@@ -18,11 +18,11 @@ import {
 } from "recharts"
 
 const dbColors: Record<string, string> = {
-  postgresql: "hsl(var(--chart-1))",
-  mysql: "hsl(var(--chart-2))",
-  mariadb: "hsl(var(--chart-3))",
-  sqlite: "hsl(var(--chart-4))",
-  mssql: "hsl(var(--chart-5))",
+  postgresql: "#ffffff",
+  mysql: "#ffffff",
+  mariadb: "#ffffff",
+  sqlite: "#ffffff",
+  mssql: "#ffffff",
 }
 
 const dbNames: Record<string, string> = {
@@ -161,16 +161,27 @@ export function DashboardsPage() {
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="time" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                  <XAxis 
+                    dataKey="time" 
+                    stroke="hsl(var(--foreground))" 
+                    fontSize={12}
+                    tick={{ fill: "hsl(var(--foreground))" }}
+                  />
+                  <YAxis 
+                    stroke="hsl(var(--foreground))" 
+                    fontSize={12}
+                    tick={{ fill: "hsl(var(--foreground))" }}
+                  />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "hsl(var(--card))",
                       border: "1px solid hsl(var(--border))",
                       borderRadius: "8px",
+                      color: "hsl(var(--foreground))",
                     }}
+                    labelStyle={{ color: "hsl(var(--foreground))" }}
                   />
-                  <Legend />
+                  <Legend wrapperStyle={{ color: "hsl(var(--foreground))" }} />
                   {testConfig.databases.map((dbId) => (
                     <Area
                       key={dbId}
@@ -200,16 +211,28 @@ export function DashboardsPage() {
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="time" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} domain={[0, 100]} />
+                  <XAxis 
+                    dataKey="time" 
+                    stroke="hsl(var(--foreground))" 
+                    fontSize={12}
+                    tick={{ fill: "hsl(var(--foreground))" }}
+                  />
+                  <YAxis 
+                    stroke="hsl(var(--foreground))" 
+                    fontSize={12}
+                    domain={[0, 100]}
+                    tick={{ fill: "hsl(var(--foreground))" }}
+                  />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "hsl(var(--card))",
                       border: "1px solid hsl(var(--border))",
                       borderRadius: "8px",
+                      color: "hsl(var(--foreground))",
                     }}
+                    labelStyle={{ color: "hsl(var(--foreground))" }}
                   />
-                  <Legend />
+                  <Legend wrapperStyle={{ color: "hsl(var(--foreground))" }} />
                   {testConfig.databases.map((dbId) => (
                     <Line
                       key={dbId}
@@ -239,16 +262,28 @@ export function DashboardsPage() {
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="time" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} domain={[0, 100]} />
+                  <XAxis 
+                    dataKey="time" 
+                    stroke="hsl(var(--foreground))" 
+                    fontSize={12}
+                    tick={{ fill: "hsl(var(--foreground))" }}
+                  />
+                  <YAxis 
+                    stroke="hsl(var(--foreground))" 
+                    fontSize={12}
+                    domain={[0, 100]}
+                    tick={{ fill: "hsl(var(--foreground))" }}
+                  />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "hsl(var(--card))",
                       border: "1px solid hsl(var(--border))",
                       borderRadius: "8px",
+                      color: "hsl(var(--foreground))",
                     }}
+                    labelStyle={{ color: "hsl(var(--foreground))" }}
                   />
-                  <Legend />
+                  <Legend wrapperStyle={{ color: "hsl(var(--foreground))" }} />
                   {testConfig.databases.map((dbId) => (
                     <Line
                       key={dbId}

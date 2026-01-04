@@ -29,8 +29,8 @@ const dbNames: Record<string, string> = {
 }
 
 const dbColors: Record<string, string> = {
-  postgresql: "hsl(var(--chart-1))",
-  mysql: "hsl(var(--chart-2))",
+  postgresql: "#ffffff",
+  mysql: "#ffffff",
   mariadb: "hsl(var(--chart-3))",
   sqlite: "hsl(var(--chart-4))",
   mssql: "hsl(var(--chart-5))",
@@ -101,7 +101,7 @@ export function ReportsPage() {
   })
 
   const getPerformanceIcon = (db: string) => {
-    const result = latestTest.results.find((r) => r.databaseId === db)
+    const result = latestTest.results?.find((r) => r.databaseId === db)
     if (!result) return <Minus className="h-4 w-4" />
 
     if (result.databaseId === bestDb.databaseId) {
@@ -196,25 +196,33 @@ export function ReportsPage() {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={comparisonData} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                  <XAxis 
+                    type="number" 
+                    stroke="#ffffff" 
+                    fontSize={12}
+                    tick={{ fill: "#ffffff" }}
+                  />
                   <YAxis
                     dataKey="name"
                     type="category"
-                    stroke="hsl(var(--muted-foreground))"
+                    stroke="#ffffff"
                     fontSize={12}
                     width={100}
+                    tick={{ fill: "#ffffff" }}
                   />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "hsl(var(--card))",
                       border: "1px solid hsl(var(--border))",
                       borderRadius: "8px",
+                      color: "#ffffff",
                     }}
+                    labelStyle={{ color: "#ffffff" }}
                   />
-                  <Legend />
-                  <Bar dataKey="Ср. время отклика" fill="hsl(var(--chart-1))" />
-                  <Bar dataKey="P95" fill="hsl(var(--chart-2))" />
-                  <Bar dataKey="P99" fill="hsl(var(--chart-3))" />
+                  <Legend wrapperStyle={{ color: "#ffffff" }} />
+                  <Bar dataKey="Ср. время отклика" fill="#ffffff" />
+                  <Bar dataKey="P95" fill="#ffffff" />
+                  <Bar dataKey="P99" fill="#ffffff" />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -231,14 +239,25 @@ export function ReportsPage() {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={throughputData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                  <XAxis 
+                    dataKey="name" 
+                    stroke="#ffffff" 
+                    fontSize={12}
+                    tick={{ fill: "#ffffff" }}
+                  />
+                  <YAxis
+                    stroke="#ffffff" 
+                    fontSize={12}
+                    tick={{ fill: "#ffffff" }}
+                  />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "hsl(var(--card))",
                       border: "1px solid hsl(var(--border))",
                       borderRadius: "8px",
+                      color: "#ffffff",
                     }}
+                    labelStyle={{ color: "#ffffff" }}
                   />
                   <Bar dataKey="throughput" name="req/s">
                     {throughputData.map((entry, index) => (
@@ -261,8 +280,17 @@ export function ReportsPage() {
               <ResponsiveContainer width="100%" height="100%">
                 <RadarChart data={radarData}>
                   <PolarGrid stroke="hsl(var(--border))" />
-                  <PolarAngleAxis dataKey="metric" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <PolarRadiusAxis stroke="hsl(var(--muted-foreground))" fontSize={10} />
+                  <PolarAngleAxis 
+                    dataKey="metric" 
+                    stroke="#ffffff" 
+                    fontSize={12}
+                    tick={{ fill: "#ffffff" }}
+                  />
+                  <PolarRadiusAxis 
+                    stroke="#ffffff" 
+                    fontSize={10}
+                    tick={{ fill: "#ffffff" }}
+                  />
                   {latestTest.results.map((result, index) => (
                     <Radar
                       key={result.databaseId}
@@ -273,7 +301,7 @@ export function ReportsPage() {
                       fillOpacity={0.2}
                     />
                   ))}
-                  <Legend />
+                  <Legend wrapperStyle={{ color: "#ffffff" }} />
                 </RadarChart>
               </ResponsiveContainer>
             </div>

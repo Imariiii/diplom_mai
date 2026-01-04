@@ -103,25 +103,67 @@ export function ConfigPage() {
         iterations: testConfig.concurrentUsers,
       })
 
+      // Агрегируем результаты по СУБД (а не по запросам)
+      const dbResults: Record<string, {
+        times: number[]
+        maxTimes: number[]
+        minTimes: number[]
+        totalSuccessful: number
+        totalFailed: number
+        totalIterations: number
+      }> = {}
+
+      // Собираем все метрики по каждой СУБД
+      response.results.forEach((result) => {
+        Object.entries(result.comparison).forEach(([dbType, stats]) => {
+          if (!dbResults[dbType]) {
+            dbResults[dbType] = {
+              times: [],
+              maxTimes: [],
+              minTimes: [],
+              totalSuccessful: 0,
+              totalFailed: 0,
+              totalIterations: 0,
+            }
+          }
+          if (stats.avg_time_ms !== undefined) {
+            dbResults[dbType].times.push(stats.avg_time_ms)
+            dbResults[dbType].maxTimes.push(stats.max_time_ms)
+            dbResults[dbType].minTimes.push(stats.min_time_ms)
+            dbResults[dbType].totalSuccessful += stats.successful
+            dbResults[dbType].totalFailed += stats.failed
+            dbResults[dbType].totalIterations += stats.iterations
+          }
+        })
+      })
+
+      // Создаем уникальные результаты по СУБД
+      const uniqueResults = Object.entries(dbResults).map(([dbType, aggregated]) => {
+        const avgTime = aggregated.times.reduce((a, b) => a + b, 0) / aggregated.times.length
+        const maxTime = Math.max(...aggregated.maxTimes)
+        const minTime = Math.min(...aggregated.minTimes)
+        const errorRate = (aggregated.totalFailed / aggregated.totalIterations) * 100
+
+        return {
+          databaseId: dbType,
+          metrics: {
+            avgResponseTime: avgTime,
+            maxResponseTime: maxTime,
+            minResponseTime: minTime,
+            throughput: 1000 / avgTime, // Примерная пропускная способность
+            errorRate: errorRate,
+            p95ResponseTime: avgTime * 1.5, // Приблизительное значение
+            p99ResponseTime: avgTime * 2, // Приблизительное значение
+          },
+          timeSeriesData: [],
+        }
+      })
+
       const completedTest: TestRun = {
         ...testRun,
         status: "completed",
         endTime: new Date(),
-        results: response.results.flatMap((result) =>
-          Object.entries(result.comparison).map(([dbType, stats]) => ({
-            databaseId: dbType,
-            metrics: {
-              avgResponseTime: stats.avg_time_ms,
-              maxResponseTime: stats.max_time_ms,
-              minResponseTime: stats.min_time_ms,
-              throughput: 1000 / stats.avg_time_ms, // Примерная пропускная способность
-              errorRate: (stats.failed / stats.iterations) * 100,
-              p95ResponseTime: stats.avg_time_ms * 1.5, // Приблизительное значение
-              p99ResponseTime: stats.avg_time_ms * 2, // Приблизительное значение
-            },
-            timeSeriesData: [],
-          }))
-        ),
+        results: uniqueResults,
       }
 
       setCurrentTest(completedTest)

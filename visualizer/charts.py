@@ -15,9 +15,18 @@ class ResultVisualizer:
     def __init__(self, output_dir: str = "results"):
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
-        sns.set_style("whitegrid")
+        sns.set_style("darkgrid")
         plt.rcParams['figure.figsize'] = (12, 6)
         plt.rcParams['font.size'] = 10
+        plt.rcParams['figure.facecolor'] = '#1e1e1e'  # Темный фон
+        plt.rcParams['axes.facecolor'] = '#2d2d2d'  # Темный фон для осей
+        plt.rcParams['text.color'] = 'white'  # Белый текст
+        plt.rcParams['axes.labelcolor'] = 'white'  # Белые подписи осей
+        plt.rcParams['xtick.color'] = 'white'  # Белые метки по X
+        plt.rcParams['ytick.color'] = 'white'  # Белые метки по Y
+        plt.rcParams['axes.edgecolor'] = 'white'  # Белые границы осей
+        plt.rcParams['axes.grid'] = True
+        plt.rcParams['grid.color'] = '#404040'  # Серые линии сетки
     
     def create_comparison_chart(self, results: List[Dict], filename: str = None) -> str:
         """Создание графика сравнения производительности"""
@@ -53,12 +62,15 @@ class ResultVisualizer:
         
         pivot_df.plot(kind='bar', ax=ax, width=0.8)
         
-        ax.set_xlabel('Запрос', fontsize=12)
-        ax.set_ylabel('Среднее время выполнения (мс)', fontsize=12)
-        ax.set_title('Сравнение производительности БД', fontsize=14, fontweight='bold')
-        ax.legend(title='СУБД', title_fontsize=11)
-        ax.grid(axis='y', alpha=0.3)
-        plt.xticks(rotation=45, ha='right')
+        ax.set_xlabel('Запрос', fontsize=12, color='white')
+        ax.set_ylabel('Среднее время выполнения (мс)', fontsize=12, color='white')
+        ax.set_title('Сравнение производительности БД', fontsize=14, fontweight='bold', color='white')
+        legend = ax.legend(title='СУБД', title_fontsize=11, facecolor='#2d2d2d', edgecolor='white')
+        legend.get_title().set_color('white')
+        for text in legend.get_texts():
+            text.set_color('white')
+        ax.grid(axis='y', alpha=0.3, color='#404040')
+        plt.xticks(rotation=45, ha='right', color='white')
         plt.tight_layout()
         
         filepath = os.path.join(self.output_dir, filename)
@@ -107,13 +119,15 @@ class ResultVisualizer:
         ax.bar(x, grouped['avg'], width, label='Среднее', alpha=0.8)
         ax.bar([i + width for i in x], grouped['max'], width, label='Макс', alpha=0.8)
         
-        ax.set_xlabel('СУБД', fontsize=12)
-        ax.set_ylabel('Время выполнения (мс)', fontsize=12)
-        ax.set_title('Статистика производительности', fontsize=14, fontweight='bold')
+        ax.set_xlabel('СУБД', fontsize=12, color='white')
+        ax.set_ylabel('Время выполнения (мс)', fontsize=12, color='white')
+        ax.set_title('Статистика производительности', fontsize=14, fontweight='bold', color='white')
         ax.set_xticks(x)
-        ax.set_xticklabels(grouped['db_type'])
-        ax.legend()
-        ax.grid(axis='y', alpha=0.3)
+        ax.set_xticklabels(grouped['db_type'], color='white')
+        legend = ax.legend(facecolor='#2d2d2d', edgecolor='white')
+        for text in legend.get_texts():
+            text.set_color('white')
+        ax.grid(axis='y', alpha=0.3, color='#404040')
         plt.tight_layout()
         
         filepath = os.path.join(self.output_dir, filename)
