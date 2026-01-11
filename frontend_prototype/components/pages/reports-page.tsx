@@ -18,6 +18,7 @@ import {
   PolarRadiusAxis,
   Radar,
   Legend,
+  Cell,
 } from "recharts"
 
 const dbNames: Record<string, string> = {
@@ -261,7 +262,7 @@ export function ReportsPage() {
                   />
                   <Bar dataKey="throughput" name="req/s">
                     {throughputData.map((entry, index) => (
-                      <rect key={index} fill={entry.fill} />
+                      <Cell key={`cell-${index}`} fill={entry.fill} />
                     ))}
                   </Bar>
                 </BarChart>

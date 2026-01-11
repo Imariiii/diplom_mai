@@ -21,8 +21,8 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="ru" className="dark">
-      <body className={`font-sans antialiased`}>
+    <html lang="ru" className="dark" suppressHydrationWarning>
+      <body className={`font-sans antialiased`} suppressHydrationWarning>
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
           {children}
           <Toaster />

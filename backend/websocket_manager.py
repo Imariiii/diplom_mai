@@ -1,0 +1,257 @@
+"""
+WebSocket менеджер для real-time обновлений тестирования
+"""
+import asyncio
+import json
+from datetime import datetime
+from typing import Dict, List, Set, Any, Optional, Callable
+from fastapi import WebSocket, WebSocketDisconnect
+from dataclasses import dataclass, asdict
+
+
+@dataclass
+class TestMetricsUpdate:
+    """Структура данных для обновления метрик теста"""
+    test_id: str
+    db_type: str
+    timestamp: str
+    
+    # Метрики производительности
+    response_time: float = 0.0
+    tps: float = 0.0
+    throughput: float = 0.0
+    active_connections: int = 0
+    error_count: int = 0
+    
+    # Системные метрики
+    cpu_usage: float = 0.0
+    memory_usage: float = 0.0
+    memory_usage_mb: float = 0.0
+    disk_iops: float = 0.0
+    network_in: float = 0.0
+    network_out: float = 0.0
+    
+    # Прогресс
+    progress: float = 0.0  # 0-100
+    elapsed_seconds: int = 0
+    remaining_seconds: int = 0
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass 
+class TestStatusUpdate:
+    """Структура данных для обновления статуса теста"""
+    test_id: str
+    status: str  # pending, running, completed, failed
+    message: Optional[str] = None
+    progress: float = 0.0
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+class ConnectionManager:
+    """Менеджер WebSocket соединений"""
+    
+    def __init__(self):
+        # Словарь: test_id -> список WebSocket соединений
+        self.active_connections: Dict[str, List[WebSocket]] = {}
+        # Все активные соединения (для широковещательных сообщений)
+        self.all_connections: Set[WebSocket] = set()
+        # Callback для уведомления о новых подключениях
+        self.on_connect_callback: Optional[Callable] = None
+    
+    async def connect(self, websocket: WebSocket, test_id: str = "global"):
+        """Принять новое WebSocket соединение"""
+        await websocket.accept()
+        
+        if test_id not in self.active_connections:
+            self.active_connections[test_id] = []
+        
+        self.active_connections[test_id].append(websocket)
+        self.all_connections.add(websocket)
+        
+        print(f"[WS] Новое соединение для теста {test_id}. Всего: {len(self.all_connections)}")
+        
+        # Отправляем приветственное сообщение
+        await self.send_personal_message({
+            "type": "connected",
+            "test_id": test_id,
+            "message": "Подключение установлено"
+        }, websocket)
+    
+    def disconnect(self, websocket: WebSocket, test_id: str = "global"):
+        """Отключить WebSocket соединение"""
+        if test_id in self.active_connections:
+            if websocket in self.active_connections[test_id]:
+                self.active_connections[test_id].remove(websocket)
+            
+            # Удаляем пустые списки
+            if not self.active_connections[test_id]:
+                del self.active_connections[test_id]
+        
+        self.all_connections.discard(websocket)
+        print(f"[WS] Соединение закрыто для теста {test_id}. Всего: {len(self.all_connections)}")
+    
+    async def send_personal_message(self, message: Dict[str, Any], websocket: WebSocket):
+        """Отправить сообщение конкретному клиенту"""
+        try:
+            await websocket.send_json(message)
+        except Exception as e:
+            print(f"[WS] Ошибка отправки сообщения: {e}")
+    
+    async def broadcast_to_test(self, test_id: str, message: Dict[str, Any]):
+        """Отправить сообщение всем подписчикам теста"""
+        if test_id not in self.active_connections:
+            return
+        
+        disconnected = []
+        for connection in self.active_connections[test_id]:
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                print(f"[WS] Ошибка broadcast: {e}")
+                disconnected.append(connection)
+        
+        # Удаляем отключившихся
+        for conn in disconnected:
+            self.disconnect(conn, test_id)
+    
+    async def broadcast_all(self, message: Dict[str, Any]):
+        """Отправить сообщение всем подключенным клиентам"""
+        disconnected = []
+        for connection in self.all_connections:
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                print(f"[WS] Ошибка broadcast_all: {e}")
+                disconnected.append(connection)
+        
+        # Удаляем отключившихся
+        for conn in disconnected:
+            self.all_connections.discard(conn)
+    
+    async def send_metrics_update(self, update: TestMetricsUpdate):
+        """Отправить обновление метрик"""
+        message = {
+            "type": "metrics",
+            "data": update.to_dict()
+        }
+        await self.broadcast_to_test(update.test_id, message)
+    
+    async def send_status_update(self, update: TestStatusUpdate):
+        """Отправить обновление статуса"""
+        message = {
+            "type": "status",
+            "data": update.to_dict()
+        }
+        await self.broadcast_to_test(update.test_id, message)
+        # Также отправляем в глобальный канал
+        await self.broadcast_to_test("global", message)
+    
+    def get_connection_count(self, test_id: str = None) -> int:
+        """Получить количество соединений"""
+        if test_id:
+            return len(self.active_connections.get(test_id, []))
+        return len(self.all_connections)
+
+
+# Глобальный менеджер соединений
+manager = ConnectionManager()
+
+
+class TestStreamingCallback:
+    """
+    Callback для потоковой отправки метрик из LoadTester в WebSocket
+    """
+    
+    def __init__(self, test_id: str, connection_manager: ConnectionManager):
+        self.test_id = test_id
+        self.manager = connection_manager
+        self.start_time = datetime.now()
+        self.total_duration = 60  # По умолчанию
+        self.metrics_buffer: List[TestMetricsUpdate] = []
+        self.buffer_size = 10
+        self._lock = asyncio.Lock()
+    
+    def set_duration(self, duration: int):
+        """Установить общую длительность теста"""
+        self.total_duration = duration
+    
+    async def on_metrics(
+        self,
+        db_type: str,
+        response_time: float,
+        tps: float,
+        successful: int,
+        failed: int,
+        cpu_usage: float = 0,
+        memory_usage: float = 0,
+        memory_usage_mb: float = 0,
+        disk_iops: float = 0,
+        network_in: float = 0,
+        network_out: float = 0
+    ):
+        """Callback вызываемый при получении новых метрик"""
+        now = datetime.now()
+        elapsed = (now - self.start_time).total_seconds()
+        remaining = max(0, self.total_duration - elapsed)
+        progress = min(100, (elapsed / self.total_duration) * 100) if self.total_duration > 0 else 0
+        
+        update = TestMetricsUpdate(
+            test_id=self.test_id,
+            db_type=db_type,
+            timestamp=now.isoformat(),
+            response_time=response_time,
+            tps=tps,
+            throughput=tps,
+            active_connections=successful + failed,
+            error_count=failed,
+            cpu_usage=cpu_usage,
+            memory_usage=memory_usage,
+            memory_usage_mb=memory_usage_mb,
+            disk_iops=disk_iops,
+            network_in=network_in,
+            network_out=network_out,
+            progress=progress,
+            elapsed_seconds=int(elapsed),
+            remaining_seconds=int(remaining)
+        )
+        
+        # Отправляем сразу или буферизируем
+        await self.manager.send_metrics_update(update)
+    
+    async def on_status_change(self, status: str, message: str = None):
+        """Callback при изменении статуса теста"""
+        elapsed = (datetime.now() - self.start_time).total_seconds()
+        progress = min(100, (elapsed / self.total_duration) * 100) if self.total_duration > 0 else 0
+        
+        if status == "completed":
+            progress = 100
+        
+        update = TestStatusUpdate(
+            test_id=self.test_id,
+            status=status,
+            message=message,
+            progress=progress
+        )
+        
+        await self.manager.send_status_update(update)
+    
+    async def on_test_start(self):
+        """Вызывается при начале теста"""
+        self.start_time = datetime.now()
+        await self.on_status_change("running", "Тестирование начато")
+    
+    async def on_test_complete(self, summary: Dict[str, Any] = None):
+        """Вызывается при завершении теста"""
+        message = "Тестирование завершено"
+        if summary:
+            message += f". TPS: {summary.get('overall_tps', 0):.2f}"
+        await self.on_status_change("completed", message)
+    
+    async def on_test_error(self, error: str):
+        """Вызывается при ошибке теста"""
+        await self.on_status_change("failed", f"Ошибка: {error}")

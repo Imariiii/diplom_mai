@@ -12,7 +12,12 @@ from datetime import datetime
 class ResultVisualizer:
     """Класс для визуализации результатов тестирования"""
     
-    def __init__(self, output_dir: str = "results"):
+    def __init__(self, output_dir: str = None):
+        if output_dir is None:
+            # Определяем путь относительно корня проекта
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(current_dir)
+            output_dir = os.path.join(project_root, "results", "charts")
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
         sns.set_style("darkgrid")
