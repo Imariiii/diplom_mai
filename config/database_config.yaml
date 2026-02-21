@@ -17,6 +17,15 @@ databases:
     database: pagila
     driver: postgresql
 
+  # Отдельная БД для хранения истории тестов
+  test_history:
+    host: localhost
+    port: 5433
+    user: postgres
+    password: "history123"
+    database: test_history
+    driver: postgresql
+
 # Настройки тестирования
 test_settings:
   default_users: 10

@@ -26,15 +26,16 @@ class TestRepository:
     # ==================== TestRun CRUD ====================
     
     def create_test_run(
-        self, 
-        name: str, 
+        self,
+        name: str,
         config: Dict[str, Any],
-        status: str = 'pending'
+        status: str = 'pending',
+        test_run_id: Optional[str] = None
     ) -> TestRun:
         """Создать новый тестовый прогон"""
         with self.get_session() as session:
             test_run = TestRun(
-                id=uuid.uuid4(),
+                id=uuid.UUID(test_run_id) if test_run_id else uuid.uuid4(),
                 name=name,
                 status=status,
                 config=config,

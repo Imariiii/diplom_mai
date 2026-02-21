@@ -26,50 +26,70 @@ app = FastAPI(title="Database Load Testing API", version="2.0.0")
 # Определяем project_root здесь, до использования
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Опционально: подключение к БД истории (если настроена)
 def get_history_db_url():
-    """Получить URL для базы данных истории"""
-    # Сначала проверяем переменную окружения
+    """Получить URL для базы данных истории из конфига"""
+    print("[HISTORY_DB] Попытка настройки подключения к БД истории...")
+    
     env_url = os.getenv('HISTORY_DATABASE_URL')
     if env_url:
+        print(f"[HISTORY_DB] Используется HISTORY_DATABASE_URL из окружения")
         return env_url
     
-    # Пробуем использовать конфиг PostgreSQL из database_config.yaml
     try:
         import yaml
         config_path = os.path.join(project_root, "config", "database_config.yaml")
+        print(f"[HISTORY_DB] Чтение конфига: {config_path}")
+        
         if os.path.exists(config_path):
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
-            pg = config.get('databases', {}).get('postgresql', {})
-            if pg:
-                host = pg.get('host', 'localhost')
-                port = pg.get('port', 5432)
-                user = pg.get('user', 'postgres')
-                password = pg.get('password', '')
-                # Используем отдельную БД для истории
-                db = 'test_history'
-                return f"postgresql://{user}:{password}@{host}:{port}/{db}"
+            
+            history_config = config.get('databases', {}).get('test_history', {})
+            print(f"[HISTORY_DB] Конфиг test_history найден: {bool(history_config)}")
+            
+            if history_config:
+                host = history_config.get('host', 'localhost')
+                port = history_config.get('port', 5433)
+                user = history_config.get('user', 'postgres')
+                password = history_config.get('password', '')
+                database = history_config.get('database', 'test_history')
+                
+                print(f"[HISTORY_DB] Подключение к: {host}:{port}/{database}")
+                return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+            else:
+                print("[HISTORY_DB] ❌ Секция 'test_history' не найдена в конфиге")
+        else:
+            print(f"[HISTORY_DB] ❌ Конфиг файл не найден: {config_path}")
     except Exception as e:
-        print(f"⚠️ Не удалось загрузить конфиг: {e}")
+        print(f"[HISTORY_DB] ❌ Ошибка чтения конфига: {e}")
+        import traceback
+        traceback.print_exc()
     
     return None
 
+print("[HISTORY_DB] === ИНИЦИАЛИЗАЦИЯ БД ИСТОРИИ ===")
 try:
     from database.repository import TestRepository
     HISTORY_DB_URL = get_history_db_url()
+    print(f"[HISTORY_DB] URL получен: {HISTORY_DB_URL is not None}")
+    
     if HISTORY_DB_URL:
+        print(f"[HISTORY_DB] Создание TestRepository...")
         test_repository = TestRepository(HISTORY_DB_URL)
         HISTORY_ENABLED = True
-        print(f"✅ История тестов включена")
+        print(f"[HISTORY_DB] ✅ История тестов включена успешно")
+        print(f"[HISTORY_DB] HISTORY_ENABLED = {HISTORY_ENABLED}")
     else:
         test_repository = None
         HISTORY_ENABLED = False
-        print("ℹ️ История тестов отключена (не настроен HISTORY_DATABASE_URL)")
+        print("[HISTORY_DB] ℹ️ История тестов отключена (URL не сформирован)")
 except Exception as e:
-    print(f"⚠️ История тестов отключена: {e}")
+    print(f"[HISTORY_DB] ❌ История тестов отключена из-за ошибки: {e}")
+    import traceback
+    traceback.print_exc()
     test_repository = None
     HISTORY_ENABLED = False
+print(f"[HISTORY_DB] === ИТОГ: HISTORY_ENABLED = {HISTORY_ENABLED} ===")
 
 # CORS middleware
 app.add_middleware(
@@ -262,6 +282,37 @@ async def run_full_test(request: TestRequest):
         for result in results:
             for db_type, stats in result.get('comparison', {}).items():
                 total_transactions += stats.get('successful', 0) + stats.get('failed', 0)
+        
+        summary = {
+            'total_transactions': total_transactions,
+            'overall_tps': total_transactions / total_duration if total_duration > 0 else 0,
+            'total_duration': total_duration
+        }
+        
+        # Сохраняем в БД истории
+        if HISTORY_ENABLED and test_repository:
+            try:
+                test_repository.create_test_run(
+                    name=f"Тест {test_id}",
+                    config=config,
+                    status='completed',
+                    test_run_id=test_id
+                )
+                test_repository.update_test_run_status(test_id, 'completed', summary)
+                
+                for result in results:
+                    for db_type, stats in result.get('comparison', {}).items():
+                        test_repository.add_test_result(
+                            test_run_id=test_id,
+                            db_type=db_type,
+                            metrics=stats,
+                            query_id=result.get('query_id'),
+                            system_metrics=system_metrics.get(db_type),
+                            dbms_metrics=dbms_metrics.get(db_type)
+                        )
+                print(f"✅ Результаты теста {test_id} сохранены в БД истории")
+            except Exception as e:
+                print(f"⚠️ Ошибка сохранения в БД истории: {e}")
         
         return {
             "test_id": test_id,
@@ -468,7 +519,7 @@ async def run_async_test(request: AsyncTestRequest, background_tasks: Background
     Асинхронный запуск теста с WebSocket обновлениями.
     Возвращает test_id для подписки на обновления.
     """
-    test_id = str(uuid.uuid4())[:8]
+    test_id = str(uuid.uuid4())
     test_name = request.test_name or f"Тест {test_id}"
     
     # Сохраняем информацию о тесте
@@ -481,15 +532,23 @@ async def run_async_test(request: AsyncTestRequest, background_tasks: Background
     }
     
     # Создаём запись в БД истории (если включена)
+    print(f"[HISTORY_DB] Проверка при создании теста: HISTORY_ENABLED={HISTORY_ENABLED}, test_repository={test_repository is not None}")
     if HISTORY_ENABLED and test_repository:
+        print(f"[HISTORY_DB] Создание записи TestRun для теста {test_id}...")
         try:
             test_repository.create_test_run(
                 name=test_name,
                 config=request.model_dump(),
-                status='pending'
+                status='pending',
+                test_run_id=test_id
             )
+            print(f"[HISTORY_DB] ✅ Запись TestRun создана для теста {test_id}")
         except Exception as e:
-            print(f"Ошибка создания записи в БД истории: {e}")
+            print(f"[HISTORY_DB] ❌ Ошибка создания записи в БД истории: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        print(f"[HISTORY_DB] ⚠️ Создание записи в БД истории пропущено")
     
     # Запускаем тест в фоне
     background_tasks.add_task(
@@ -580,14 +639,20 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         }
         
         # Сохраняем в БД истории
+        print(f"[HISTORY_DB] Проверка перед сохранением: HISTORY_ENABLED={HISTORY_ENABLED}, test_repository={test_repository is not None}")
         if HISTORY_ENABLED and test_repository:
+            print(f"[HISTORY_DB] Начинаем сохранение результатов теста {test_id}...")
             try:
                 # Обновляем статус теста
+                print(f"[HISTORY_DB] Обновление статуса теста {test_id} на 'completed'...")
                 test_repository.update_test_run_status(test_id, 'completed', summary)
+                print(f"[HISTORY_DB] Статус обновлён")
                 
                 # Сохраняем результаты по каждой СУБД
+                print(f"[HISTORY_DB] Сохранение результатов по СУБД (всего результатов: {len(results)})...")
                 for result in results:
                     for db_type, stats in result.get('comparison', {}).items():
+                        print(f"[HISTORY_DB] Сохранение результата для {db_type}, query={result.get('query_id')}")
                         test_repository.add_test_result(
                             test_run_id=test_id,
                             db_type=db_type,
@@ -596,13 +661,20 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                             system_metrics=system_metrics.get(db_type),
                             dbms_metrics=dbms_metrics.get(db_type)
                         )
+                print(f"[HISTORY_DB] ✅ Результаты теста {test_id} успешно сохранены в БД истории")
             except Exception as e:
-                print(f"Ошибка сохранения в БД истории: {e}")
+                print(f"[HISTORY_DB] ❌ Ошибка сохранения в БД истории: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print(f"[HISTORY_DB] ⚠️ Сохранение в БД истории пропущено: HISTORY_ENABLED={HISTORY_ENABLED}")
         
         # Обновляем локальное состояние
         active_tests[test_id]["status"] = "completed"
         active_tests[test_id]["results"] = results
         active_tests[test_id]["summary"] = summary
+        active_tests[test_id]["system_metrics"] = system_metrics
+        active_tests[test_id]["dbms_metrics"] = dbms_metrics
         
         # Уведомляем через WebSocket
         await streaming_callback.on_test_complete(summary)
@@ -648,7 +720,9 @@ async def get_async_test_results(test_id: str):
     return {
         "status": "completed",
         "results": test_info.get("results", []),
-        "summary": test_info.get("summary", {})
+        "summary": test_info.get("summary", {}),
+        "system_metrics": test_info.get("system_metrics", {}),
+        "dbms_metrics": test_info.get("dbms_metrics", {})
     }
 
 

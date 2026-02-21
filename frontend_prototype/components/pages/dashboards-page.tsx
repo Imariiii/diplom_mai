@@ -77,32 +77,88 @@ export function DashboardsPage() {
           if (data.status === "completed") {
             apiClient.getAsyncTestResults(currentTest.id).then((response) => {
               if (response.results) {
-                // Преобразуем результаты
-                const formattedResults = response.results.map((result: any) => ({
-                  databaseId: result.db_type || result.databaseId,
-                  databaseName: result.db_type === "mysql" ? "MySQL" : "PostgreSQL",
-                  metrics: {
-                    avgResponseTime: result.metrics?.avg_time_ms || result.comparison?.[result.db_type]?.avg_time_ms || 0,
-                    p50ResponseTime: result.metrics?.p50_time_ms || 0,
-                    p95ResponseTime: result.metrics?.p95_time_ms || 0,
-                    p99ResponseTime: result.metrics?.p99_time_ms || 0,
-                    minResponseTime: result.metrics?.min_time_ms || 0,
-                    maxResponseTime: result.metrics?.max_time_ms || 0,
-                    tps: result.metrics?.tps || 0,
-                    throughput: result.metrics?.throughput || 0,
-                    activeConnections: testConfig.virtualUsers,
-                    errorCount: result.metrics?.failed || 0,
-                    errorRate: result.metrics?.error_rate || 0,
-                  },
-                  transactionMetrics: {
-                    totalTransactions: (result.metrics?.successful || 0) + (result.metrics?.failed || 0),
-                    successfulTransactions: result.metrics?.successful || 0,
-                    failedTransactions: result.metrics?.failed || 0,
-                    rollbacks: 0,
-                  },
-                  timeSeriesData: [],
-                }))
-                
+                const aggregateByDb: Record<string, {
+                  avgTimes: number[]
+                  p50Times: number[]
+                  p95Times: number[]
+                  p99Times: number[]
+                  minTimes: number[]
+                  maxTimes: number[]
+                  tpsValues: number[]
+                  throughputValues: number[]
+                  activeConnections: number[]
+                  successful: number
+                  failed: number
+                }> = {}
+
+                response.results.forEach((result: any) => {
+                  const comparison = result.comparison || {}
+                  Object.entries(comparison).forEach(([dbType, stats]: [string, any]) => {
+                    if (!aggregateByDb[dbType]) {
+                      aggregateByDb[dbType] = {
+                        avgTimes: [],
+                        p50Times: [],
+                        p95Times: [],
+                        p99Times: [],
+                        minTimes: [],
+                        maxTimes: [],
+                        tpsValues: [],
+                        throughputValues: [],
+                        activeConnections: [],
+                        successful: 0,
+                        failed: 0,
+                      }
+                    }
+                    const bucket = aggregateByDb[dbType]
+                    if (typeof stats.avg_time_ms === "number") bucket.avgTimes.push(stats.avg_time_ms)
+                    if (typeof stats.p50_time_ms === "number") bucket.p50Times.push(stats.p50_time_ms)
+                    if (typeof stats.p95_time_ms === "number") bucket.p95Times.push(stats.p95_time_ms)
+                    if (typeof stats.p99_time_ms === "number") bucket.p99Times.push(stats.p99_time_ms)
+                    if (typeof stats.min_time_ms === "number") bucket.minTimes.push(stats.min_time_ms)
+                    if (typeof stats.max_time_ms === "number") bucket.maxTimes.push(stats.max_time_ms)
+                    if (typeof stats.tps === "number") bucket.tpsValues.push(stats.tps)
+                    if (typeof stats.throughput === "number") bucket.throughputValues.push(stats.throughput)
+                    if (typeof stats.active_connections === "number") bucket.activeConnections.push(stats.active_connections)
+                    bucket.successful += stats.successful || 0
+                    bucket.failed += stats.failed || 0
+                  })
+                })
+
+                const average = (values: number[]) =>
+                  values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0
+
+                const formattedResults = Object.entries(aggregateByDb).map(([dbType, bucket]) => {
+                  const totalTransactions = bucket.successful + bucket.failed
+                  return {
+                    databaseId: dbType,
+                    databaseName: dbNames[dbType] || dbType,
+                    metrics: {
+                      avgResponseTime: average(bucket.avgTimes),
+                      p50ResponseTime: average(bucket.p50Times),
+                      p95ResponseTime: average(bucket.p95Times),
+                      p99ResponseTime: average(bucket.p99Times),
+                      minResponseTime: bucket.minTimes.length ? Math.min(...bucket.minTimes) : 0,
+                      maxResponseTime: bucket.maxTimes.length ? Math.max(...bucket.maxTimes) : 0,
+                      tps: average(bucket.tpsValues),
+                      throughput: average(bucket.throughputValues),
+                      activeConnections: bucket.activeConnections.length
+                        ? Math.round(average(bucket.activeConnections))
+                        : testConfig.virtualUsers,
+                      errorCount: bucket.failed,
+                      errorRate: totalTransactions > 0 ? (bucket.failed / totalTransactions) * 100 : 0,
+                    },
+                    transactionMetrics: {
+                      totalTransactions,
+                      successfulTransactions: bucket.successful,
+                      failedTransactions: bucket.failed,
+                      rollbacks: 0,
+                    },
+                    systemMetrics: response.system_metrics?.[dbType],
+                    dbmsMetrics: response.dbms_metrics?.[dbType],
+                    timeSeriesData: [],
+                  }
+                })
+
                 setCurrentTest({
                   ...updatedTest,
                   results: formattedResults,
