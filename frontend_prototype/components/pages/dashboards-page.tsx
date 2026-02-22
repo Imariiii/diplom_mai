@@ -10,6 +10,7 @@ import { useAppStore } from "@/lib/store"
 import { useTestWebSocket } from "@/hooks/use-test-websocket"
 import { apiClient } from "@/lib/api"
 import { toast } from "sonner"
+import { DB_COLORS, DB_NAMES, getDbColor, CHART_COLORS } from "@/lib/chart-colors"
 import {
   LineChart,
   Line,
@@ -24,29 +25,6 @@ import {
   BarChart,
   Bar,
 } from "recharts"
-
-// Основной зеленый цвет системы для всех графиков
-const PRIMARY_GREEN = "#4ade80"
-// Светло-серый для осей координат
-const AXIS_COLOR = "#9CA3AF"
-// Белый для текста
-const TEXT_COLOR = "#ffffff"
-
-const dbColors: Record<string, string> = {
-  postgresql: PRIMARY_GREEN,
-  mysql: "#22c55e",  // Немного другой оттенок для различия
-  mariadb: PRIMARY_GREEN,
-  sqlite: PRIMARY_GREEN,
-  mssql: PRIMARY_GREEN,
-}
-
-const dbNames: Record<string, string> = {
-  postgresql: "PostgreSQL",
-  mysql: "MySQL",
-  mariadb: "MariaDB",
-  sqlite: "SQLite",
-  mssql: "MS SQL Server",
-}
 
 export function DashboardsPage() {
   const { currentTest, realtimeData, testConfig, setCurrentTest, addTestToHistory, clearRealtimeData } = useAppStore()
@@ -131,7 +109,7 @@ export function DashboardsPage() {
                   const totalTransactions = bucket.successful + bucket.failed
                   return {
                     databaseId: dbType,
-                    databaseName: dbNames[dbType] || dbType,
+                    databaseName: DB_NAMES[dbType] || dbType,
                     metrics: {
                       avgResponseTime: average(bucket.avgTimes),
                       p50ResponseTime: average(bucket.p50Times),
@@ -353,8 +331,8 @@ export function DashboardsPage() {
                 <Card key={dbId} className="bg-card border-border">
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm flex items-center gap-2 text-foreground">
-                      <Database className="h-4 w-4" style={{ color: dbColors[dbId] }} />
-                      {dbNames[dbId]}
+                      <Database className="h-4 w-4" style={{ color: getDbColor(dbId) }} />
+                      {DB_NAMES[dbId]}
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2">
@@ -396,8 +374,8 @@ export function DashboardsPage() {
                   const metrics = result?.metrics
                   return (
                     <div key={dbId} className="p-4 bg-muted rounded-lg">
-                      <div className="font-medium mb-3 text-foreground" style={{ color: dbColors[dbId] }}>
-                        {dbNames[dbId]}
+                      <div className="font-medium mb-3 text-foreground" style={{ color: getDbColor(dbId) }}>
+                        {DB_NAMES[dbId]}
                       </div>
                       <div className="grid grid-cols-2 gap-2 text-sm">
                         <div className="flex justify-between">
@@ -449,33 +427,33 @@ export function DashboardsPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis 
                         dataKey="time" 
-                        stroke={AXIS_COLOR} 
+                        stroke={CHART_COLORS.axis} 
                         fontSize={12}
-                        tick={{ fill: TEXT_COLOR }}
+                        tick={{ fill: CHART_COLORS.text }}
                       />
                       <YAxis 
-                        stroke={AXIS_COLOR} 
+                        stroke={CHART_COLORS.axis} 
                         fontSize={12}
-                        tick={{ fill: TEXT_COLOR }}
+                        tick={{ fill: CHART_COLORS.text }}
                       />
                       <Tooltip
                         contentStyle={{
                           backgroundColor: "hsl(var(--card))",
                           border: "1px solid hsl(var(--border))",
                           borderRadius: "8px",
-                          color: TEXT_COLOR,
+                          color: CHART_COLORS.text,
                         }}
-                        labelStyle={{ color: TEXT_COLOR }}
-                        itemStyle={{ color: TEXT_COLOR }}
+                        labelStyle={{ color: CHART_COLORS.text }}
+                        itemStyle={{ color: CHART_COLORS.text }}
                       />
-                      <Legend wrapperStyle={{ color: TEXT_COLOR }} />
+                      <Legend wrapperStyle={{ color: CHART_COLORS.text }} />
                       {testConfig.databases.map((dbId) => (
                         <Line
                           key={dbId}
                           type="monotone"
                           dataKey={`${dbId}_responseTime`}
-                          name={dbNames[dbId]}
-                          stroke={dbColors[dbId]}
+                          name={DB_NAMES[dbId]}
+                          stroke={getDbColor(dbId)}
                           strokeWidth={2}
                           dot={false}
                         />
@@ -501,34 +479,34 @@ export function DashboardsPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis 
                         dataKey="time" 
-                        stroke={AXIS_COLOR} 
+                        stroke={CHART_COLORS.axis} 
                         fontSize={12}
-                        tick={{ fill: TEXT_COLOR }}
+                        tick={{ fill: CHART_COLORS.text }}
                       />
                       <YAxis 
-                        stroke={AXIS_COLOR} 
+                        stroke={CHART_COLORS.axis} 
                         fontSize={12}
-                        tick={{ fill: TEXT_COLOR }}
+                        tick={{ fill: CHART_COLORS.text }}
                       />
                       <Tooltip
                         contentStyle={{
                           backgroundColor: "hsl(var(--card))",
                           border: "1px solid hsl(var(--border))",
                           borderRadius: "8px",
-                          color: TEXT_COLOR,
+                          color: CHART_COLORS.text,
                         }}
-                        labelStyle={{ color: TEXT_COLOR }}
-                        itemStyle={{ color: TEXT_COLOR }}
+                        labelStyle={{ color: CHART_COLORS.text }}
+                        itemStyle={{ color: CHART_COLORS.text }}
                       />
-                      <Legend wrapperStyle={{ color: TEXT_COLOR }} />
+                      <Legend wrapperStyle={{ color: CHART_COLORS.text }} />
                       {testConfig.databases.map((dbId) => (
                         <Area
                           key={dbId}
                           type="monotone"
                           dataKey={`${dbId}_tps`}
-                          name={dbNames[dbId]}
-                          stroke={dbColors[dbId]}
-                          fill={dbColors[dbId]}
+                          name={DB_NAMES[dbId]}
+                          stroke={getDbColor(dbId)}
+                          fill={getDbColor(dbId)}
                           fillOpacity={0.2}
                         />
                       ))}
@@ -553,33 +531,33 @@ export function DashboardsPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis 
                         dataKey="time" 
-                        stroke={AXIS_COLOR} 
+                        stroke={CHART_COLORS.axis} 
                         fontSize={12}
-                        tick={{ fill: TEXT_COLOR }}
+                        tick={{ fill: CHART_COLORS.text }}
                       />
                       <YAxis 
-                        stroke={AXIS_COLOR} 
+                        stroke={CHART_COLORS.axis} 
                         fontSize={12}
-                        tick={{ fill: TEXT_COLOR }}
+                        tick={{ fill: CHART_COLORS.text }}
                       />
                       <Tooltip
                         contentStyle={{
                           backgroundColor: "hsl(var(--card))",
                           border: "1px solid hsl(var(--border))",
                           borderRadius: "8px",
-                          color: TEXT_COLOR,
+                          color: CHART_COLORS.text,
                         }}
-                        labelStyle={{ color: TEXT_COLOR }}
-                        itemStyle={{ color: TEXT_COLOR }}
+                        labelStyle={{ color: CHART_COLORS.text }}
+                        itemStyle={{ color: CHART_COLORS.text }}
                       />
-                      <Legend wrapperStyle={{ color: TEXT_COLOR }} />
+                      <Legend wrapperStyle={{ color: CHART_COLORS.text }} />
                       {testConfig.databases.map((dbId) => (
                         <Line
                           key={dbId}
                           type="monotone"
                           dataKey={`${dbId}_connections`}
-                          name={dbNames[dbId]}
-                          stroke={dbColors[dbId]}
+                          name={DB_NAMES[dbId]}
+                          stroke={getDbColor(dbId)}
                           strokeWidth={2}
                           dot={false}
                         />
@@ -605,35 +583,35 @@ export function DashboardsPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis 
                         dataKey="time" 
-                        stroke={AXIS_COLOR} 
+                        stroke={CHART_COLORS.axis} 
                         fontSize={12}
-                        tick={{ fill: TEXT_COLOR }}
+                        tick={{ fill: CHART_COLORS.text }}
                       />
                       <YAxis 
-                        stroke={AXIS_COLOR} 
+                        stroke={CHART_COLORS.axis} 
                         fontSize={12}
-                        tick={{ fill: TEXT_COLOR }}
+                        tick={{ fill: CHART_COLORS.text }}
                       />
                       <Tooltip
                         contentStyle={{
                           backgroundColor: "hsl(var(--card))",
                           border: "1px solid hsl(var(--border))",
                           borderRadius: "8px",
-                          color: TEXT_COLOR,
+                          color: CHART_COLORS.text,
                         }}
-                        labelStyle={{ color: TEXT_COLOR }}
-                        itemStyle={{ color: TEXT_COLOR }}
+                        labelStyle={{ color: CHART_COLORS.text }}
+                        itemStyle={{ color: CHART_COLORS.text }}
                       />
-                      <Legend wrapperStyle={{ color: TEXT_COLOR }} />
+                      <Legend wrapperStyle={{ color: CHART_COLORS.text }} />
                       {testConfig.databases.map((dbId) => (
                         <Line
                           key={dbId}
                           type="monotone"
                           dataKey={`${dbId}_errors`}
-                          name={dbNames[dbId]}
-                          stroke="#ef4444"
+                          name={DB_NAMES[dbId]}
+                          stroke={getDbColor(dbId)}
                           strokeWidth={2}
-                          dot={false}
+                          dot={{ fill: getDbColor(dbId), r: 4 }}
                         />
                       ))}
                     </LineChart>
@@ -662,34 +640,34 @@ export function DashboardsPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis 
                         dataKey="time" 
-                        stroke={AXIS_COLOR} 
+                        stroke={CHART_COLORS.axis} 
                         fontSize={12}
-                        tick={{ fill: TEXT_COLOR }}
+                        tick={{ fill: CHART_COLORS.text }}
                       />
                       <YAxis 
-                        stroke={AXIS_COLOR} 
+                        stroke={CHART_COLORS.axis} 
                         fontSize={12}
                         domain={[0, 100]}
-                        tick={{ fill: TEXT_COLOR }}
+                        tick={{ fill: CHART_COLORS.text }}
                       />
                       <Tooltip
                         contentStyle={{
                           backgroundColor: "hsl(var(--card))",
                           border: "1px solid hsl(var(--border))",
                           borderRadius: "8px",
-                          color: TEXT_COLOR,
+                          color: CHART_COLORS.text,
                         }}
-                        labelStyle={{ color: TEXT_COLOR }}
-                        itemStyle={{ color: TEXT_COLOR }}
+                        labelStyle={{ color: CHART_COLORS.text }}
+                        itemStyle={{ color: CHART_COLORS.text }}
                       />
-                      <Legend wrapperStyle={{ color: TEXT_COLOR }} />
+                      <Legend wrapperStyle={{ color: CHART_COLORS.text }} />
                       {testConfig.databases.map((dbId) => (
                         <Line
                           key={dbId}
                           type="monotone"
                           dataKey={`${dbId}_cpu`}
-                          name={dbNames[dbId]}
-                          stroke={dbColors[dbId]}
+                          name={DB_NAMES[dbId]}
+                          stroke={getDbColor(dbId)}
                           strokeWidth={2}
                           dot={false}
                         />
@@ -715,34 +693,34 @@ export function DashboardsPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis 
                         dataKey="time" 
-                        stroke={AXIS_COLOR} 
+                        stroke={CHART_COLORS.axis} 
                         fontSize={12}
-                        tick={{ fill: TEXT_COLOR }}
+                        tick={{ fill: CHART_COLORS.text }}
                       />
                       <YAxis 
-                        stroke={AXIS_COLOR} 
+                        stroke={CHART_COLORS.axis} 
                         fontSize={12}
                         domain={[0, 100]}
-                        tick={{ fill: TEXT_COLOR }}
+                        tick={{ fill: CHART_COLORS.text }}
                       />
                       <Tooltip
                         contentStyle={{
                           backgroundColor: "hsl(var(--card))",
                           border: "1px solid hsl(var(--border))",
                           borderRadius: "8px",
-                          color: TEXT_COLOR,
+                          color: CHART_COLORS.text,
                         }}
-                        labelStyle={{ color: TEXT_COLOR }}
-                        itemStyle={{ color: TEXT_COLOR }}
+                        labelStyle={{ color: CHART_COLORS.text }}
+                        itemStyle={{ color: CHART_COLORS.text }}
                       />
-                      <Legend wrapperStyle={{ color: TEXT_COLOR }} />
+                      <Legend wrapperStyle={{ color: CHART_COLORS.text }} />
                       {testConfig.databases.map((dbId) => (
                         <Line
                           key={dbId}
                           type="monotone"
                           dataKey={`${dbId}_memory`}
-                          name={dbNames[dbId]}
-                          stroke={dbColors[dbId]}
+                          name={DB_NAMES[dbId]}
+                          stroke={getDbColor(dbId)}
                           strokeWidth={2}
                           dot={false}
                         />
@@ -768,34 +746,34 @@ export function DashboardsPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis 
                         dataKey="time" 
-                        stroke={AXIS_COLOR} 
+                        stroke={CHART_COLORS.axis} 
                         fontSize={12}
-                        tick={{ fill: TEXT_COLOR }}
+                        tick={{ fill: CHART_COLORS.text }}
                       />
                       <YAxis 
-                        stroke={AXIS_COLOR} 
+                        stroke={CHART_COLORS.axis} 
                         fontSize={12}
-                        tick={{ fill: TEXT_COLOR }}
+                        tick={{ fill: CHART_COLORS.text }}
                       />
                       <Tooltip
                         contentStyle={{
                           backgroundColor: "hsl(var(--card))",
                           border: "1px solid hsl(var(--border))",
                           borderRadius: "8px",
-                          color: TEXT_COLOR,
+                          color: CHART_COLORS.text,
                         }}
-                        labelStyle={{ color: TEXT_COLOR }}
-                        itemStyle={{ color: TEXT_COLOR }}
+                        labelStyle={{ color: CHART_COLORS.text }}
+                        itemStyle={{ color: CHART_COLORS.text }}
                       />
-                      <Legend wrapperStyle={{ color: TEXT_COLOR }} />
+                      <Legend wrapperStyle={{ color: CHART_COLORS.text }} />
                       {testConfig.databases.map((dbId) => (
                         <Area
                           key={dbId}
                           type="monotone"
                           dataKey={`${dbId}_diskIO`}
-                          name={dbNames[dbId]}
-                          stroke={dbColors[dbId]}
-                          fill={dbColors[dbId]}
+                          name={DB_NAMES[dbId]}
+                          stroke={getDbColor(dbId)}
+                          fill={getDbColor(dbId)}
                           fillOpacity={0.2}
                         />
                       ))}
@@ -820,34 +798,34 @@ export function DashboardsPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis 
                         dataKey="time" 
-                        stroke={AXIS_COLOR} 
+                        stroke={CHART_COLORS.axis} 
                         fontSize={12}
-                        tick={{ fill: TEXT_COLOR }}
+                        tick={{ fill: CHART_COLORS.text }}
                       />
                       <YAxis 
-                        stroke={AXIS_COLOR} 
+                        stroke={CHART_COLORS.axis} 
                         fontSize={12}
-                        tick={{ fill: TEXT_COLOR }}
+                        tick={{ fill: CHART_COLORS.text }}
                       />
                       <Tooltip
                         contentStyle={{
                           backgroundColor: "hsl(var(--card))",
                           border: "1px solid hsl(var(--border))",
                           borderRadius: "8px",
-                          color: TEXT_COLOR,
+                          color: CHART_COLORS.text,
                         }}
-                        labelStyle={{ color: TEXT_COLOR }}
-                        itemStyle={{ color: TEXT_COLOR }}
+                        labelStyle={{ color: CHART_COLORS.text }}
+                        itemStyle={{ color: CHART_COLORS.text }}
                       />
-                      <Legend wrapperStyle={{ color: TEXT_COLOR }} />
+                      <Legend wrapperStyle={{ color: CHART_COLORS.text }} />
                       {testConfig.databases.map((dbId) => (
                         <Area
                           key={dbId}
                           type="monotone"
                           dataKey={`${dbId}_throughput`}
-                          name={dbNames[dbId]}
-                          stroke={dbColors[dbId]}
-                          fill={dbColors[dbId]}
+                          name={DB_NAMES[dbId]}
+                          stroke={getDbColor(dbId)}
+                          fill={getDbColor(dbId)}
                           fillOpacity={0.2}
                         />
                       ))}
@@ -874,8 +852,8 @@ export function DashboardsPage() {
                 <Card key={dbId} className="bg-card border-border">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-foreground">
-                      <Database className="h-5 w-5" style={{ color: dbColors[dbId] }} />
-                      {dbNames[dbId]}
+                      <Database className="h-5 w-5" style={{ color: getDbColor(dbId) }} />
+                      {DB_NAMES[dbId]}
                     </CardTitle>
                     <CardDescription>Статистика транзакций</CardDescription>
                   </CardHeader>
@@ -926,7 +904,7 @@ export function DashboardsPage() {
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart 
                       data={currentTest.results.map(r => ({
-                        name: dbNames[r.databaseId] || r.databaseId,
+                        name: DB_NAMES[r.databaseId] || r.databaseId,
                         successful: r.transactionMetrics?.successfulTransactions || 0,
                         failed: r.transactionMetrics?.failedTransactions || 0,
                       }))}
@@ -934,25 +912,25 @@ export function DashboardsPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis 
                         dataKey="name" 
-                        stroke={AXIS_COLOR}
-                        tick={{ fill: TEXT_COLOR }}
+                        stroke={CHART_COLORS.axis}
+                        tick={{ fill: CHART_COLORS.text }}
                       />
                       <YAxis 
-                        stroke={AXIS_COLOR}
-                        tick={{ fill: TEXT_COLOR }}
+                        stroke={CHART_COLORS.axis}
+                        tick={{ fill: CHART_COLORS.text }}
                       />
                       <Tooltip
                         contentStyle={{
                           backgroundColor: "hsl(var(--card))",
                           border: "1px solid hsl(var(--border))",
                           borderRadius: "8px",
-                          color: TEXT_COLOR,
+                          color: CHART_COLORS.text,
                         }}
-                        labelStyle={{ color: TEXT_COLOR }}
+                        labelStyle={{ color: CHART_COLORS.text }}
                       />
-                      <Legend wrapperStyle={{ color: TEXT_COLOR }} />
-                      <Bar dataKey="successful" name="Успешные" fill={PRIMARY_GREEN} />
-                      <Bar dataKey="failed" name="Неудачные" fill="#ef4444" />
+                      <Legend wrapperStyle={{ color: CHART_COLORS.text }} />
+                      <Bar dataKey="successful" name="Успешные" fill={CHART_COLORS.success} />
+                      <Bar dataKey="failed" name="Неудачные" fill={CHART_COLORS.error} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -972,8 +950,8 @@ export function DashboardsPage() {
                 <Card key={dbId} className="bg-card border-border">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-foreground">
-                      <Database className="h-5 w-5" style={{ color: dbColors[dbId] }} />
-                      {dbNames[dbId]} — Внутренние метрики
+                      <Database className="h-5 w-5" style={{ color: getDbColor(dbId) }} />
+                      {DB_NAMES[dbId]} — Внутренние метрики
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">

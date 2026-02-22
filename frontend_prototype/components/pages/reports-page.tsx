@@ -4,6 +4,7 @@ import { FileText, TrendingUp, TrendingDown, Minus, Award, AlertTriangle } from 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useAppStore } from "@/lib/store"
+import { DB_NAMES, getDbColor, CHART_COLORS } from "@/lib/chart-colors"
 import {
   BarChart,
   Bar,
@@ -20,22 +21,6 @@ import {
   Legend,
   Cell,
 } from "recharts"
-
-const dbNames: Record<string, string> = {
-  postgresql: "PostgreSQL",
-  mysql: "MySQL",
-  mariadb: "MariaDB",
-  sqlite: "SQLite",
-  mssql: "MS SQL Server",
-}
-
-const dbColors: Record<string, string> = {
-  postgresql: "#ffffff",
-  mysql: "#ffffff",
-  mariadb: "hsl(var(--chart-3))",
-  sqlite: "hsl(var(--chart-4))",
-  mssql: "hsl(var(--chart-5))",
-}
 
 export function ReportsPage() {
   const { testHistory, currentTest } = useAppStore()
@@ -57,40 +42,40 @@ export function ReportsPage() {
   }
 
   const comparisonData = latestTest.results.map((result) => ({
-    name: dbNames[result.databaseId],
+    name: DB_NAMES[result.databaseId],
     "Ср. время отклика": result.metrics.avgResponseTime,
     "Макс. время отклика": result.metrics.maxResponseTime,
     P95: result.metrics.p95ResponseTime,
     P99: result.metrics.p99ResponseTime,
-    fill: dbColors[result.databaseId],
+    color: getDbColor(result.databaseId),
   }))
 
   const throughputData = latestTest.results.map((result) => ({
-    name: dbNames[result.databaseId],
+    name: DB_NAMES[result.databaseId],
     throughput: result.metrics.throughput,
-    fill: dbColors[result.databaseId],
+    color: getDbColor(result.databaseId),
   }))
 
   const radarData = [
     {
       metric: "Скорость",
-      ...Object.fromEntries(latestTest.results.map((r) => [dbNames[r.databaseId], 100 - r.metrics.avgResponseTime])),
+      ...Object.fromEntries(latestTest.results.map((r) => [DB_NAMES[r.databaseId], 100 - r.metrics.avgResponseTime])),
     },
     {
       metric: "Пропускная способность",
-      ...Object.fromEntries(latestTest.results.map((r) => [dbNames[r.databaseId], r.metrics.throughput / 15])),
+      ...Object.fromEntries(latestTest.results.map((r) => [DB_NAMES[r.databaseId], r.metrics.throughput / 15])),
     },
     {
       metric: "Стабильность",
-      ...Object.fromEntries(latestTest.results.map((r) => [dbNames[r.databaseId], 100 - r.metrics.errorRate * 10])),
+      ...Object.fromEntries(latestTest.results.map((r) => [DB_NAMES[r.databaseId], 100 - r.metrics.errorRate * 10])),
     },
     {
       metric: "P95 Latency",
-      ...Object.fromEntries(latestTest.results.map((r) => [dbNames[r.databaseId], 100 - r.metrics.p95ResponseTime])),
+      ...Object.fromEntries(latestTest.results.map((r) => [DB_NAMES[r.databaseId], 100 - r.metrics.p95ResponseTime])),
     },
     {
       metric: "P99 Latency",
-      ...Object.fromEntries(latestTest.results.map((r) => [dbNames[r.databaseId], 100 - r.metrics.p99ResponseTime])),
+      ...Object.fromEntries(latestTest.results.map((r) => [DB_NAMES[r.databaseId], 100 - r.metrics.p99ResponseTime])),
     },
   ]
 
@@ -134,7 +119,7 @@ export function ReportsPage() {
             </div>
             <Badge className="bg-primary/10 text-primary border-primary/20">
               <Award className="h-3 w-3 mr-1" />
-              Лучший: {dbNames[bestDb.databaseId]}
+              Лучший: {DB_NAMES[bestDb.databaseId]}
             </Badge>
           </div>
         </CardHeader>
@@ -146,7 +131,7 @@ export function ReportsPage() {
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg flex items-center gap-2">
-                  {dbNames[result.databaseId]}
+                  <span style={{ color: getDbColor(result.databaseId) }}>{DB_NAMES[result.databaseId]}</span>
                   {result.databaseId === bestDb.databaseId && <Award className="h-4 w-4 text-primary" />}
                 </CardTitle>
                 {getPerformanceIcon(result.databaseId)}
@@ -199,31 +184,43 @@ export function ReportsPage() {
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis 
                     type="number" 
-                    stroke="#ffffff" 
+                    stroke={CHART_COLORS.axis} 
                     fontSize={12}
-                    tick={{ fill: "#ffffff" }}
+                    tick={{ fill: CHART_COLORS.text }}
                   />
                   <YAxis
                     dataKey="name"
                     type="category"
-                    stroke="#ffffff"
+                    stroke={CHART_COLORS.axis}
                     fontSize={12}
                     width={100}
-                    tick={{ fill: "#ffffff" }}
+                    tick={{ fill: CHART_COLORS.text }}
                   />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "hsl(var(--card))",
                       border: "1px solid hsl(var(--border))",
                       borderRadius: "8px",
-                      color: "#ffffff",
+                      color: CHART_COLORS.text,
                     }}
-                    labelStyle={{ color: "#ffffff" }}
+                    labelStyle={{ color: CHART_COLORS.text }}
                   />
-                  <Legend wrapperStyle={{ color: "#ffffff" }} />
-                  <Bar dataKey="Ср. время отклика" fill="#ffffff" />
-                  <Bar dataKey="P95" fill="#ffffff" />
-                  <Bar dataKey="P99" fill="#ffffff" />
+                  <Legend wrapperStyle={{ color: CHART_COLORS.text }} />
+                  <Bar dataKey="Ср. время отклика" name="Среднее">
+                    {comparisonData.map((entry, index) => (
+                      <Cell key={`cell-avg-${index}`} fill={entry.color} />
+                    ))}
+                  </Bar>
+                  <Bar dataKey="P95" name="P95">
+                    {comparisonData.map((entry, index) => (
+                      <Cell key={`cell-p95-${index}`} fill={entry.color} fillOpacity={0.6} />
+                    ))}
+                  </Bar>
+                  <Bar dataKey="P99" name="P99">
+                    {comparisonData.map((entry, index) => (
+                      <Cell key={`cell-p99-${index}`} fill={entry.color} fillOpacity={0.3} />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -242,27 +239,27 @@ export function ReportsPage() {
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis 
                     dataKey="name" 
-                    stroke="#ffffff" 
+                    stroke={CHART_COLORS.axis} 
                     fontSize={12}
-                    tick={{ fill: "#ffffff" }}
+                    tick={{ fill: CHART_COLORS.text }}
                   />
                   <YAxis
-                    stroke="#ffffff" 
+                    stroke={CHART_COLORS.axis} 
                     fontSize={12}
-                    tick={{ fill: "#ffffff" }}
+                    tick={{ fill: CHART_COLORS.text }}
                   />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "hsl(var(--card))",
                       border: "1px solid hsl(var(--border))",
                       borderRadius: "8px",
-                      color: "#ffffff",
+                      color: CHART_COLORS.text,
                     }}
-                    labelStyle={{ color: "#ffffff" }}
+                    labelStyle={{ color: CHART_COLORS.text }}
                   />
                   <Bar dataKey="throughput" name="req/s">
                     {throughputData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.fill} />
+                      <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -283,26 +280,26 @@ export function ReportsPage() {
                   <PolarGrid stroke="hsl(var(--border))" />
                   <PolarAngleAxis 
                     dataKey="metric" 
-                    stroke="#ffffff" 
+                    stroke={CHART_COLORS.axis} 
                     fontSize={12}
-                    tick={{ fill: "#ffffff" }}
+                    tick={{ fill: CHART_COLORS.text }}
                   />
                   <PolarRadiusAxis 
-                    stroke="#ffffff" 
+                    stroke={CHART_COLORS.axis} 
                     fontSize={10}
-                    tick={{ fill: "#ffffff" }}
+                    tick={{ fill: CHART_COLORS.text }}
                   />
-                  {latestTest.results.map((result, index) => (
+                  {latestTest.results.map((result) => (
                     <Radar
                       key={result.databaseId}
-                      name={dbNames[result.databaseId]}
-                      dataKey={dbNames[result.databaseId]}
-                      stroke={dbColors[result.databaseId]}
-                      fill={dbColors[result.databaseId]}
+                      name={DB_NAMES[result.databaseId]}
+                      dataKey={DB_NAMES[result.databaseId]}
+                      stroke={getDbColor(result.databaseId)}
+                      fill={getDbColor(result.databaseId)}
                       fillOpacity={0.2}
                     />
                   ))}
-                  <Legend wrapperStyle={{ color: "#ffffff" }} />
+                  <Legend wrapperStyle={{ color: CHART_COLORS.text }} />
                 </RadarChart>
               </ResponsiveContainer>
             </div>
@@ -324,7 +321,7 @@ export function ReportsPage() {
                 .filter((r) => r.metrics.errorRate > 1)
                 .map((r) => (
                   <li key={r.databaseId}>
-                    {dbNames[r.databaseId]}: высокий процент ошибок ({r.metrics.errorRate.toFixed(2)}%)
+                    {DB_NAMES[r.databaseId]}: высокий процент ошибок ({r.metrics.errorRate.toFixed(2)}%)
                   </li>
                 ))}
             </ul>
