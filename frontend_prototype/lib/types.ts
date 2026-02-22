@@ -5,6 +5,11 @@ export interface Database {
   icon: string
 }
 
+// Режим тестирования
+export type TestMode = 
+  | "scenario"       // Режим со сценарием тестирования
+  | "custom_query"   // Режим с конкретным SQL запросом
+
 // Сценарии нагрузочного тестирования
 export type TestScenario = 
   | "read_only"      // 100% SELECT
@@ -26,7 +31,10 @@ export interface ScenarioConfig {
 // Конфигурация теста (ввод пользователя)
 export interface TestConfig {
   databases: string[]           // Выбранные СУБД
-  scenario: TestScenario        // Сценарий тестирования
+  testMode: TestMode            // Режим тестирования
+  scenario: TestScenario        // Сценарий тестирования (для режима scenario)
+  selectedQueryId: string       // ID выбранного запроса (для режима custom_query)
+  customSql: string             // Пользовательский SQL запрос
   testDuration: number          // Длительность в секундах
   virtualUsers: number          // Количество виртуальных пользователей (параллельных соединений)
   iterations: number            // Количество итераций на пользователя

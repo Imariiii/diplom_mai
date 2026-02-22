@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Play, Database, Users, Clock, FileCode, AlertCircle, CheckCircle2, Gauge, Timer, Layers } from "lucide-react"
+import { Play, Database, Users, Clock, FileCode, AlertCircle, CheckCircle2, Gauge, Timer, Layers, Code, Edit3 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -9,17 +9,32 @@ import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
 import { useAppStore } from "@/lib/store"
 import { apiClient, type Query } from "@/lib/api"
 import { toast } from "sonner"
-import type { TestRun, TestScenario, ScenarioConfig } from "@/lib/types"
+import type { TestRun, TestScenario, ScenarioConfig, TestMode } from "@/lib/types"
 
 const databases = [
   { id: "mysql", name: "MySQL (Sakila)", type: "mysql" as const },
   { id: "postgresql", name: "PostgreSQL (Pagila)", type: "postgresql" as const },
 ]
 
-// Сценарии нагрузочного тестирования
+const testModes: { id: TestMode; name: string; description: string; icon: React.ElementType }[] = [
+  { 
+    id: "scenario", 
+    name: "По сценарию", 
+    description: "Выбор предустановленного сценария нагрузки",
+    icon: Layers
+  },
+  { 
+    id: "custom_query", 
+    name: "Конкретный запрос", 
+    description: "Выбор SQL-запроса из списка или ввод своего",
+    icon: Code
+  },
+]
+
 const scenarios: ScenarioConfig[] = [
   { 
     id: "read_only", 
@@ -75,20 +90,19 @@ export function ConfigPage() {
   } = useAppStore()
   const [isRunning, setIsRunning] = useState(false)
   const [queries, setQueries] = useState<Query[]>([])
-  const [selectedQuery, setSelectedQuery] = useState<string>("")
   const [healthStatus, setHealthStatus] = useState<{ mysql: boolean; postgresql: boolean }>({
     mysql: false,
     postgresql: false,
   })
+  const [useCustomSql, setUseCustomSql] = useState(false)
 
   useEffect(() => {
-    // Загрузка списка запросов
     apiClient
       .getQueries()
       .then((data) => {
         setQueries(data)
-        if (data.length > 0) {
-          setSelectedQuery(data[0].id)
+        if (data.length > 0 && !testConfig.selectedQueryId) {
+          setTestConfig({ selectedQueryId: data[0].id })
         }
       })
       .catch((error) => {
@@ -96,7 +110,6 @@ export function ConfigPage() {
         toast.error("Не удалось загрузить список запросов")
       })
 
-    // Проверка статуса подключений
     apiClient
       .getHealth()
       .then((status) => {
@@ -117,32 +130,53 @@ export function ConfigPage() {
     setTestConfig({ databases: newDatabases })
   }
 
-  const runTest = async () => {
+  const validateConfig = (): boolean => {
     if (testConfig.databases.length === 0) {
       toast.error("Выберите хотя бы одну базу данных")
-      return
+      return false
     }
 
-    if (!selectedQuery) {
-      toast.error("Выберите запрос для тестирования")
-      return
+    if (testConfig.testMode === "custom_query") {
+      if (useCustomSql) {
+        if (!testConfig.customSql.trim()) {
+          toast.error("Введите SQL-запрос")
+          return false
+        }
+      } else {
+        if (!testConfig.selectedQueryId) {
+          toast.error("Выберите запрос из списка")
+          return false
+        }
+      }
     }
+
+    return true
+  }
+
+  const runTest = async () => {
+    if (!validateConfig()) return
 
     setIsRunning(true)
 
     try {
-      const selectedScenario = scenarios.find(s => s.id === testConfig.scenario)
       const testName = `Тест ${new Date().toLocaleString("ru")}`
       
-      toast.info(`Запуск тестирования: ${selectedScenario?.name || testConfig.scenario}`)
+      if (testConfig.testMode === "scenario") {
+        const selectedScenario = scenarios.find(s => s.id === testConfig.scenario)
+        toast.info(`Запуск тестирования: ${selectedScenario?.name}`)
+      } else {
+        const queryDesc = useCustomSql 
+          ? "пользовательский запрос" 
+          : queries.find(q => q.id === testConfig.selectedQueryId)?.name || "выбранный запрос"
+        toast.info(`Запуск тестирования: ${queryDesc}`)
+      }
 
-      // Асинхронный запуск теста с WebSocket
       const asyncResponse = await apiClient.runAsyncTest({
         db_types: testConfig.databases,
         iterations: testConfig.iterations,
         duration: testConfig.testDuration,
         virtual_users: testConfig.virtualUsers,
-        scenario: testConfig.scenario,
+        scenario: testConfig.testMode === "scenario" ? testConfig.scenario : "custom",
         warmup_time: testConfig.warmupTime,
         test_name: testName,
       })
@@ -178,151 +212,19 @@ export function ConfigPage() {
     }
   }
 
-  // Fallback для синхронного запуска (если WebSocket недоступен)
-  const runTestSync = async () => {
-    if (testConfig.databases.length === 0) {
-      toast.error("Выберите хотя бы одну базу данных")
-      return
-    }
-
-    if (!selectedQuery) {
-      toast.error("Выберите запрос для тестирования")
-      return
-    }
-
-    setIsRunning(true)
-
-    try {
-      const testRun: TestRun = {
-        id: Date.now().toString(),
-        name: `Тест ${new Date().toLocaleString("ru")}`,
-        status: "running",
-        startTime: new Date(),
-        config: { ...testConfig },
-      }
-
-      setCurrentTest(testRun)
-      setCurrentPage("dashboards")
-
-      const selectedScenario = scenarios.find(s => s.id === testConfig.scenario)
-      toast.info(`Запуск тестирования: ${selectedScenario?.name || testConfig.scenario}`)
-
-      // Запуск полного набора тестов
-      const response = await apiClient.runFullTest({
-        db_types: testConfig.databases,
-        iterations: testConfig.iterations,
-        duration: testConfig.testDuration,
-        virtual_users: testConfig.virtualUsers,
-        scenario: testConfig.scenario,
-        warmup_time: testConfig.warmupTime,
-      })
-
-      // Агрегируем результаты по СУБД
-      const dbResults: Record<string, {
-        times: number[]
-        maxTimes: number[]
-        minTimes: number[]
-        totalSuccessful: number
-        totalFailed: number
-        totalIterations: number
-      }> = {}
-
-      // Собираем все метрики по каждой СУБД
-      response.results.forEach((result) => {
-        Object.entries(result.comparison).forEach(([dbType, stats]) => {
-          if (!dbResults[dbType]) {
-            dbResults[dbType] = {
-              times: [],
-              maxTimes: [],
-              minTimes: [],
-              totalSuccessful: 0,
-              totalFailed: 0,
-              totalIterations: 0,
-            }
-          }
-          if (stats.avg_time_ms !== undefined) {
-            dbResults[dbType].times.push(stats.avg_time_ms)
-            dbResults[dbType].maxTimes.push(stats.max_time_ms)
-            dbResults[dbType].minTimes.push(stats.min_time_ms)
-            dbResults[dbType].totalSuccessful += stats.successful
-            dbResults[dbType].totalFailed += stats.failed
-            dbResults[dbType].totalIterations += stats.iterations
-          }
-        })
-      })
-
-      // Создаем уникальные результаты по СУБД
-      const uniqueResults = Object.entries(dbResults).map(([dbType, aggregated]) => {
-        const sortedTimes = [...aggregated.times].sort((a, b) => a - b)
-        const avgTime = aggregated.times.reduce((a, b) => a + b, 0) / aggregated.times.length
-        const maxTime = Math.max(...aggregated.maxTimes)
-        const minTime = Math.min(...aggregated.minTimes)
-        const errorRate = (aggregated.totalFailed / aggregated.totalIterations) * 100
-        
-        // Вычисление перцентилей
-        const p50Index = Math.floor(sortedTimes.length * 0.5)
-        const p95Index = Math.floor(sortedTimes.length * 0.95)
-        const p99Index = Math.floor(sortedTimes.length * 0.99)
-
-        return {
-          databaseId: dbType,
-          databaseName: dbType === "mysql" ? "MySQL" : "PostgreSQL",
-          metrics: {
-            avgResponseTime: avgTime,
-            p50ResponseTime: sortedTimes[p50Index] || avgTime,
-            p95ResponseTime: sortedTimes[p95Index] || avgTime * 1.5,
-            p99ResponseTime: sortedTimes[p99Index] || avgTime * 2,
-            minResponseTime: minTime,
-            maxResponseTime: maxTime,
-            tps: aggregated.totalSuccessful / (testConfig.testDuration || 60),
-            throughput: 1000 / avgTime,
-            activeConnections: testConfig.virtualUsers,
-            errorCount: aggregated.totalFailed,
-            errorRate: errorRate,
-          },
-          transactionMetrics: {
-            totalTransactions: aggregated.totalIterations,
-            successfulTransactions: aggregated.totalSuccessful,
-            failedTransactions: aggregated.totalFailed,
-            rollbacks: 0,
-          },
-          timeSeriesData: [],
-        }
-      })
-
-      const completedTest: TestRun = {
-        ...testRun,
-        status: "completed",
-        endTime: new Date(),
-        results: uniqueResults,
-      }
-
-      setCurrentTest(completedTest)
-      addTestToHistory(completedTest)
-      toast.success("Тестирование завершено!")
-
-      if (response.charts.comparison || response.charts.statistics) {
-        toast.info("Графики и отчеты созданы в папке results/")
-      }
-    } catch (error) {
-      console.error("Ошибка выполнения теста:", error)
-      toast.error(`Ошибка: ${error instanceof Error ? error.message : "Неизвестная ошибка"}`)
-      
-      const failedTest: TestRun = {
-        id: Date.now().toString(),
-        name: `Тест ${new Date().toLocaleString("ru")}`,
-        status: "failed",
-        startTime: new Date(),
-        endTime: new Date(),
-        config: { ...testConfig },
-      }
-      setCurrentTest(failedTest)
-    } finally {
-      setIsRunning(false)
-    }
-  }
-
   const selectedScenario = scenarios.find(s => s.id === testConfig.scenario)
+  const selectedQuery = queries.find(q => q.id === testConfig.selectedQueryId)
+
+  const canRunTest = () => {
+    if (testConfig.databases.length === 0) return false
+    if (testConfig.testMode === "custom_query") {
+      if (useCustomSql) {
+        return testConfig.customSql.trim().length > 0
+      }
+      return !!testConfig.selectedQueryId
+    }
+    return true
+  }
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
@@ -404,85 +306,175 @@ export function ConfigPage() {
         </CardContent>
       </Card>
 
-      {/* Сценарий тестирования */}
+      {/* Режим тестирования */}
       <Card className="bg-card border-border">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Layers className="h-5 w-5 text-primary" />
-            Сценарий тестирования
+            Режим тестирования
           </CardTitle>
-          <CardDescription>Выберите тип нагрузки для теста</CardDescription>
+          <CardDescription>Выберите способ проведения нагрузочного теста</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <Select 
-            value={testConfig.scenario} 
-            onValueChange={(value: TestScenario) => setTestConfig({ scenario: value })}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Выберите сценарий" />
-            </SelectTrigger>
-            <SelectContent>
-              {scenarios.map((scenario) => (
-                <SelectItem key={scenario.id} value={scenario.id}>
-                  <div className="flex flex-col">
-                    <span>{scenario.name}</span>
-                    <span className="text-xs text-muted-foreground">{scenario.description}</span>
+        <CardContent>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {testModes.map((mode) => {
+              const Icon = mode.icon
+              const isSelected = testConfig.testMode === mode.id
+              return (
+                <label
+                  key={mode.id}
+                  className={`flex items-start gap-3 p-4 rounded-lg border cursor-pointer transition-colors ${
+                    isSelected
+                      ? "border-primary bg-primary/10"
+                      : "border-border hover:border-muted-foreground"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="testMode"
+                    checked={isSelected}
+                    onChange={() => setTestConfig({ testMode: mode.id })}
+                    className="mt-1"
+                  />
+                  <div>
+                    <div className="flex items-center gap-2 font-medium">
+                      <Icon className="h-4 w-4" />
+                      {mode.name}
+                    </div>
+                    <div className="text-sm text-muted-foreground mt-1">
+                      {mode.description}
+                    </div>
                   </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          
-          {selectedScenario && (
-            <div className="p-4 bg-muted rounded-lg space-y-2">
-              <div className="font-medium">{selectedScenario.name}</div>
-              <div className="text-sm text-muted-foreground">{selectedScenario.description}</div>
-              <div className="flex gap-4 text-sm">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-                  <span>SELECT: {selectedScenario.readPercent}%</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 bg-orange-500 rounded-full"></div>
-                  <span>UPDATE: {selectedScenario.writePercent}%</span>
-                </div>
-              </div>
-            </div>
-          )}
+                </label>
+              )
+            })}
+          </div>
         </CardContent>
       </Card>
 
-      {/* Выбор запроса */}
-      <Card className="bg-card border-border">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <FileCode className="h-5 w-5 text-primary" />
-            Выбор запроса
-          </CardTitle>
-          <CardDescription>Выберите SQL-запрос для тестирования</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Select value={selectedQuery} onValueChange={setSelectedQuery}>
-            <SelectTrigger>
-              <SelectValue placeholder="Выберите запрос" />
-            </SelectTrigger>
-            <SelectContent>
-              {queries.map((query) => (
-                <SelectItem key={query.id} value={query.id}>
-                  {query.name} - {query.description}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {selectedQuery && (
-            <div className="mt-4 p-3 bg-muted rounded-lg">
-              <pre className="text-sm overflow-x-auto">
-                {queries.find((q) => q.id === selectedQuery)?.sql}
-              </pre>
+      {/* Сценарий тестирования - показывается только в режиме scenario */}
+      {testConfig.testMode === "scenario" && (
+        <Card className="bg-card border-border">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Layers className="h-5 w-5 text-primary" />
+              Сценарий тестирования
+            </CardTitle>
+            <CardDescription>Выберите тип нагрузки для теста</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Select 
+              value={testConfig.scenario} 
+              onValueChange={(value: TestScenario) => setTestConfig({ scenario: value })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Выберите сценарий" />
+              </SelectTrigger>
+              <SelectContent>
+                {scenarios.map((scenario) => (
+                  <SelectItem key={scenario.id} value={scenario.id}>
+                    <div className="flex flex-col">
+                      <span>{scenario.name}</span>
+                      <span className="text-xs text-muted-foreground">{scenario.description}</span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            
+            {selectedScenario && (
+              <div className="p-4 bg-muted rounded-lg space-y-2">
+                <div className="font-medium">{selectedScenario.name}</div>
+                <div className="text-sm text-muted-foreground">{selectedScenario.description}</div>
+                <div className="flex gap-4 text-sm">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                    <span>SELECT: {selectedScenario.readPercent}%</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-orange-500 rounded-full"></div>
+                    <span>UPDATE: {selectedScenario.writePercent}%</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Конкретный запрос - показывается только в режиме custom_query */}
+      {testConfig.testMode === "custom_query" && (
+        <Card className="bg-card border-border">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FileCode className="h-5 w-5 text-primary" />
+              SQL-запрос для тестирования
+            </CardTitle>
+            <CardDescription>Выберите запрос из списка или введите свой</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Переключатель между списком и своим запросом */}
+            <div className="flex gap-2">
+              <Button
+                variant={!useCustomSql ? "default" : "outline"}
+                size="sm"
+                onClick={() => setUseCustomSql(false)}
+              >
+                <FileCode className="h-4 w-4 mr-2" />
+                Из списка
+              </Button>
+              <Button
+                variant={useCustomSql ? "default" : "outline"}
+                size="sm"
+                onClick={() => setUseCustomSql(true)}
+              >
+                <Edit3 className="h-4 w-4 mr-2" />
+                Свой запрос
+              </Button>
             </div>
-          )}
-        </CardContent>
-      </Card>
+
+            {!useCustomSql ? (
+              <>
+                <Select 
+                  value={testConfig.selectedQueryId} 
+                  onValueChange={(value) => setTestConfig({ selectedQueryId: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Выберите запрос" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {queries.map((query) => (
+                      <SelectItem key={query.id} value={query.id}>
+                        {query.name} - {query.description}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedQuery && (
+                  <div className="p-3 bg-muted rounded-lg">
+                    <div className="text-sm text-muted-foreground mb-2">{selectedQuery.description}</div>
+                    <pre className="text-sm overflow-x-auto font-mono">
+                      {selectedQuery.sql}
+                    </pre>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="space-y-2">
+                <Textarea
+                  placeholder="Введите SQL-запрос для тестирования..."
+                  value={testConfig.customSql}
+                  onChange={(e) => setTestConfig({ customSql: e.target.value })}
+                  className="font-mono min-h-[120px]"
+                />
+                <div className="text-xs text-muted-foreground">
+                  Поддерживаются SQL-запросы, совместимые с выбранными СУБД
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Длительность теста */}
       <Card className="bg-card border-border">
@@ -637,9 +629,28 @@ export function ConfigPage() {
               </span>
             </div>
             <div>
-              <span className="text-muted-foreground">Сценарий:</span>
-              <span className="ml-2 font-medium">{selectedScenario?.name || "Не выбрано"}</span>
+              <span className="text-muted-foreground">Режим:</span>
+              <span className="ml-2 font-medium">
+                {testConfig.testMode === "scenario" ? "По сценарию" : "Конкретный запрос"}
+              </span>
             </div>
+            {testConfig.testMode === "scenario" ? (
+              <div>
+                <span className="text-muted-foreground">Сценарий:</span>
+                <span className="ml-2 font-medium">{selectedScenario?.name || "Не выбрано"}</span>
+              </div>
+            ) : (
+              <>
+                <div>
+                  <span className="text-muted-foreground">Запрос:</span>
+                  <span className="ml-2 font-medium">
+                    {useCustomSql 
+                      ? "Пользовательский SQL" 
+                      : (selectedQuery?.name || "Не выбрано")}
+                  </span>
+                </div>
+              </>
+            )}
             <div>
               <span className="text-muted-foreground">Длительность:</span>
               <span className="ml-2 font-medium">{testConfig.testDuration} сек</span>
@@ -664,7 +675,7 @@ export function ConfigPage() {
         size="lg"
         className="w-full"
         onClick={runTest}
-        disabled={testConfig.databases.length === 0 || isRunning || !selectedQuery}
+        disabled={!canRunTest() || isRunning}
       >
         <Play className="mr-2 h-5 w-5" />
         {isRunning ? "Тест выполняется..." : "Запустить тестирование"}

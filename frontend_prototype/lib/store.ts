@@ -31,11 +31,14 @@ export const useAppStore = create<AppState>((set) => ({
 
   testConfig: {
     databases: [],
-    scenario: "mixed_light",      // По умолчанию: 80% SELECT, 20% UPDATE (как TPC-C)
-    testDuration: 60,             // 60 секунд по умолчанию
-    virtualUsers: 10,             // 10 виртуальных пользователей
-    iterations: 100,              // 100 итераций на пользователя
-    warmupTime: 5,                // 5 секунд прогрева
+    testMode: "scenario",       // По умолчанию: режим со сценарием
+    scenario: "mixed_light",     // По умолчанию: 80% SELECT, 20% UPDATE (как TPC-C)
+    selectedQueryId: "",         // Выбранный запрос из списка
+    customSql: "",               // Пользовательский SQL
+    testDuration: 60,            // 60 секунд по умолчанию
+    virtualUsers: 10,            // 10 виртуальных пользователей
+    iterations: 100,             // 100 итераций на пользователя
+    warmupTime: 5,               // 5 секунд прогрева
     queryTypes: ["mixed"],
     dataSize: "medium",
   },
