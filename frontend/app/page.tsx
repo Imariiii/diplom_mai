@@ -6,6 +6,7 @@ import { HomePage } from "@/components/pages/home-page"
 import { ConfigPage } from "@/components/pages/config-page"
 import { DashboardsPage } from "@/components/pages/dashboards-page"
 import { ReportsPage } from "@/components/pages/reports-page"
+import { HistoryPage } from "@/components/pages/history-page"
 import { useAppStore } from "@/lib/store"
 
 export default function Page() {
@@ -20,6 +21,7 @@ export default function Page() {
         {currentPage === "config" && <ConfigPage />}
         {currentPage === "dashboards" && <DashboardsPage />}
         {currentPage === "reports" && <ReportsPage />}
+        {currentPage === "history" && <HistoryPage />}
       </main>
     </div>
   )
