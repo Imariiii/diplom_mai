@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Play, Database, Users, Clock, FileCode, AlertCircle, CheckCircle2, Gauge, Timer, Layers, Code, Edit3 } from "lucide-react"
+import { Play, Database, Users, Clock, FileCode, AlertCircle, CheckCircle2, Gauge, Layers, Code, Edit3 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -174,7 +174,6 @@ export function ConfigPage() {
       const asyncResponse = await apiClient.runAsyncTest({
         db_types: testConfig.databases,
         iterations: testConfig.iterations,
-        duration: testConfig.testDuration,
         virtual_users: testConfig.virtualUsers,
         scenario: testConfig.testMode === "scenario" ? testConfig.scenario : "custom",
         warmup_time: testConfig.warmupTime,
@@ -476,47 +475,6 @@ export function ConfigPage() {
         </Card>
       )}
 
-      {/* Длительность теста */}
-      <Card className="bg-card border-border">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Timer className="h-5 w-5 text-primary" />
-            Длительность теста
-          </CardTitle>
-          <CardDescription>
-            Установите продолжительность теста в секундах: {testConfig.testDuration} сек 
-            ({Math.floor(testConfig.testDuration / 60)} мин {testConfig.testDuration % 60} сек)
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Slider
-            value={[testConfig.testDuration]}
-            onValueChange={([value]) => setTestConfig({ testDuration: value })}
-            min={10}
-            max={600}
-            step={10}
-            className="w-full"
-          />
-          <div className="flex justify-between text-sm text-muted-foreground">
-            <span>10 сек</span>
-            <span>5 мин</span>
-            <span>10 мин</span>
-          </div>
-          <div className="grid grid-cols-4 gap-2">
-            {[30, 60, 180, 600].map((duration) => (
-              <Button
-                key={duration}
-                variant={testConfig.testDuration === duration ? "default" : "outline"}
-                size="sm"
-                onClick={() => setTestConfig({ testDuration: duration })}
-              >
-                {duration < 60 ? `${duration} сек` : `${duration / 60} мин`}
-              </Button>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Виртуальные пользователи */}
       <Card className="bg-card border-border">
         <CardHeader>
@@ -651,10 +609,6 @@ export function ConfigPage() {
                 </div>
               </>
             )}
-            <div>
-              <span className="text-muted-foreground">Длительность:</span>
-              <span className="ml-2 font-medium">{testConfig.testDuration} сек</span>
-            </div>
             <div>
               <span className="text-muted-foreground">Виртуальных пользователей:</span>
               <span className="ml-2 font-medium">{testConfig.virtualUsers}</span>

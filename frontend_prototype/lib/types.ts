@@ -35,7 +35,6 @@ export interface TestConfig {
   scenario: TestScenario        // Сценарий тестирования (для режима scenario)
   selectedQueryId: string       // ID выбранного запроса (для режима custom_query)
   customSql: string             // Пользовательский SQL запрос
-  testDuration: number          // Длительность в секундах
   virtualUsers: number          // Количество виртуальных пользователей (параллельных соединений)
   iterations: number            // Количество итераций на пользователя
   warmupTime: number            // Время прогрева в секундах

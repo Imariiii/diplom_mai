@@ -2,13 +2,18 @@
 Repository для работы с историей тестов в PostgreSQL
 """
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from sqlalchemy import create_engine, desc
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from database.models import Base, TestRun, TestResult, TimeSeries
+
+
+def get_local_now():
+    """Получить текущее локальное время"""
+    return datetime.now()
 
 
 class TestRepository:
@@ -39,7 +44,7 @@ class TestRepository:
                 name=name,
                 status=status,
                 config=config,
-                started_at=datetime.utcnow()
+                started_at=get_local_now()
             )
             session.add(test_run)
             session.commit()
@@ -98,7 +103,7 @@ class TestRepository:
             if test_run:
                 test_run.status = status
                 if status in ['completed', 'failed']:
-                    test_run.finished_at = datetime.utcnow()
+                    test_run.finished_at = get_local_now()
                 if summary:
                     test_run.summary = summary
                 session.commit()

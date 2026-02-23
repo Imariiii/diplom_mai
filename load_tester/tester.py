@@ -272,10 +272,11 @@ class LoadTester:
         
         queries = self.query_manager.get_all_queries()
         all_results = []
+        total_queries = len(queries)
         
-        # Устанавливаем длительность для callback
+        # Устанавливаем количество запросов для расчёта прогресса
         if self._metrics_callback:
-            self._metrics_callback.set_duration(duration)
+            self._metrics_callback.set_total_queries(total_queries)
             await self._metrics_callback.on_test_start()
         
         # Прогрев (если указан)
@@ -291,9 +292,13 @@ class LoadTester:
                         await asyncio.sleep(0.1)
             await asyncio.sleep(warmup_time)
         
-        total_queries = len(queries)
         for idx, query in enumerate(queries):
             print(f"Тестирование запроса: {query['name']} ({idx + 1}/{total_queries})")
+            
+            # Обновляем прогресс
+            if self._metrics_callback:
+                self._metrics_callback.set_current_query(idx + 1)
+            
             await self._emit_status("running", f"Тестирование: {query['name']} ({idx + 1}/{total_queries})")
             
             comparison = await self.run_comparison_test(
@@ -314,8 +319,7 @@ class LoadTester:
             )
             summary = {
                 'total_transactions': total_transactions,
-                'overall_tps': total_transactions / duration if duration > 0 else 0,
-                'total_duration': duration
+                'overall_tps': total_transactions / total_queries if total_queries > 0 else 0,
             }
             await self._metrics_callback.on_test_complete(summary)
         

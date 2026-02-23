@@ -286,10 +286,6 @@ export function DashboardsPage() {
                     <Timer className="h-3 w-3" />
                     Прошло: {formatTime(elapsedSeconds)}
                   </span>
-                  <span className="flex items-center gap-1">
-                    <Clock className="h-3 w-3" />
-                    Осталось: {formatTime(remainingSeconds)}
-                  </span>
                 </div>
                 {statusMessage && (
                   <span className="text-primary">{statusMessage}</span>

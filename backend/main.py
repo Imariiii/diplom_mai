@@ -118,10 +118,10 @@ class TestRequest(BaseModel):
     query_id: Optional[str] = None
     db_types: Optional[List[str]] = ["mysql", "postgresql"]
     iterations: int = 10
-    duration: Optional[int] = 60           # Длительность теста в секундах
     virtual_users: Optional[int] = 10      # Количество виртуальных пользователей
     scenario: Optional[str] = "mixed_light" # Сценарий тестирования
     warmup_time: Optional[int] = 5         # Время прогрева в секундах
+    test_name: Optional[str] = None        # Название теста
 
 
 class TestResult(BaseModel):
@@ -228,6 +228,9 @@ async def run_single_test(request: TestRequest):
 async def run_full_test(request: TestRequest):
     """Запуск полного набора тестов с сохранением результатов"""
     try:
+        import time
+        start_time = time.time()
+        
         # Генерируем ID теста
         test_id = result_saver.generate_test_id()
         
@@ -235,7 +238,6 @@ async def run_full_test(request: TestRequest):
         config = {
             'db_types': request.db_types,
             'iterations': request.iterations,
-            'duration': request.duration,
             'virtual_users': request.virtual_users,
             'scenario': request.scenario,
             'warmup_time': request.warmup_time
@@ -245,11 +247,13 @@ async def run_full_test(request: TestRequest):
         results = await tester.run_full_test_suite(
             request.db_types,
             request.iterations,
-            duration=request.duration,
             virtual_users=request.virtual_users,
             scenario=request.scenario,
             warmup_time=request.warmup_time
         )
+        
+        end_time = time.time()
+        actual_duration = end_time - start_time
         
         # Сбор системных и СУБД метрик
         system_metrics = {}
@@ -277,7 +281,6 @@ async def run_full_test(request: TestRequest):
         
         # Подсчет общей статистики
         total_transactions = 0
-        total_duration = request.duration or 60
         
         for result in results:
             for db_type, stats in result.get('comparison', {}).items():
@@ -285,8 +288,8 @@ async def run_full_test(request: TestRequest):
         
         summary = {
             'total_transactions': total_transactions,
-            'overall_tps': total_transactions / total_duration if total_duration > 0 else 0,
-            'total_duration': total_duration
+            'overall_tps': total_transactions / actual_duration if actual_duration > 0 else 0,
+            'total_duration': actual_duration
         }
         
         # Сохраняем в БД истории
@@ -326,9 +329,9 @@ async def run_full_test(request: TestRequest):
             },
             "saved_files": saved_files,
             "summary": {
-                "total_duration": total_duration,
+                "total_duration": actual_duration,
                 "total_transactions": total_transactions,
-                "overall_tps": total_transactions / total_duration if total_duration > 0 else 0
+                "overall_tps": total_transactions / actual_duration if actual_duration > 0 else 0
             }
         }
     except Exception as e:
@@ -506,7 +509,6 @@ class AsyncTestRequest(BaseModel):
     query_id: Optional[str] = None
     db_types: Optional[List[str]] = ["mysql", "postgresql"]
     iterations: int = 10
-    duration: Optional[int] = 60
     virtual_users: Optional[int] = 10
     scenario: Optional[str] = "mixed_light"
     warmup_time: Optional[int] = 5
@@ -568,10 +570,11 @@ async def run_async_test(request: AsyncTestRequest, background_tasks: Background
 
 async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
     """Фоновая задача для выполнения теста с WebSocket стримингом"""
+    import time
+    start_time = time.time()
     
     # Создаём callback для streaming
     streaming_callback = TestStreamingCallback(test_id, manager)
-    streaming_callback.set_duration(request.duration or 60)
     
     # Создаём новый экземпляр тестера для этого теста
     test_tester = LoadTester()
@@ -586,17 +589,18 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         results = await test_tester.run_full_test_suite(
             db_types=request.db_types,
             iterations=request.iterations,
-            duration=request.duration,
             virtual_users=request.virtual_users,
             scenario=request.scenario,
             warmup_time=request.warmup_time
         )
         
+        end_time = time.time()
+        actual_duration = end_time - start_time
+        
         # Сохраняем результаты
         config = {
             'db_types': request.db_types,
             'iterations': request.iterations,
-            'duration': request.duration,
             'virtual_users': request.virtual_users,
             'scenario': request.scenario,
             'warmup_time': request.warmup_time
@@ -634,8 +638,8 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         
         summary = {
             'total_transactions': total_transactions,
-            'overall_tps': total_transactions / (request.duration or 60),
-            'total_duration': request.duration or 60
+            'overall_tps': total_transactions / actual_duration if actual_duration > 0 else 0,
+            'total_duration': actual_duration
         }
         
         # Сохраняем в БД истории

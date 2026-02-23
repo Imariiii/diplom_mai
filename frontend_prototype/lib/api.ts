@@ -23,10 +23,10 @@ export interface TestRequest {
   query_id?: string | null
   db_types?: string[]
   iterations?: number
-  duration?: number           // Длительность теста в секундах
   virtual_users?: number      // Количество виртуальных пользователей
   scenario?: TestScenario     // Сценарий тестирования
   warmup_time?: number        // Время прогрева в секундах
+  test_name?: string          // Название теста
 }
 
 export interface TestStats {

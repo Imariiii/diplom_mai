@@ -171,14 +171,27 @@ class TestStreamingCallback:
         self.test_id = test_id
         self.manager = connection_manager
         self.start_time = datetime.now()
-        self.total_duration = 60  # По умолчанию
+        self.total_queries = 1  # Общее количество запросов для теста
+        self.current_query = 0  # Текущий обрабатываемый запрос
         self.metrics_buffer: List[TestMetricsUpdate] = []
         self.buffer_size = 10
         self._lock = asyncio.Lock()
     
+    def set_total_queries(self, total: int):
+        """Установить общее количество запросов для расчёта прогресса"""
+        self.total_queries = max(1, total)
+    
+    def set_current_query(self, current: int):
+        """Установить текущий обрабатываемый запрос"""
+        self.current_query = current
+    
     def set_duration(self, duration: int):
-        """Установить общую длительность теста"""
-        self.total_duration = duration
+        """Устаревший метод, оставлен для совместимости"""
+        pass
+    
+    def _calculate_progress(self) -> float:
+        """Рассчитать прогресс на основе обработанных запросов"""
+        return min(100, (self.current_query / self.total_queries) * 100) if self.total_queries > 0 else 0
     
     async def on_metrics(
         self,
@@ -197,8 +210,7 @@ class TestStreamingCallback:
         """Callback вызываемый при получении новых метрик"""
         now = datetime.now()
         elapsed = (now - self.start_time).total_seconds()
-        remaining = max(0, self.total_duration - elapsed)
-        progress = min(100, (elapsed / self.total_duration) * 100) if self.total_duration > 0 else 0
+        progress = self._calculate_progress()
         
         update = TestMetricsUpdate(
             test_id=self.test_id,
@@ -217,16 +229,14 @@ class TestStreamingCallback:
             network_out=network_out,
             progress=progress,
             elapsed_seconds=int(elapsed),
-            remaining_seconds=int(remaining)
+            remaining_seconds=0  # Не можем предсказать без duration
         )
         
-        # Отправляем сразу или буферизируем
         await self.manager.send_metrics_update(update)
     
     async def on_status_change(self, status: str, message: str = None):
         """Callback при изменении статуса теста"""
-        elapsed = (datetime.now() - self.start_time).total_seconds()
-        progress = min(100, (elapsed / self.total_duration) * 100) if self.total_duration > 0 else 0
+        progress = self._calculate_progress()
         
         if status == "completed":
             progress = 100
@@ -243,13 +253,16 @@ class TestStreamingCallback:
     async def on_test_start(self):
         """Вызывается при начале теста"""
         self.start_time = datetime.now()
+        self.current_query = 0
         await self.on_status_change("running", "Тестирование начато")
     
     async def on_test_complete(self, summary: Dict[str, Any] = None):
         """Вызывается при завершении теста"""
+        self.current_query = self.total_queries
         message = "Тестирование завершено"
         if summary:
-            message += f". TPS: {summary.get('overall_tps', 0):.2f}"
+            actual_duration = (datetime.now() - self.start_time).total_seconds()
+            message += f". Длительность: {actual_duration:.1f} сек, TPS: {summary.get('overall_tps', 0):.2f}"
         await self.on_status_change("completed", message)
     
     async def on_test_error(self, error: str):

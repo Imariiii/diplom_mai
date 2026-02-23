@@ -27,6 +27,22 @@ export function ReportsPage() {
 
   const latestTest = currentTest?.status === "completed" ? currentTest : testHistory[testHistory.length - 1]
 
+  // Вычисляем длительность теста
+  const getTestDuration = () => {
+    if (latestTest?.endTime && latestTest?.startTime) {
+      const durationMs = new Date(latestTest.endTime).getTime() - new Date(latestTest.startTime).getTime()
+      return Math.round(durationMs / 1000) // в секундах
+    }
+    return null
+  }
+  
+  const testDuration = getTestDuration()
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return mins > 0 ? `${mins} мин ${secs} сек` : `${secs} сек`
+  }
+
   if (!latestTest || !latestTest.results) {
     return (
       <div className="p-6 flex items-center justify-center h-[calc(100vh-3.5rem)]">
@@ -114,7 +130,7 @@ export function ReportsPage() {
             <div>
               <CardTitle>{latestTest.name}</CardTitle>
               <CardDescription>
-                {latestTest.startTime.toLocaleString("ru")} • Длительность: {latestTest.config.testDuration} сек
+                {latestTest.startTime.toLocaleString("ru")} • Длительность: {testDuration ? formatDuration(testDuration) : "N/A"}
               </CardDescription>
             </div>
             <Badge className="bg-primary/10 text-primary border-primary/20">
