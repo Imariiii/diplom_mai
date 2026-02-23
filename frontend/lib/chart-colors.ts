@@ -31,6 +31,13 @@ export const getDbName = (dbId: string): string => {
 export const CHART_COLORS = {
   axis: "#9CA3AF",      // Цвет осей
   text: "#ffffff",      // Цвет текста
-  success: "#22c55e",   // Зелёный для успешных операций
-  error: "#ef4444",     // Красный для ошибок
+  success: "#22c55e",  // Зелёный для успешных операций
+  error: "#ef4444",    // Красный для ошибок
+}
+
+// Цвета для метрик (Среднее, P95, P99)
+export const METRIC_COLORS = {
+  avg: "#22c55e",    // Зелёный - Среднее
+  p95: "#f59e0b",   // Оранжевый - P95
+  p99: "#ef4444",   // Красный - P99
 }

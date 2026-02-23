@@ -4,7 +4,7 @@ import { FileText, TrendingUp, TrendingDown, Minus, Award, AlertTriangle } from 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useAppStore } from "@/lib/store"
-import { DB_NAMES, getDbColor, CHART_COLORS } from "@/lib/chart-colors"
+import { DB_NAMES, getDbColor, CHART_COLORS, METRIC_COLORS } from "@/lib/chart-colors"
 import {
   BarChart,
   Bar,
@@ -217,24 +217,24 @@ export function ReportsPage() {
                       backgroundColor: "hsl(var(--card))",
                       border: "1px solid hsl(var(--border))",
                       borderRadius: "8px",
-                      color: CHART_COLORS.text,
                     }}
-                    labelStyle={{ color: CHART_COLORS.text }}
+                    itemStyle={{ color: "hsl(var(--foreground))" }}
+                    labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
                   />
-                  <Legend wrapperStyle={{ color: CHART_COLORS.text }} />
-                  <Bar dataKey="Ср. время отклика" name="Среднее">
+                  <Legend wrapperStyle={{ color: CHART_COLORS.text, paddingTop: "10px" }} />
+                  <Bar dataKey="Ср. время отклика" name="Среднее" fill={METRIC_COLORS.avg}>
                     {comparisonData.map((entry, index) => (
-                      <Cell key={`cell-avg-${index}`} fill={entry.color} />
+                      <Cell key={`cell-avg-${index}`} fill={METRIC_COLORS.avg} />
                     ))}
                   </Bar>
-                  <Bar dataKey="P95" name="P95">
+                  <Bar dataKey="P95" name="P95" fill={METRIC_COLORS.p95}>
                     {comparisonData.map((entry, index) => (
-                      <Cell key={`cell-p95-${index}`} fill={entry.color} fillOpacity={0.6} />
+                      <Cell key={`cell-p95-${index}`} fill={METRIC_COLORS.p95} />
                     ))}
                   </Bar>
-                  <Bar dataKey="P99" name="P99">
+                  <Bar dataKey="P99" name="P99" fill={METRIC_COLORS.p99}>
                     {comparisonData.map((entry, index) => (
-                      <Cell key={`cell-p99-${index}`} fill={entry.color} fillOpacity={0.3} />
+                      <Cell key={`cell-p99-${index}`} fill={METRIC_COLORS.p99} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -269,9 +269,9 @@ export function ReportsPage() {
                       backgroundColor: "hsl(var(--card))",
                       border: "1px solid hsl(var(--border))",
                       borderRadius: "8px",
-                      color: CHART_COLORS.text,
                     }}
-                    labelStyle={{ color: CHART_COLORS.text }}
+                    itemStyle={{ color: "hsl(var(--foreground))" }}
+                    labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
                   />
                   <Bar dataKey="throughput" name="req/s">
                     {throughputData.map((entry, index) => (

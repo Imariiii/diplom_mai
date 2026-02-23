@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { apiClient, type HistoryTestRun, type HistoryTestResult } from "@/lib/api"
-import { DB_NAMES, getDbColor, CHART_COLORS } from "@/lib/chart-colors"
+import { DB_NAMES, getDbColor, CHART_COLORS, METRIC_COLORS } from "@/lib/chart-colors"
 import {
   BarChart,
   Bar,
@@ -286,17 +286,18 @@ export function HistoryPage() {
                         <YAxis stroke={CHART_COLORS.axis} fontSize={12} tick={{ fill: CHART_COLORS.text }} />
                         <Tooltip
                           contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }}
-                          labelStyle={{ color: CHART_COLORS.text }}
+                          itemStyle={{ color: "hsl(var(--foreground))" }}
+                          labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
                         />
-                        <Legend wrapperStyle={{ color: CHART_COLORS.text }} />
-                        <Bar dataKey="avg" name="Среднее">
+                        <Legend wrapperStyle={{ color: CHART_COLORS.text, paddingTop: "10px" }} />
+                        <Bar dataKey="avg" name="Среднее" fill={METRIC_COLORS.avg}>
                           {selectedTest.results.map((r, i) => (
-                            <Cell key={i} fill={getDbColor(r.db_type)} />
+                            <Cell key={i} fill={METRIC_COLORS.avg} />
                           ))}
                         </Bar>
-                        <Bar dataKey="p95" name="P95" fillOpacity={0.6}>
+                        <Bar dataKey="p95" name="P95" fill={METRIC_COLORS.p95}>
                           {selectedTest.results.map((r, i) => (
-                            <Cell key={i} fill={getDbColor(r.db_type)} />
+                            <Cell key={i} fill={METRIC_COLORS.p95} />
                           ))}
                         </Bar>
                       </BarChart>
@@ -325,11 +326,12 @@ export function HistoryPage() {
                         <YAxis stroke={CHART_COLORS.axis} fontSize={12} tick={{ fill: CHART_COLORS.text }} />
                         <Tooltip
                           contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }}
-                          labelStyle={{ color: CHART_COLORS.text }}
+                          itemStyle={{ color: "hsl(var(--foreground))" }}
+                          labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
                         />
-                        <Bar dataKey="tps" name="TPS">
+                        <Bar dataKey="tps" name="TPS" fill={CHART_COLORS.success}>
                           {selectedTest.results.map((r, i) => (
-                            <Cell key={i} fill={getDbColor(r.db_type)} />
+                            <Cell key={i} fill={CHART_COLORS.success} />
                           ))}
                         </Bar>
                       </BarChart>
