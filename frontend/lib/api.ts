@@ -246,6 +246,8 @@ class ApiClient {
     status: string
     results?: TestResult[]
     summary?: { total_transactions: number; overall_tps: number; total_duration: number }
+    system_metrics?: Record<string, any>
+    dbms_metrics?: Record<string, any>
     message?: string
   }> {
     return this.request(`/test/async/${testId}/results`)

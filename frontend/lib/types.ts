@@ -134,4 +134,10 @@ export interface TimeSeriesPoint {
   diskIOps: number
   networkIn: number
   networkOut: number
+  
+  // Внутренние метрики СУБД
+  cacheHitRatio: number
+  bufferPoolHitRatio: number
+  lockWaits: number
+  deadlocks: number
 }

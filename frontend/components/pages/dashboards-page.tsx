@@ -107,6 +107,10 @@ export function DashboardsPage() {
 
                 const formattedResults = Object.entries(aggregateByDb).map(([dbType, bucket]) => {
                   const totalTransactions = bucket.successful + bucket.failed
+                  
+                  // Получаем dbms_metrics для этой СУБД из ответа
+                  const dbmsMetricsData = response.dbms_metrics?.[dbType]
+                  
                   return {
                     databaseId: dbType,
                     databaseName: DB_NAMES[dbType] || dbType,
@@ -125,6 +129,15 @@ export function DashboardsPage() {
                       errorCount: bucket.failed,
                       errorRate: totalTransactions > 0 ? (bucket.failed / totalTransactions) * 100 : 0,
                     },
+                    dbmsMetrics: dbmsMetricsData ? {
+                      cacheHitRatio: dbmsMetricsData.cache_hit_ratio || 0,
+                      bufferPoolHitRatio: dbmsMetricsData.buffer_pool_hit_ratio || 0,
+                      lockWaits: dbmsMetricsData.lock_waits || 0,
+                      deadlocks: dbmsMetricsData.deadlocks || 0,
+                      tableSizesMB: dbmsMetricsData.table_sizes_mb || {},
+                      indexSizesMB: dbmsMetricsData.index_sizes_mb || {},
+                      totalDBSizeMB: dbmsMetricsData.total_db_size_mb || 0,
+                    } : undefined,
                     transactionMetrics: {
                       totalTransactions,
                       successfulTransactions: bucket.successful,
@@ -942,6 +955,14 @@ export function DashboardsPage() {
               const result = getResultForDb(dbId)
               const dbmsMetrics = result?.dbmsMetrics
               
+              // Получаем последние значения из realtime данных
+              const getRealtimeDbmsMetric = (metric: string, defaultValue: string = "—") => {
+                const points = realtimeData[dbId]
+                if (!points || points.length === 0) return defaultValue
+                const value = points[points.length - 1][metric as keyof typeof points[number]]
+                return typeof value === "number" ? value.toFixed(1) : defaultValue
+              }
+              
               return (
                 <Card key={dbId} className="bg-card border-border">
                   <CardHeader>
@@ -955,25 +976,25 @@ export function DashboardsPage() {
                       <div className="p-3 bg-muted rounded-lg">
                         <div className="text-sm text-muted-foreground">Cache Hit Ratio</div>
                         <div className="text-2xl font-mono text-foreground">
-                          {dbmsMetrics?.cacheHitRatio?.toFixed(1) || "—"}%
+                          {dbmsMetrics?.cacheHitRatio?.toFixed(1) || getRealtimeDbmsMetric("cacheHitRatio")}%
                         </div>
                       </div>
                       <div className="p-3 bg-muted rounded-lg">
                         <div className="text-sm text-muted-foreground">Buffer Pool Hit</div>
                         <div className="text-2xl font-mono text-foreground">
-                          {dbmsMetrics?.bufferPoolHitRatio?.toFixed(1) || "—"}%
+                          {dbmsMetrics?.bufferPoolHitRatio?.toFixed(1) || getRealtimeDbmsMetric("bufferPoolHitRatio")}%
                         </div>
                       </div>
                       <div className="p-3 bg-muted rounded-lg">
                         <div className="text-sm text-muted-foreground">Ожидание блокировок</div>
                         <div className="text-2xl font-mono text-foreground">
-                          {dbmsMetrics?.lockWaits || "—"}
+                          {dbmsMetrics?.lockWaits ?? getRealtimeDbmsMetric("lockWaits", "0")}
                         </div>
                       </div>
                       <div className="p-3 bg-muted rounded-lg">
                         <div className="text-sm text-muted-foreground">Дедлоки</div>
                         <div className="text-2xl font-mono text-foreground">
-                          {dbmsMetrics?.deadlocks || "—"}
+                          {dbmsMetrics?.deadlocks ?? getRealtimeDbmsMetric("deadlocks", "0")}
                         </div>
                       </div>
                     </div>

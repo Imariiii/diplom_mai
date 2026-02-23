@@ -22,6 +22,10 @@ interface MetricsMessage {
     disk_iops: number
     network_in: number
     network_out: number
+    cache_hit_ratio: number
+    buffer_pool_hit_ratio: number
+    lock_waits: number
+    deadlocks: number
     progress: number
     elapsed_seconds: number
     remaining_seconds: number
@@ -119,6 +123,10 @@ export function useTestWebSocket({
             diskIOps: metricsData.disk_iops,
             networkIn: metricsData.network_in,
             networkOut: metricsData.network_out,
+            cacheHitRatio: metricsData.cache_hit_ratio,
+            bufferPoolHitRatio: metricsData.buffer_pool_hit_ratio,
+            lockWaits: metricsData.lock_waits,
+            deadlocks: metricsData.deadlocks,
           }
           
           // Добавляем в store для отображения на графиках

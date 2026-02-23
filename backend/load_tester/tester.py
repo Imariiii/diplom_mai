@@ -36,7 +36,7 @@ class LoadTester:
         self._status_callback = callback
     
     async def _emit_metrics(
-        self, 
+        self,
         db_type: str, 
         response_time: float, 
         tps: float,
@@ -49,6 +49,9 @@ class LoadTester:
                 # Получаем системные метрики
                 system_metrics = await self.get_system_metrics(db_type)
                 
+                # Получаем внутренние метрики СУБД
+                dbms_metrics = await self.get_dbms_metrics(db_type)
+                
                 await self._metrics_callback.on_metrics(
                     db_type=db_type,
                     response_time=response_time,
@@ -60,7 +63,11 @@ class LoadTester:
                     memory_usage_mb=system_metrics.get('memory_usage_mb', 0),
                     disk_iops=system_metrics.get('disk_iops', 0),
                     network_in=system_metrics.get('network_in_mbps', 0),
-                    network_out=system_metrics.get('network_out_mbps', 0)
+                    network_out=system_metrics.get('network_out_mbps', 0),
+                    cache_hit_ratio=dbms_metrics.get('cache_hit_ratio', 0),
+                    buffer_pool_hit_ratio=dbms_metrics.get('buffer_pool_hit_ratio', 0),
+                    lock_waits=dbms_metrics.get('lock_waits', 0),
+                    deadlocks=dbms_metrics.get('deadlocks', 0)
                 )
             except Exception as e:
                 print(f"Ошибка отправки метрик: {e}")

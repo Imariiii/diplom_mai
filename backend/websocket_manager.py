@@ -31,6 +31,12 @@ class TestMetricsUpdate:
     network_in: float = 0.0
     network_out: float = 0.0
     
+    # Внутренние метрики СУБД
+    cache_hit_ratio: float = 0.0
+    buffer_pool_hit_ratio: float = 0.0
+    lock_waits: int = 0
+    deadlocks: int = 0
+    
     # Прогресс
     progress: float = 0.0  # 0-100
     elapsed_seconds: int = 0
@@ -205,7 +211,11 @@ class TestStreamingCallback:
         memory_usage_mb: float = 0,
         disk_iops: float = 0,
         network_in: float = 0,
-        network_out: float = 0
+        network_out: float = 0,
+        cache_hit_ratio: float = 0,
+        buffer_pool_hit_ratio: float = 0,
+        lock_waits: int = 0,
+        deadlocks: int = 0
     ):
         """Callback вызываемый при получении новых метрик"""
         now = datetime.now()
@@ -227,9 +237,13 @@ class TestStreamingCallback:
             disk_iops=disk_iops,
             network_in=network_in,
             network_out=network_out,
+            cache_hit_ratio=cache_hit_ratio,
+            buffer_pool_hit_ratio=buffer_pool_hit_ratio,
+            lock_waits=lock_waits,
+            deadlocks=deadlocks,
             progress=progress,
             elapsed_seconds=int(elapsed),
-            remaining_seconds=0  # Не можем предсказать без duration
+            remaining_seconds=0
         )
         
         await self.manager.send_metrics_update(update)
