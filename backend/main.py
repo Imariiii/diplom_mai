@@ -14,17 +14,18 @@ import os
 # Добавляем корневую директорию в путь
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from load_tester.tester import LoadTester
-from visualizer.charts import ResultVisualizer
-from visualizer.result_saver import ResultSaver
-from database.connection import DatabaseConnection
-from database.queries import QueryManager
+from backend.load_tester.tester import LoadTester
+from backend.visualizer.charts import ResultVisualizer
+from backend.visualizer.result_saver import ResultSaver
+from backend.database.connection import DatabaseConnection
+from backend.database.queries import QueryManager
 from backend.websocket_manager import manager, TestStreamingCallback
 
 app = FastAPI(title="Database Load Testing API", version="2.0.0")
 
-# Определяем project_root здесь, до использования
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Определяем пути относительно расположения файлов
+backend_root = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(backend_root)  # code/
 
 def get_history_db_url():
     """Получить URL для базы данных истории из конфига"""
@@ -37,7 +38,7 @@ def get_history_db_url():
     
     try:
         import yaml
-        config_path = os.path.join(project_root, "config", "database_config.yaml")
+        config_path = os.path.join(backend_root, "config", "database_config.yaml")
         print(f"[HISTORY_DB] Чтение конфига: {config_path}")
         
         if os.path.exists(config_path):
@@ -69,7 +70,7 @@ def get_history_db_url():
 
 print("[HISTORY_DB] === ИНИЦИАЛИЗАЦИЯ БД ИСТОРИИ ===")
 try:
-    from database.repository import TestRepository
+    from backend.database.repository import TestRepository
     HISTORY_DB_URL = get_history_db_url()
     print(f"[HISTORY_DB] URL получен: {HISTORY_DB_URL is not None}")
     

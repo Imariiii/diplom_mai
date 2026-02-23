@@ -14,9 +14,9 @@ class ResultVisualizer:
     
     def __init__(self, output_dir: str = None):
         if output_dir is None:
-            # Определяем путь относительно корня проекта
+            # Определяем путь относительно корня проекта (code/)
             current_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(current_dir)
+            project_root = os.path.dirname(os.path.dirname(current_dir))  # Поднимаемся на 2 уровня выше из backend/visualizer/
             output_dir = os.path.join(project_root, "results", "charts")
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)

@@ -8,8 +8,8 @@ import psutil
 from typing import Dict, List, Optional, Callable, Any
 from datetime import datetime
 from sqlalchemy import text
-from database.connection import DatabaseConnection
-from database.queries import QueryManager
+from backend.database.connection import DatabaseConnection
+from backend.database.queries import QueryManager
 
 
 class LoadTester:

@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, desc
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import SQLAlchemyError
 
-from database.models import Base, TestRun, TestResult, TimeSeries
+from backend.database.models import Base, TestRun, TestResult, TimeSeries
 
 
 def get_local_now():
