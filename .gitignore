@@ -28,4 +28,4 @@ results/
 *.log
 *.db
 *.sqlite
-
+description/
