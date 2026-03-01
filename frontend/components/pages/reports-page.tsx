@@ -95,16 +95,21 @@ export function ReportsPage() {
     },
   ]
 
-  // Определяем лучшую СУБД
-  const bestDb = latestTest.results.reduce((best, current) => {
-    const bestScore = best.metrics.avgResponseTime + best.metrics.errorRate * 10
-    const currentScore = current.metrics.avgResponseTime + current.metrics.errorRate * 10
-    return currentScore < bestScore ? current : best
-  })
+  // Определяем лучшую СУБД (если есть результаты)
+  const bestDb = latestTest.results.length > 0
+    ? latestTest.results.reduce((best, current) => {
+        const bestScore = best.metrics.avgResponseTime + best.metrics.errorRate * 10
+        const currentScore = current.metrics.avgResponseTime + current.metrics.errorRate * 10
+        return currentScore < bestScore ? current : best
+      })
+    : null
 
   const getPerformanceIcon = (db: string) => {
     const result = latestTest.results?.find((r) => r.databaseId === db)
     if (!result) return <Minus className="h-4 w-4" />
+    
+    // Если нет лучшей БД (нет результатов), возвращаем нейтральную иконку
+    if (!bestDb) return <Minus className="h-4 w-4 text-muted-foreground" />
 
     if (result.databaseId === bestDb.databaseId) {
       return <TrendingUp className="h-4 w-4 text-primary" />
@@ -133,10 +138,12 @@ export function ReportsPage() {
                 {latestTest.startTime.toLocaleString("ru")} • Длительность: {testDuration ? formatDuration(testDuration) : "N/A"}
               </CardDescription>
             </div>
-            <Badge className="bg-primary/10 text-primary border-primary/20">
-              <Award className="h-3 w-3 mr-1" />
-              Лучший: {DB_NAMES[bestDb.databaseId]}
-            </Badge>
+            {bestDb && (
+              <Badge className="bg-primary/10 text-primary border-primary/20">
+                <Award className="h-3 w-3 mr-1" />
+                Лучший: {DB_NAMES[bestDb.databaseId]}
+              </Badge>
+            )}
           </div>
         </CardHeader>
       </Card>
@@ -148,7 +155,7 @@ export function ReportsPage() {
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <span style={{ color: getDbColor(result.databaseId) }}>{DB_NAMES[result.databaseId]}</span>
-                  {result.databaseId === bestDb.databaseId && <Award className="h-4 w-4 text-primary" />}
+                  {bestDb && result.databaseId === bestDb.databaseId && <Award className="h-4 w-4 text-primary" />}
                 </CardTitle>
                 {getPerformanceIcon(result.databaseId)}
               </div>

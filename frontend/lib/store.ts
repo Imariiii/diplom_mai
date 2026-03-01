@@ -4,8 +4,8 @@ import { create } from "zustand"
 import type { TestConfig, TestRun, TimeSeriesPoint } from "./types"
 
 interface AppState {
-  currentPage: "home" | "config" | "dashboards" | "reports" | "history"
-  setCurrentPage: (page: "home" | "config" | "dashboards" | "reports" | "history") => void
+  currentPage: "home" | "config" | "scenarios" | "dashboards" | "reports" | "history"
+  setCurrentPage: (page: "home" | "config" | "scenarios" | "dashboards" | "reports" | "history") => void
   sidebarOpen: boolean
   setSidebarOpen: (open: boolean) => void
 

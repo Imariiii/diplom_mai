@@ -1,6 +1,6 @@
 "use client"
 
-import { X, Home, Settings, BarChart3, FileText, History } from "lucide-react"
+import { X, Home, Settings, BarChart3, FileText, History, Database } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/lib/store"
 import { cn } from "@/lib/utils"
@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 const navItems = [
   { id: "home", label: "Начальная страница", icon: Home },
   { id: "config", label: "Конфигурация и запуск", icon: Settings },
+  { id: "scenarios", label: "Сценарии тестирования", icon: Database },
   { id: "dashboards", label: "Дашборды", icon: BarChart3 },
   { id: "reports", label: "Отчёты", icon: FileText },
   { id: "history", label: "История тестов", icon: History },

@@ -493,6 +493,631 @@ class LoadTester:
         
         return metrics
     
+    async def execute_scenario_query(
+        self,
+        db_type: str,
+        sql_template: str,
+        params_config: List[Dict],
+        scenario_name: str
+    ) -> Dict:
+        """Выполнение запроса сценария с подстановкой параметров"""
+        start_time = time.time()
+        error = None
+        rows_count = 0
+
+        # Подстановка параметров
+        param_values = {}
+        for param_config in params_config:
+            param_name = param_config['param_name']
+            param_type = param_config['param_type']
+            param_values[param_name] = await self._generate_param_value(
+                db_type, param_type, param_config
+            )
+
+        # Формируем финальный SQL
+        try:
+            final_sql = sql_template.format(**param_values)
+        except KeyError as e:
+            error = f"Missing parameter: {e}"
+            final_sql = sql_template
+
+        try:
+            engine = self.db_connection.get_engine(db_type)
+            with engine.connect() as conn:
+                result = conn.execute(text(final_sql))
+                rows_count = len(result.fetchall()) if result.returns_rows else 0
+                conn.commit()
+        except Exception as e:
+            error = str(e)
+
+        end_time = time.time()
+        execution_time = (end_time - start_time) * 1000
+
+        return {
+            'scenario': scenario_name,
+            'db_type': db_type,
+            'sql': final_sql[:200] + '...' if len(final_sql) > 200 else final_sql,
+            'execution_time_ms': execution_time,
+            'rows_count': rows_count,
+            'error': error,
+            'timestamp': datetime.now().isoformat()
+        }
+
+    async def _generate_param_value(
+        self,
+        db_type: str,
+        param_type: str,
+        param_config: Dict
+    ) -> Any:
+        """Генерация значения параметра"""
+        import random
+        import uuid
+
+        if param_type == 'random_int':
+            min_val = param_config.get('min_value', 1)
+            max_val = param_config.get('max_value', 1000)
+            return random.randint(min_val, max_val)
+
+        elif param_type == 'random_from_table':
+            table = param_config.get('table_ref', '')
+            column = param_config.get('column_ref', '')
+            return await self._get_random_value_from_table(db_type, table, column)
+
+        elif param_type == 'sequential_int':
+            # Для sequential используем текущее время как seed
+            return int(datetime.now().timestamp()) % 100000
+
+        elif param_type == 'uuid':
+            return str(uuid.uuid4())
+
+        elif param_type == 'fixed':
+            return param_config.get('fixed_value', '')
+
+        elif param_type == 'random_string':
+            length = param_config.get('string_length', 10)
+            chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+            return ''.join(random.choice(chars) for _ in range(length))
+
+        elif param_type == 'random_date':
+            from datetime import timedelta
+            days = random.randint(0, 3650)  # ~10 years
+            base_date = datetime(2000, 1, 1)
+            return (base_date + timedelta(days=days)).strftime('%Y-%m-%d')
+
+        else:
+            return 1  # Default fallback
+
+    async def _get_random_value_from_table(
+        self,
+        db_type: str,
+        table: str,
+        column: str
+    ) -> Any:
+        """Получение случайного значения из таблицы"""
+        try:
+            engine = self.db_connection.get_engine(db_type)
+            with engine.connect() as conn:
+                result = conn.execute(text(f"""
+                    SELECT {column} FROM {table}
+                    ORDER BY RANDOM() LIMIT 1
+                """))
+                row = result.fetchone()
+                return row[0] if row else 1
+        except Exception as e:
+            print(f"Error getting random value: {e}")
+            return 1
+
+    async def run_scenario_test(
+        self,
+        db_type: str,
+        scenario: Dict,
+        iterations: int = 10,
+        virtual_users: int = 1
+    ) -> Dict:
+        """Запуск теста на основе сценария"""
+        import random
+
+        queries = scenario.get('queries', [])
+        if not queries:
+            return {
+                'scenario': scenario.get('name', 'unknown'),
+                'db_type': db_type,
+                'error': 'No queries in scenario',
+                'successful': 0,
+                'failed': 0
+            }
+
+        results = []
+        start_time = time.time()
+
+        # Создаем взвешенный список запросов
+        weighted_queries = []
+        for query in queries:
+            weight = query.get('weight', 1)
+            for _ in range(weight):
+                weighted_queries.append(query)
+
+        last_emit_time = start_time
+        recent_times = []
+        recent_successful = 0
+        recent_failed = 0
+
+        for i in range(iterations):
+            # Выбираем случайный запрос из взвешенного списка
+            query = random.choice(weighted_queries)
+
+            result = await self.execute_scenario_query(
+                db_type,
+                query['sql_template'],
+                query.get('params', []),
+                scenario.get('name', 'unknown')
+            )
+            results.append(result)
+
+            if result['error'] is None:
+                recent_times.append(result['execution_time_ms'])
+                recent_successful += 1
+            else:
+                recent_failed += 1
+
+            # Потоковая отправка метрик
+            current_time = time.time()
+            if self._is_streaming and (current_time - last_emit_time) >= self._streaming_interval:
+                if recent_times:
+                    avg_response_time = statistics.mean(recent_times)
+                    tps = (recent_successful + recent_failed) / (current_time - last_emit_time)
+
+                    await self._emit_metrics(
+                        db_type=db_type,
+                        response_time=avg_response_time,
+                        tps=tps,
+                        successful=recent_successful,
+                        failed=recent_failed
+                    )
+
+                recent_times = []
+                recent_successful = 0
+                recent_failed = 0
+                last_emit_time = current_time
+
+            await asyncio.sleep(0.01)
+
+        end_time = time.time()
+        total_test_time = end_time - start_time
+
+        # Статистика
+        execution_times = [r['execution_time_ms'] for r in results if r['error'] is None]
+        successful_count = len(execution_times)
+        failed_count = len(results) - len(execution_times)
+
+        stats = {
+            'scenario': scenario.get('name', 'unknown'),
+            'scenario_type': scenario.get('scenario_type', 'unknown'),
+            'db_type': db_type,
+            'iterations': iterations,
+            'virtual_users': virtual_users,
+            'successful': successful_count,
+            'failed': failed_count,
+            'avg_time_ms': statistics.mean(execution_times) if execution_times else 0,
+            'min_time_ms': min(execution_times) if execution_times else 0,
+            'max_time_ms': max(execution_times) if execution_times else 0,
+            'p95_time_ms': self.calculate_percentile(execution_times, 95) if execution_times else 0,
+            'tps': successful_count / total_test_time if total_test_time > 0 else 0,
+            'error_rate': (failed_count / iterations) * 100 if iterations > 0 else 0,
+            'timestamp': datetime.now().isoformat()
+        }
+
+        return stats
+
+    async def run_full_scenario_test_suite(
+        self,
+        scenario_id: str,
+        db_types: List[str] = None,
+        iterations: int = 100,
+        virtual_users: int = 10,
+        warmup_time: int = 5,
+        scenario_repository = None
+    ) -> List[Dict]:
+        """Запуск полного теста на основе сценария из БД"""
+        from backend.database.repository import ScenarioRepository
+
+        if db_types is None:
+            db_types = ['mysql', 'postgresql']
+
+        # Загружаем сценарий - используем переданный репозиторий или создаем новый
+        if scenario_repository is not None:
+            scenario_repo = scenario_repository
+        else:
+            # Fallback: создаем репозиторий с дефолтным URL
+            import os
+            db_url = os.getenv('HISTORY_DATABASE_URL', 'postgresql://postgres:postgres@localhost:5433/test_history')
+            scenario_repo = ScenarioRepository(db_url)
+        
+        scenario = scenario_repo.get_scenario_for_execution(scenario_id)
+
+        if not scenario:
+            raise ValueError(f"Scenario {scenario_id} not found")
+
+        all_results = []
+
+        # Устанавливаем количество БД для прогресса
+        if self._metrics_callback:
+            self._metrics_callback.set_total_queries(len(db_types))
+            await self._metrics_callback.on_test_start()
+
+        # Прогрев
+        if warmup_time > 0:
+            print(f"Прогрев системы ({warmup_time} сек)...")
+            await self._emit_status("running", f"Прогрев системы ({warmup_time} сек)...")
+
+            queries = scenario.get('queries', [])
+            if queries:
+                warmup_query = queries[0]
+                for db_type in db_types:
+                    for _ in range(min(5, iterations // 10)):
+                        await self.execute_scenario_query(
+                            db_type,
+                            warmup_query['sql_template'],
+                            warmup_query.get('params', []),
+                            scenario['name']
+                        )
+                        await asyncio.sleep(0.1)
+            await asyncio.sleep(warmup_time)
+
+        # Запуск тестов для каждой БД
+        for idx, db_type in enumerate(db_types):
+            print(f"Тестирование {db_type} со сценарием {scenario['name']}...")
+
+            if self._metrics_callback:
+                self._metrics_callback.set_current_query(idx + 1)
+
+            await self._emit_status(
+                "running",
+                f"Тестирование {db_type}: {scenario['name']} ({idx + 1}/{len(db_types)})"
+            )
+
+            stats = await self.run_scenario_test(
+                db_type,
+                scenario,
+                iterations=iterations,
+                virtual_users=virtual_users
+            )
+
+            all_results.append({
+                'db_type': db_type,
+                'scenario': scenario['name'],
+                'stats': stats
+            })
+
+        # Уведомляем о завершении
+        if self._metrics_callback:
+            total_transactions = sum(
+                result.get('stats', {}).get('successful', 0)
+                for result in all_results
+            )
+            summary = {
+                'total_transactions': total_transactions,
+                'overall_tps': total_transactions / len(db_types) if db_types else 0,
+            }
+            await self._metrics_callback.on_test_complete(summary)
+
+        return all_results
+
+    async def execute_scenario_query(
+        self,
+        db_type: str,
+        sql_template: str,
+        params_config: List[Dict],
+        scenario_name: str
+    ) -> Dict:
+        """Выполнение запроса сценария с подстановкой параметров"""
+        import random
+        import uuid
+
+        start_time = time.time()
+        error = None
+        rows_count = 0
+
+        # Подстановка параметров
+        param_values = {}
+        for param_config in params_config:
+            param_name = param_config['param_name']
+            param_type = param_config['param_type']
+            param_values[param_name] = await self._generate_param_value(
+                db_type, param_type, param_config
+            )
+
+        # Формируем финальный SQL
+        try:
+            final_sql = sql_template.format(**param_values)
+        except KeyError as e:
+            error = f"Missing parameter: {e}"
+            final_sql = sql_template
+
+        try:
+            engine = self.db_connection.get_engine(db_type)
+            with engine.connect() as conn:
+                result = conn.execute(text(final_sql))
+                rows_count = len(result.fetchall()) if result.returns_rows else 0
+                conn.commit()
+        except Exception as e:
+            error = str(e)
+
+        end_time = time.time()
+        execution_time = (end_time - start_time) * 1000
+
+        return {
+            'scenario': scenario_name,
+            'db_type': db_type,
+            'sql': final_sql[:200] + '...' if len(final_sql) > 200 else final_sql,
+            'execution_time_ms': execution_time,
+            'rows_count': rows_count,
+            'error': error,
+            'timestamp': datetime.now().isoformat()
+        }
+
+    async def _generate_param_value(
+        self,
+        db_type: str,
+        param_type: str,
+        param_config: Dict
+    ) -> Any:
+        """Генерация значения параметра"""
+        import random
+        import uuid
+        from datetime import timedelta
+
+        if param_type == 'random_int':
+            min_val = param_config.get('min_value', 1)
+            max_val = param_config.get('max_value', 1000)
+            return random.randint(min_val, max_val)
+
+        elif param_type == 'random_from_table':
+            table = param_config.get('table_ref', '')
+            column = param_config.get('column_ref', '')
+            return await self._get_random_value_from_table(db_type, table, column)
+
+        elif param_type == 'sequential_int':
+            # Для sequential используем текущее время как seed
+            return int(datetime.now().timestamp()) % 100000
+
+        elif param_type == 'uuid':
+            return str(uuid.uuid4())
+
+        elif param_type == 'fixed':
+            return param_config.get('fixed_value', '')
+
+        elif param_type == 'random_string':
+            length = param_config.get('string_length', 10)
+            chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+            return ''.join(random.choice(chars) for _ in range(length))
+
+        elif param_type == 'random_date':
+            days = random.randint(0, 3650)  # ~10 years
+            base_date = datetime(2000, 1, 1)
+            return (base_date + timedelta(days=days)).strftime('%Y-%m-%d')
+
+        else:
+            return 1  # Default fallback
+
+    async def _get_random_value_from_table(
+        self,
+        db_type: str,
+        table: str,
+        column: str
+    ) -> Any:
+        """Получение случайного значения из таблицы"""
+        try:
+            engine = self.db_connection.get_engine(db_type)
+            with engine.connect() as conn:
+                # PostgreSQL использует RANDOM(), MySQL использует RAND()
+                order_func = "RANDOM()" if db_type == "postgresql" else "RAND()"
+                result = conn.execute(text(f"""
+                    SELECT {column} FROM {table}
+                    ORDER BY {order_func} LIMIT 1
+                """))
+                row = result.fetchone()
+                return row[0] if row else 1
+        except Exception as e:
+            print(f"Error getting random value: {e}")
+            return 1
+
+    async def run_scenario_test(
+        self,
+        db_type: str,
+        scenario: Dict,
+        iterations: int = 10,
+        virtual_users: int = 1
+    ) -> Dict:
+        """Запуск теста на основе сценария"""
+        import random
+
+        queries = scenario.get('queries', [])
+        if not queries:
+            return {
+                'scenario': scenario.get('name', 'unknown'),
+                'db_type': db_type,
+                'error': 'No queries in scenario',
+                'successful': 0,
+                'failed': 0
+            }
+
+        results = []
+        start_time = time.time()
+
+        # Создаем взвешенный список запросов
+        weighted_queries = []
+        for query in queries:
+            weight = query.get('weight', 1)
+            for _ in range(weight):
+                weighted_queries.append(query)
+
+        last_emit_time = start_time
+        recent_times = []
+        recent_successful = 0
+        recent_failed = 0
+
+        for i in range(iterations):
+            # Выбираем случайный запрос из взвешенного списка
+            query = random.choice(weighted_queries)
+
+            result = await self.execute_scenario_query(
+                db_type,
+                query['sql_template'],
+                query.get('params', []),
+                scenario.get('name', 'unknown')
+            )
+            results.append(result)
+
+            if result['error'] is None:
+                recent_times.append(result['execution_time_ms'])
+                recent_successful += 1
+            else:
+                recent_failed += 1
+
+            # Потоковая отправка метрик
+            current_time = time.time()
+            if self._is_streaming and (current_time - last_emit_time) >= self._streaming_interval:
+                if recent_times:
+                    avg_response_time = statistics.mean(recent_times)
+                    tps = (recent_successful + recent_failed) / (current_time - last_emit_time)
+
+                    await self._emit_metrics(
+                        db_type=db_type,
+                        response_time=avg_response_time,
+                        tps=tps,
+                        successful=recent_successful,
+                        failed=recent_failed
+                    )
+
+                recent_times = []
+                recent_successful = 0
+                recent_failed = 0
+                last_emit_time = current_time
+
+            await asyncio.sleep(0.01)
+
+        end_time = time.time()
+        total_test_time = end_time - start_time
+
+        # Статистика
+        execution_times = [r['execution_time_ms'] for r in results if r['error'] is None]
+        successful_count = len(execution_times)
+        failed_count = len(results) - len(execution_times)
+
+        stats = {
+            'scenario': scenario.get('name', 'unknown'),
+            'scenario_type': scenario.get('scenario_type', 'unknown'),
+            'db_type': db_type,
+            'iterations': iterations,
+            'virtual_users': virtual_users,
+            'successful': successful_count,
+            'failed': failed_count,
+            'avg_time_ms': statistics.mean(execution_times) if execution_times else 0,
+            'min_time_ms': min(execution_times) if execution_times else 0,
+            'max_time_ms': max(execution_times) if execution_times else 0,
+            'p95_time_ms': self.calculate_percentile(execution_times, 95) if execution_times else 0,
+            'tps': successful_count / total_test_time if total_test_time > 0 else 0,
+            'error_rate': (failed_count / iterations) * 100 if iterations > 0 else 0,
+            'timestamp': datetime.now().isoformat()
+        }
+
+        return stats
+
+    async def run_full_scenario_test_suite(
+        self,
+        scenario_id: str,
+        db_types: List[str] = None,
+        iterations: int = 100,
+        virtual_users: int = 10,
+        warmup_time: int = 5,
+        scenario_repository = None
+    ) -> List[Dict]:
+        """Запуск полного теста на основе сценария из БД"""
+        from backend.database.repository import ScenarioRepository
+
+        if db_types is None:
+            db_types = ['mysql', 'postgresql']
+
+        # Загружаем сценарий - используем переданный репозиторий или создаем новый
+        if scenario_repository is not None:
+            scenario_repo = scenario_repository
+        else:
+            # Fallback: создаем репозиторий с дефолтным URL
+            import os
+            db_url = os.getenv('HISTORY_DATABASE_URL', 'postgresql://postgres:postgres@localhost:5433/test_history')
+            scenario_repo = ScenarioRepository(db_url)
+        
+        scenario = scenario_repo.get_scenario_for_execution(scenario_id)
+
+        if not scenario:
+            raise ValueError(f"Scenario {scenario_id} not found")
+
+        all_results = []
+
+        # Устанавливаем количество БД для прогресса
+        if self._metrics_callback:
+            self._metrics_callback.set_total_queries(len(db_types))
+            await self._metrics_callback.on_test_start()
+
+        # Прогрев
+        if warmup_time > 0:
+            print(f"Прогрев системы ({warmup_time} сек)...")
+            await self._emit_status("running", f"Прогрев системы ({warmup_time} сек)...")
+
+            queries = scenario.get('queries', [])
+            if queries:
+                warmup_query = queries[0]
+                for db_type in db_types:
+                    for _ in range(min(5, iterations // 10)):
+                        await self.execute_scenario_query(
+                            db_type,
+                            warmup_query['sql_template'],
+                            warmup_query.get('params', []),
+                            scenario['name']
+                        )
+                        await asyncio.sleep(0.1)
+            await asyncio.sleep(warmup_time)
+
+        # Запуск тестов для каждой БД
+        for idx, db_type in enumerate(db_types):
+            print(f"Тестирование {db_type} со сценарием {scenario['name']}...")
+
+            if self._metrics_callback:
+                self._metrics_callback.set_current_query(idx + 1)
+
+            await self._emit_status(
+                "running",
+                f"Тестирование {db_type}: {scenario['name']} ({idx + 1}/{len(db_types)})"
+            )
+
+            stats = await self.run_scenario_test(
+                db_type,
+                scenario,
+                iterations=iterations,
+                virtual_users=virtual_users
+            )
+
+            all_results.append({
+                'db_type': db_type,
+                'scenario': scenario['name'],
+                'stats': stats
+            })
+
+        # Уведомляем о завершении
+        if self._metrics_callback:
+            total_transactions = sum(
+                result.get('stats', {}).get('successful', 0)
+                for result in all_results
+            )
+            summary = {
+                'total_transactions': total_transactions,
+                'overall_tps': total_transactions / len(db_types) if db_types else 0,
+            }
+            await self._metrics_callback.on_test_complete(summary)
+
+        return all_results
+
     def close(self):
         """Закрытие подключений"""
         self.db_connection.close_all()

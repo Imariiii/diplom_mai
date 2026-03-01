@@ -70,8 +70,45 @@ export function DashboardsPage() {
                 }> = {}
 
                 response.results.forEach((result: any) => {
+                  // Поддержка старого формата (comparison) и нового формата (db_type + stats)
                   const comparison = result.comparison || {}
-                  Object.entries(comparison).forEach(([dbType, stats]: [string, any]) => {
+                  const entries = Object.entries(comparison)
+
+                  if (entries.length > 0) {
+                    // Старый формат: result.comparison = { db_type: stats }
+                    entries.forEach(([dbType, stats]: [string, any]) => {
+                      if (!aggregateByDb[dbType]) {
+                        aggregateByDb[dbType] = {
+                          avgTimes: [],
+                          p50Times: [],
+                          p95Times: [],
+                          p99Times: [],
+                          minTimes: [],
+                          maxTimes: [],
+                          tpsValues: [],
+                          throughputValues: [],
+                          activeConnections: [],
+                          successful: 0,
+                          failed: 0,
+                        }
+                      }
+                      const bucket = aggregateByDb[dbType]
+                      if (typeof stats.avg_time_ms === "number") bucket.avgTimes.push(stats.avg_time_ms)
+                      if (typeof stats.p50_time_ms === "number") bucket.p50Times.push(stats.p50_time_ms)
+                      if (typeof stats.p95_time_ms === "number") bucket.p95Times.push(stats.p95_time_ms)
+                      if (typeof stats.p99_time_ms === "number") bucket.p99Times.push(stats.p99_time_ms)
+                      if (typeof stats.min_time_ms === "number") bucket.minTimes.push(stats.min_time_ms)
+                      if (typeof stats.max_time_ms === "number") bucket.maxTimes.push(stats.max_time_ms)
+                      if (typeof stats.tps === "number") bucket.tpsValues.push(stats.tps)
+                      if (typeof stats.throughput === "number") bucket.throughputValues.push(stats.throughput)
+                      if (typeof stats.active_connections === "number") bucket.activeConnections.push(stats.active_connections)
+                      bucket.successful += stats.successful || 0
+                      bucket.failed += stats.failed || 0
+                    })
+                  } else if (result.db_type && result.stats) {
+                    // Новый формат: result = { db_type: 'mysql', stats: {...} }
+                    const dbType = result.db_type
+                    const stats = result.stats
                     if (!aggregateByDb[dbType]) {
                       aggregateByDb[dbType] = {
                         avgTimes: [],
@@ -99,7 +136,7 @@ export function DashboardsPage() {
                     if (typeof stats.active_connections === "number") bucket.activeConnections.push(stats.active_connections)
                     bucket.successful += stats.successful || 0
                     bucket.failed += stats.failed || 0
-                  })
+                  }
                 })
 
                 const average = (values: number[]) =>
@@ -145,7 +182,6 @@ export function DashboardsPage() {
                       rollbacks: 0,
                     },
                     systemMetrics: response.system_metrics?.[dbType],
-                    dbmsMetrics: response.dbms_metrics?.[dbType],
                     timeSeriesData: [],
                   }
                 })

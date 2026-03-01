@@ -2,7 +2,17 @@
  * API клиент для работы с backend
  */
 
-import type { TestScenario } from "./types"
+import type {
+  Scenario,
+  ScenarioQuery,
+  ScenarioParam,
+  CreateScenarioRequest,
+  CreateScenarioQueryRequest,
+  CreateScenarioParamRequest,
+  ScenarioTestRequest,
+  SystemMetrics,
+  DBMSInternalMetrics as DBMSMetrics
+} from "./types"
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -24,7 +34,7 @@ export interface TestRequest {
   db_types?: string[]
   iterations?: number
   virtual_users?: number      // Количество виртуальных пользователей
-  scenario?: TestScenario     // Сценарий тестирования
+  scenario?: string           // ID сценария тестирования (UUID из БД или строковый сценарий)
   warmup_time?: number        // Время прогрева в секундах
   test_name?: string          // Название теста
 }
@@ -326,6 +336,135 @@ class ApiClient {
     success_rate: number
   }> {
     return this.request('/history/statistics')
+  }
+
+  // ==================== Сценарии тестирования ====================
+
+  async getScenarios(): Promise<{ scenarios: Scenario[] }> {
+    return this.request('/scenarios')
+  }
+
+  async getScenario(id: string): Promise<Scenario> {
+    return this.request(`/scenarios/${id}`)
+  }
+
+  async getEnabledScenarios(): Promise<{ scenarios: Scenario[] }> {
+    return this.request('/scenarios')
+  }
+
+  async createScenario(scenario: CreateScenarioRequest): Promise<Scenario> {
+    return this.request('/scenarios', {
+      method: 'POST',
+      body: JSON.stringify(scenario),
+    })
+  }
+
+  async updateScenario(id: string, scenario: Partial<CreateScenarioRequest>): Promise<Scenario> {
+    return this.request(`/scenarios/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(scenario),
+    })
+  }
+
+  async deleteScenario(id: string): Promise<{ deleted: boolean; scenario_id: string }> {
+    return this.request(`/scenarios/${id}`, { method: 'DELETE' })
+  }
+
+  async cloneScenario(id: string, newName?: string): Promise<Scenario> {
+    return this.request(`/scenarios/${id}/clone`, {
+      method: 'POST',
+      body: JSON.stringify({ new_name: newName }),
+    })
+  }
+
+  // Запросы сценария
+  async getScenarioQueries(scenarioId: string): Promise<{ queries: ScenarioQuery[] }> {
+    return this.request(`/scenarios/${scenarioId}/queries`)
+  }
+
+  async createScenarioQuery(scenarioId: string, query: CreateScenarioQueryRequest): Promise<ScenarioQuery> {
+    return this.request(`/scenarios/${scenarioId}/queries`, {
+      method: 'POST',
+      body: JSON.stringify(query),
+    })
+  }
+
+  async updateScenarioQuery(
+    scenarioId: string,
+    queryId: string,
+    query: Partial<CreateScenarioQueryRequest>
+  ): Promise<ScenarioQuery> {
+    return this.request(`/scenarios/${scenarioId}/queries/${queryId}`, {
+      method: 'PUT',
+      body: JSON.stringify(query),
+    })
+  }
+
+  async deleteScenarioQuery(scenarioId: string, queryId: string): Promise<{ deleted: boolean; query_id: string }> {
+    return this.request(`/scenarios/${scenarioId}/queries/${queryId}`, { method: 'DELETE' })
+  }
+
+  // Параметры запроса
+  async getScenarioQueryParams(scenarioId: string, queryId: string): Promise<{ params: ScenarioParam[] }> {
+    return this.request(`/scenarios/${scenarioId}/queries/${queryId}/params`)
+  }
+
+  async createScenarioParam(
+    scenarioId: string,
+    queryId: string,
+    param: CreateScenarioParamRequest
+  ): Promise<ScenarioParam> {
+    return this.request(`/scenarios/${scenarioId}/queries/${queryId}/params`, {
+      method: 'POST',
+      body: JSON.stringify(param),
+    })
+  }
+
+  async updateScenarioParam(
+    scenarioId: string,
+    queryId: string,
+    paramId: string,
+    param: Partial<CreateScenarioParamRequest>
+  ): Promise<ScenarioParam> {
+    return this.request(`/scenarios/${scenarioId}/queries/${queryId}/params/${paramId}`, {
+      method: 'PUT',
+      body: JSON.stringify(param),
+    })
+  }
+
+  async deleteScenarioParam(
+    scenarioId: string,
+    queryId: string,
+    paramId: string
+  ): Promise<{ deleted: boolean; param_id: string }> {
+    return this.request(`/scenarios/${scenarioId}/queries/${queryId}/params/${paramId}`, { method: 'DELETE' })
+  }
+
+  // Запуск теста по сценарию
+  async runScenarioTest(request: ScenarioTestRequest): Promise<{
+    test_id: string
+    scenario: {
+      id: string
+      name: string
+      type: string
+    }
+    results: Array<{
+      db_type: string
+      scenario: string
+      stats: TestStats
+    }>
+    system_metrics: Record<string, SystemMetrics>
+    dbms_metrics: Record<string, DBMSMetrics>
+    summary: {
+      total_duration: number
+      total_transactions: number
+      overall_tps: number
+    }
+  }> {
+    return this.request('/test/scenario', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    })
   }
 }
 

@@ -5,10 +5,15 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from sqlalchemy import create_engine, desc
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker, Session, joinedload
 from sqlalchemy.exc import SQLAlchemyError
+from collections import defaultdict  # Для подсчета запросов в списке сценариев
+import time  # Для таймаутов при инициализации
 
-from backend.database.models import Base, TestRun, TestResult, TimeSeries
+from backend.database.models import (
+    Base, TestRun, TestResult, TimeSeries,
+    TestScenario, ScenarioQuery, ScenarioParam
+)
 
 
 def get_local_now():
@@ -286,10 +291,424 @@ class TestRepository:
             total_runs = session.query(TestRun).count()
             completed_runs = session.query(TestRun).filter(TestRun.status == 'completed').count()
             failed_runs = session.query(TestRun).filter(TestRun.status == 'failed').count()
-            
+
             return {
                 'total_runs': total_runs,
                 'completed_runs': completed_runs,
                 'failed_runs': failed_runs,
                 'success_rate': (completed_runs / total_runs * 100) if total_runs > 0 else 0
+            }
+
+
+class ScenarioRepository:
+    """Репозиторий для работы со сценариями тестирования"""
+
+    def __init__(self, database_url: str):
+        self.engine = create_engine(database_url, pool_pre_ping=True)
+        Base.metadata.create_all(self.engine)
+        self.SessionLocal = sessionmaker(bind=self.engine, autocommit=False, autoflush=False)
+
+    def get_session(self) -> Session:
+        """Получить новую сессию БД"""
+        return self.SessionLocal()
+
+    # ==================== TestScenario CRUD ====================
+
+    def create_scenario(
+        self,
+        name: str,
+        description: Optional[str],
+        scenario_type: str,
+        is_builtin: bool = False
+    ) -> TestScenario:
+        """Создать новый сценарий"""
+        with self.get_session() as session:
+            scenario = TestScenario(
+                id=uuid.uuid4(),
+                name=name,
+                description=description,
+                scenario_type=scenario_type,
+                is_builtin='t' if is_builtin else 'f',
+                is_active='t'
+            )
+            session.add(scenario)
+            session.commit()
+            session.refresh(scenario)
+            return scenario
+
+    def get_scenario(self, scenario_id: str) -> Optional[TestScenario]:
+        """Получить сценарий по ID с запросами и параметрами (eager loading)"""
+        with self.get_session() as session:
+            scenario = session.query(TestScenario).options(
+                joinedload(TestScenario.queries).joinedload(ScenarioQuery.params)
+            ).filter(
+                TestScenario.id == uuid.UUID(scenario_id)
+            ).first()
+            # Явно загружаем связанные данные до закрытия сессии
+            if scenario:
+                for query in scenario.queries:
+                    _ = query.params  # Touch to load
+            return scenario
+
+    def get_scenario_by_name(self, name: str) -> Optional[TestScenario]:
+        """Получить сценарий по имени"""
+        with self.get_session() as session:
+            return session.query(TestScenario).filter(
+                TestScenario.name == name
+            ).first()
+
+    def get_all_scenarios(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        scenario_type: Optional[str] = None,
+        include_builtin: bool = True
+    ) -> List[Dict[str, Any]]:
+        """Получить список всех сценариев"""
+        with self.get_session() as session:
+            query = session.query(TestScenario)
+
+            if scenario_type:
+                query = query.filter(TestScenario.scenario_type == scenario_type)
+
+            if not include_builtin:
+                query = query.filter(TestScenario.is_builtin == 'f')
+
+            scenarios = query.order_by(desc(TestScenario.created_at)).offset(offset).limit(limit).all()
+            return [s.to_dict() for s in scenarios]
+
+    def update_scenario(
+        self,
+        scenario_id: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        scenario_type: Optional[str] = None,
+        is_active: Optional[bool] = None
+    ) -> Optional[TestScenario]:
+        """Обновить сценарий"""
+        with self.get_session() as session:
+            scenario = session.query(TestScenario).filter(
+                TestScenario.id == uuid.UUID(scenario_id)
+            ).first()
+
+            if scenario:
+                if name is not None:
+                    scenario.name = name
+                if description is not None:
+                    scenario.description = description
+                if scenario_type is not None:
+                    scenario.scenario_type = scenario_type
+                if is_active is not None:
+                    scenario.is_active = 't' if is_active else 'f'
+
+                session.commit()
+                session.refresh(scenario)
+
+            return scenario
+
+    def delete_scenario(self, scenario_id: str) -> bool:
+        """Удалить сценарий (только если не built-in)"""
+        with self.get_session() as session:
+            scenario = session.query(TestScenario).filter(
+                TestScenario.id == uuid.UUID(scenario_id)
+            ).first()
+
+            if scenario and scenario.is_builtin == 'f':
+                session.delete(scenario)
+                session.commit()
+                return True
+            return False
+
+    def clone_scenario(self, scenario_id: str, new_name: str) -> Optional[TestScenario]:
+        """Клонировать сценарий"""
+        with self.get_session() as session:
+            original = session.query(TestScenario).filter(
+                TestScenario.id == uuid.UUID(scenario_id)
+            ).first()
+
+            if not original:
+                return None
+
+            # Создаём новый сценарий
+            cloned = TestScenario(
+                id=uuid.uuid4(),
+                name=new_name,
+                description=f"Копия: {original.description}" if original.description else None,
+                scenario_type=original.scenario_type,
+                is_builtin='f',
+                is_active='t'
+            )
+            session.add(cloned)
+            session.flush()
+
+            # Копируем запросы
+            for orig_query in original.queries:
+                new_query = ScenarioQuery(
+                    id=uuid.uuid4(),
+                    scenario_id=cloned.id,
+                    sql_template=orig_query.sql_template,
+                    query_type=orig_query.query_type,
+                    weight=orig_query.weight,
+                    order_index=orig_query.order_index,
+                    description=orig_query.description
+                )
+                session.add(new_query)
+                session.flush()
+
+                # Копируем параметры
+                for orig_param in orig_query.params:
+                    new_param = ScenarioParam(
+                        id=uuid.uuid4(),
+                        query_id=new_query.id,
+                        param_name=orig_param.param_name,
+                        param_type=orig_param.param_type,
+                        min_value=orig_param.min_value,
+                        max_value=orig_param.max_value,
+                        string_pattern=orig_param.string_pattern,
+                        string_length=orig_param.string_length,
+                        table_ref=orig_param.table_ref,
+                        column_ref=orig_param.column_ref,
+                        current_value=orig_param.current_value,
+                        step=orig_param.step
+                    )
+                    session.add(new_param)
+
+            session.commit()
+            session.refresh(cloned)
+            return cloned
+
+    # ==================== ScenarioQuery CRUD ====================
+
+    def add_query_to_scenario(
+        self,
+        scenario_id: str,
+        sql_template: str,
+        query_type: str,
+        weight: int = 1,
+        order_index: int = 0,
+        description: Optional[str] = None
+    ) -> ScenarioQuery:
+        """Добавить запрос в сценарий"""
+        with self.get_session() as session:
+            query = ScenarioQuery(
+                id=uuid.uuid4(),
+                scenario_id=uuid.UUID(scenario_id),
+                sql_template=sql_template,
+                query_type=query_type,
+                weight=weight,
+                order_index=order_index,
+                description=description
+            )
+            session.add(query)
+            session.commit()
+            session.refresh(query)
+            return query
+
+    def get_query(self, query_id: str) -> Optional[ScenarioQuery]:
+        """Получить запрос по ID"""
+        with self.get_session() as session:
+            return session.query(ScenarioQuery).filter(
+                ScenarioQuery.id == uuid.UUID(query_id)
+            ).first()
+
+    def update_query(
+        self,
+        query_id: str,
+        sql_template: Optional[str] = None,
+        query_type: Optional[str] = None,
+        weight: Optional[int] = None,
+        order_index: Optional[int] = None,
+        description: Optional[str] = None
+    ) -> Optional[ScenarioQuery]:
+        """Обновить запрос"""
+        with self.get_session() as session:
+            query = session.query(ScenarioQuery).filter(
+                ScenarioQuery.id == uuid.UUID(query_id)
+            ).first()
+
+            if query:
+                if sql_template is not None:
+                    query.sql_template = sql_template
+                if query_type is not None:
+                    query.query_type = query_type
+                if weight is not None:
+                    query.weight = weight
+                if order_index is not None:
+                    query.order_index = order_index
+                if description is not None:
+                    query.description = description
+
+                session.commit()
+                session.refresh(query)
+
+            return query
+
+    def delete_query(self, query_id: str) -> bool:
+        """Удалить запрос из сценария"""
+        with self.get_session() as session:
+            query = session.query(ScenarioQuery).filter(
+                ScenarioQuery.id == uuid.UUID(query_id)
+            ).first()
+
+            if query:
+                session.delete(query)
+                session.commit()
+                return True
+            return False
+
+    # ==================== ScenarioParam CRUD ====================
+
+    def add_param_to_query(
+        self,
+        query_id: str,
+        param_name: str,
+        param_type: str,
+        min_value: Optional[int] = None,
+        max_value: Optional[int] = None,
+        string_pattern: Optional[str] = None,
+        string_length: Optional[int] = None,
+        table_ref: Optional[str] = None,
+        column_ref: Optional[str] = None,
+        current_value: int = 0,
+        step: int = 1
+    ) -> ScenarioParam:
+        """Добавить параметр к запросу"""
+        with self.get_session() as session:
+            param = ScenarioParam(
+                id=uuid.uuid4(),
+                query_id=uuid.UUID(query_id),
+                param_name=param_name,
+                param_type=param_type,
+                min_value=min_value,
+                max_value=max_value,
+                string_pattern=string_pattern,
+                string_length=string_length,
+                table_ref=table_ref,
+                column_ref=column_ref,
+                current_value=current_value,
+                step=step
+            )
+            session.add(param)
+            session.commit()
+            session.refresh(param)
+            return param
+
+    def get_param(self, param_id: str) -> Optional[ScenarioParam]:
+        """Получить параметр по ID"""
+        with self.get_session() as session:
+            return session.query(ScenarioParam).filter(
+                ScenarioParam.id == uuid.UUID(param_id)
+            ).first()
+
+    def update_param(
+        self,
+        param_id: str,
+        param_name: Optional[str] = None,
+        param_type: Optional[str] = None,
+        min_value: Optional[int] = None,
+        max_value: Optional[int] = None,
+        string_pattern: Optional[str] = None,
+        string_length: Optional[int] = None,
+        table_ref: Optional[str] = None,
+        column_ref: Optional[str] = None,
+        current_value: Optional[int] = None,
+        step: Optional[int] = None
+    ) -> Optional[ScenarioParam]:
+        """Обновить параметр"""
+        with self.get_session() as session:
+            param = session.query(ScenarioParam).filter(
+                ScenarioParam.id == uuid.UUID(param_id)
+            ).first()
+
+            if param:
+                if param_name is not None:
+                    param.param_name = param_name
+                if param_type is not None:
+                    param.param_type = param_type
+                if min_value is not None:
+                    param.min_value = min_value
+                if max_value is not None:
+                    param.max_value = max_value
+                if string_pattern is not None:
+                    param.string_pattern = string_pattern
+                if string_length is not None:
+                    param.string_length = string_length
+                if table_ref is not None:
+                    param.table_ref = table_ref
+                if column_ref is not None:
+                    param.column_ref = column_ref
+                if current_value is not None:
+                    param.current_value = current_value
+                if step is not None:
+                    param.step = step
+
+                session.commit()
+                session.refresh(param)
+
+            return param
+
+    def delete_param(self, param_id: str) -> bool:
+        """Удалить параметр"""
+        with self.get_session() as session:
+            param = session.query(ScenarioParam).filter(
+                ScenarioParam.id == uuid.UUID(param_id)
+            ).first()
+
+            if param:
+                session.delete(param)
+                session.commit()
+                return True
+            return False
+
+    def increment_sequential_param(self, param_id: str) -> int:
+        """Инкрементировать значение sequential параметра"""
+        with self.get_session() as session:
+            param = session.query(ScenarioParam).filter(
+                ScenarioParam.id == uuid.UUID(param_id)
+            ).first()
+
+            if param and param.param_type == 'sequential_int':
+                old_value = param.current_value
+                param.current_value += param.step
+                session.commit()
+                return old_value
+            return 0
+
+    # ==================== Helper Methods ====================
+
+    def get_scenario_for_execution(self, scenario_id: str) -> Optional[Dict[str, Any]]:
+        """Получить сценарий в формате для выполнения теста"""
+        with self.get_session() as session:
+            scenario = session.query(TestScenario).filter(
+                TestScenario.id == uuid.UUID(scenario_id),
+                TestScenario.is_active == 't'
+            ).first()
+
+            if not scenario:
+                return None
+
+            return {
+                'id': str(scenario.id),
+                'name': scenario.name,
+                'scenario_type': scenario.scenario_type,
+                'queries': [
+                    {
+                        'id': str(q.id),
+                        'sql_template': q.sql_template,
+                        'query_type': q.query_type,
+                        'weight': q.weight,
+                        'params': [
+                            {
+                                'param_name': p.param_name,
+                                'param_type': p.param_type,
+                                'min_value': p.min_value,
+                                'max_value': p.max_value,
+                                'table_ref': p.table_ref,
+                                'column_ref': p.column_ref,
+                            }
+                            for p in q.params
+                        ]
+                    }
+                    for q in scenario.queries
+                ]
             }

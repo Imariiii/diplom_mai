@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useAppStore } from "@/lib/store"
 import { apiClient, type Query } from "@/lib/api"
 import { toast } from "sonner"
-import type { TestRun, TestScenario, ScenarioConfig, TestMode } from "@/lib/types"
+import type { TestRun, TestScenario, ScenarioConfig, TestMode, Scenario } from "@/lib/types"
 
 const databases = [
   { id: "mysql", name: "MySQL (Sakila)", type: "mysql" as const },
@@ -35,50 +35,16 @@ const testModes: { id: TestMode; name: string; description: string; icon: React.
   },
 ]
 
-const scenarios: ScenarioConfig[] = [
-  { 
-    id: "read_only", 
-    name: "Только чтение", 
-    description: "100% SELECT запросы",
-    readPercent: 100,
-    writePercent: 0
-  },
-  { 
-    id: "mixed_light", 
-    name: "TPC-C (лёгкий)", 
-    description: "80% SELECT, 20% UPDATE",
-    readPercent: 80,
-    writePercent: 20
-  },
-  { 
-    id: "mixed_heavy", 
-    name: "Смешанный (тяжёлый)", 
-    description: "50% SELECT, 50% UPDATE",
-    readPercent: 50,
-    writePercent: 50
-  },
-  { 
-    id: "write_only", 
-    name: "Только запись", 
-    description: "100% INSERT/UPDATE/DELETE",
-    readPercent: 0,
-    writePercent: 100
-  },
-  { 
-    id: "oltp", 
-    name: "OLTP", 
-    description: "Транзакционная нагрузка",
-    readPercent: 70,
-    writePercent: 30
-  },
-  { 
-    id: "olap", 
-    name: "OLAP", 
-    description: "Аналитические запросы",
-    readPercent: 95,
-    writePercent: 5
-  },
-]
+// Сценарии загружаются из API
+const scenarioTypeLabels: Record<string, string> = {
+  "read_only": "Только чтение",
+  "write_only": "Только запись", 
+  "mixed_light": "TPC-C (лёгкий)",
+  "mixed_heavy": "Смешанный (тяжёлый)",
+  "oltp": "OLTP",
+  "olap": "OLAP",
+  "custom": "Пользовательский"
+}
 
 export function ConfigPage() {
   const {
@@ -90,6 +56,8 @@ export function ConfigPage() {
   } = useAppStore()
   const [isRunning, setIsRunning] = useState(false)
   const [queries, setQueries] = useState<Query[]>([])
+  const [scenarios, setScenarios] = useState<Scenario[]>([])
+  const [scenariosLoading, setScenariosLoading] = useState(true)
   const [healthStatus, setHealthStatus] = useState<{ mysql: boolean; postgresql: boolean }>({
     mysql: false,
     postgresql: false,
@@ -97,6 +65,7 @@ export function ConfigPage() {
   const [useCustomSql, setUseCustomSql] = useState(false)
 
   useEffect(() => {
+    // Загрузка запросов
     apiClient
       .getQueries()
       .then((data) => {
@@ -108,6 +77,24 @@ export function ConfigPage() {
       .catch((error) => {
         console.error("Ошибка загрузки запросов:", error)
         toast.error("Не удалось загрузить список запросов")
+      })
+
+    // Загрузка сценариев из БД
+    apiClient
+      .getEnabledScenarios()
+      .then((response) => {
+        const scenariosList = response?.scenarios || []
+        setScenarios(scenariosList)
+        setScenariosLoading(false)
+        // Если сценарий не выбран, выбираем первый
+        if (scenariosList.length > 0 && !testConfig.scenario) {
+          setTestConfig({ scenario: scenariosList[0].id })
+        }
+      })
+      .catch((error) => {
+        console.error("Ошибка загрузки сценариев:", error)
+        toast.error("Не удалось загрузить сценарии")
+        setScenariosLoading(false)
       })
 
     apiClient
@@ -211,8 +198,8 @@ export function ConfigPage() {
     }
   }
 
-  const selectedScenario = scenarios.find(s => s.id === testConfig.scenario)
-  const selectedQuery = queries.find(q => q.id === testConfig.selectedQueryId)
+  const selectedScenario = scenarios?.find(s => s.id === testConfig.scenario)
+  const selectedQuery = queries?.find(q => q.id === testConfig.selectedQueryId)
 
   const canRunTest = () => {
     if (testConfig.databases.length === 0) return false
@@ -370,7 +357,7 @@ export function ConfigPage() {
                 <SelectValue placeholder="Выберите сценарий" />
               </SelectTrigger>
               <SelectContent>
-                {scenarios.map((scenario) => (
+                {(scenarios || []).map((scenario) => (
                   <SelectItem key={scenario.id} value={scenario.id}>
                     <div className="flex flex-col">
                       <span>{scenario.name}</span>
@@ -378,22 +365,33 @@ export function ConfigPage() {
                     </div>
                   </SelectItem>
                 ))}
+                {(scenarios || []).length === 0 && (
+                  <div className="px-2 py-4 text-center text-sm text-muted-foreground">
+                    Нет доступных сценариев
+                  </div>
+                )}
               </SelectContent>
             </Select>
             
             {selectedScenario && (
               <div className="p-4 bg-muted rounded-lg space-y-2">
-                <div className="font-medium">{selectedScenario.name}</div>
-                <div className="text-sm text-muted-foreground">{selectedScenario.description}</div>
-                <div className="flex gap-4 text-sm">
+                <div className="font-medium">{selectedScenario.name || 'Без названия'}</div>
+                <div className="text-sm text-muted-foreground">{selectedScenario.description || 'Нет описания'}</div>
+                <div className="flex gap-4 text-sm flex-wrap">
                   <div className="flex items-center gap-2">
                     <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-                    <span>SELECT: {selectedScenario.readPercent}%</span>
+                    <span>Запросов: {selectedScenario.queries_count ?? selectedScenario.queries?.length ?? 0}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 bg-orange-500 rounded-full"></div>
-                    <span>UPDATE: {selectedScenario.writePercent}%</span>
+                    <div className="w-3 h-3 bg-purple-500 rounded-full"></div>
+                    <span>Тип: {selectedScenario.scenario_type || 'custom'}</span>
                   </div>
+                  {selectedScenario.is_builtin && (
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                      <span>Системный</span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

@@ -32,7 +32,7 @@ export interface ScenarioConfig {
 export interface TestConfig {
   databases: string[]           // Выбранные СУБД
   testMode: TestMode            // Режим тестирования
-  scenario: TestScenario        // Сценарий тестирования (для режима scenario)
+  scenario: string               // ID сценария тестирования (для режима scenario) - UUID из БД или строковый сценарий
   selectedQueryId: string       // ID выбранного запроса (для режима custom_query)
   customSql: string             // Пользовательский SQL запрос
   virtualUsers: number          // Количество виртуальных пользователей (параллельных соединений)
@@ -140,4 +140,99 @@ export interface TimeSeriesPoint {
   bufferPoolHitRatio: number
   lockWaits: number
   deadlocks: number
+}
+
+
+// ==================== Сценарии тестирования (Scenario Entity) ====================
+
+export interface Scenario {
+  id: string
+  name: string
+  description: string | null
+  scenario_type: string
+  is_builtin: 't' | 'f'
+  created_at: string
+  updated_at: string | null
+  queries_count?: number  // Количество запросов в сценарии
+  queries?: ScenarioQuery[]
+}
+
+export interface ScenarioQuery {
+  id: string
+  scenario_id: string
+  sql_template: string
+  query_type: 'select' | 'insert' | 'update' | 'delete'
+  description: string | null
+  weight: number
+  execution_order: number
+  created_at: string
+  params?: ScenarioParam[]
+}
+
+export interface ScenarioParam {
+  id: string
+  query_id: string
+  param_name: string
+  param_type: 'random_int' | 'random_from_table' | 'sequential_int' | 'uuid' | 'fixed' | 'random_string' | 'random_date'
+  min_value: number | null
+  max_value: number | null
+  table_ref: string | null
+  column_ref: string | null
+  fixed_value: string | null
+  string_length: number | null
+  created_at: string
+}
+
+export interface CreateScenarioRequest {
+  name: string
+  description?: string
+  scenario_type: string
+}
+
+export interface CreateScenarioQueryRequest {
+  sql_template: string
+  query_type: 'select' | 'insert' | 'update' | 'delete'
+  description?: string
+  weight?: number
+  execution_order?: number
+}
+
+export interface CreateScenarioParamRequest {
+  param_name: string
+  param_type: 'random_int' | 'random_from_table' | 'sequential_int' | 'uuid' | 'fixed' | 'random_string' | 'random_date'
+  min_value?: number
+  max_value?: number
+  table_ref?: string
+  column_ref?: string
+  fixed_value?: string
+  string_length?: number
+}
+
+export interface ScenarioTestRequest {
+  scenario_id: string
+  db_types?: string[]
+  iterations?: number
+  virtual_users?: number
+  warmup_time?: number
+  test_name?: string
+}
+
+export interface SystemMetrics {
+  cpu_usage: number
+  memory_usage_mb: number
+  memory_usage_percent: number
+  disk_iops: number
+  network_in_mbps: number
+  network_out_mbps: number
+}
+
+export interface DBMSMetrics {
+  cache_hit_ratio: number
+  buffer_pool_hit_ratio: number
+  lock_waits: number
+  deadlocks: number
+  active_connections: number
+  table_sizes_mb: Record<string, number>
+  index_sizes_mb: Record<string, number>
+  total_db_size_mb: number
 }
