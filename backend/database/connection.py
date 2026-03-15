@@ -3,7 +3,7 @@
 """
 from sqlalchemy import create_engine, Engine, text
 from sqlalchemy.pool import QueuePool
-from typing import Optional, Dict
+from typing import Dict
 import yaml
 import os
 
@@ -77,4 +77,61 @@ class DatabaseConnection:
         for engine in self.engines.values():
             engine.dispose()
         self.engines.clear()
+    
+    def recreate_engine(self, db_type: str) -> Engine:
+        """
+        Пересоздать engine для указанной СУБД
+        Закрывает старые соединения и создаёт новый engine
+        """
+        if db_type in self.engines:
+            self.engines[db_type].dispose()
+            del self.engines[db_type]
+        return self.get_engine(db_type)
+    
+    async def terminate_other_connections(self, engine: Engine, db_type: str) -> int:
+        """
+        Завершить другие активные соединения с БД
+        
+        Returns:
+            Количество завершённых соединений
+        """
+        terminated = 0
+        
+        with engine.connect() as conn:
+            if db_type == 'postgresql':
+                # PostgreSQL: используем pg_terminate_backend
+                sql = """
+                    SELECT pg_terminate_backend(pid)
+                    FROM pg_stat_activity
+                    WHERE datname = current_database()
+                    AND pid <> pg_backend_pid()
+                    AND state != 'idle'
+                """
+                result = conn.execute(text(sql))
+                terminated = sum(1 for row in result if row[0])
+                conn.commit()
+                
+            elif db_type == 'mysql':
+                # MySQL: используем KILL
+                # Получаем список процессов
+                result = conn.execute(text("SHOW PROCESSLIST"))
+                rows = result.fetchall()
+                
+                for row in rows:
+                    process_id = row[0]
+                    process_db = row[3] if len(row) > 3 else None
+                    process_command = row[4] if len(row) > 4 else None
+                    
+                    # Не убиваем собственное соединение и системные процессы
+                    if (process_command != 'Sleep' and 
+                        process_db == self.config.get('databases', {}).get(db_type, {}).get('database')):
+                        try:
+                            conn.execute(text(f"KILL {process_id}"))
+                            terminated += 1
+                        except:
+                            pass
+                
+                conn.commit()
+        
+        return terminated
 

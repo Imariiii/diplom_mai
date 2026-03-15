@@ -14,6 +14,7 @@ import { useAppStore } from "@/lib/store"
 import { apiClient, type Query } from "@/lib/api"
 import { toast } from "sonner"
 import type { TestRun, TestScenario, ScenarioConfig, TestMode, Scenario } from "@/lib/types"
+import { DatabaseStatePanel } from "@/components/database-state-panel"
 
 const databases = [
   { id: "mysql", name: "MySQL (Sakila)", type: "mysql" as const },
@@ -568,6 +569,9 @@ export function ConfigPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Панель управления состоянием БД */}
+      <DatabaseStatePanel />
 
       {/* Сводка конфигурации */}
       <Card className="bg-card border-border">

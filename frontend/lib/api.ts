@@ -9,9 +9,6 @@ import type {
   CreateScenarioRequest,
   CreateScenarioQueryRequest,
   CreateScenarioParamRequest,
-  ScenarioTestRequest,
-  SystemMetrics,
-  DBMSInternalMetrics as DBMSMetrics
 } from "./types"
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
@@ -193,52 +190,6 @@ class ApiClient {
     return this.request<Query[]>('/queries')
   }
 
-  async getQuery(queryId: string): Promise<Query> {
-    return this.request<Query>(`/queries/${queryId}`)
-  }
-
-  async runSingleTest(request: TestRequest): Promise<TestResult> {
-    return this.request<TestResult>('/test/single', {
-      method: 'POST',
-      body: JSON.stringify(request),
-    })
-  }
-
-  async runFullTest(request: TestRequest): Promise<FullTestResponse> {
-    return this.request<FullTestResponse>('/test/full', {
-      method: 'POST',
-      body: JSON.stringify(request),
-    })
-  }
-
-  async getCharts(): Promise<{ charts: Array<{ filename: string; path: string }> }> {
-    return this.request<{ charts: Array<{ filename: string; path: string }> }>('/results/charts')
-  }
-
-  async getSystemMetrics(dbType: string): Promise<{
-    cpu_usage: number
-    memory_usage_mb: number
-    memory_usage_percent: number
-    disk_iops: number
-    network_in_mbps: number
-    network_out_mbps: number
-  }> {
-    return this.request(`/metrics/system/${dbType}`)
-  }
-
-  async getDBMSMetrics(dbType: string): Promise<{
-    cache_hit_ratio: number
-    buffer_pool_hit_ratio: number
-    lock_waits: number
-    deadlocks: number
-    active_connections: number
-    table_sizes_mb: Record<string, number>
-    index_sizes_mb: Record<string, number>
-    total_db_size_mb: number
-  }> {
-    return this.request(`/metrics/dbms/${dbType}`)
-  }
-
   // ==================== Асинхронное тестирование ====================
 
   async runAsyncTest(request: TestRequest & { test_name?: string }): Promise<AsyncTestResponse> {
@@ -246,10 +197,6 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(request),
     })
-  }
-
-  async getAsyncTestStatus(testId: string): Promise<AsyncTestStatus> {
-    return this.request<AsyncTestStatus>(`/test/async/${testId}`)
   }
 
   async getAsyncTestResults(testId: string): Promise<{
@@ -261,13 +208,6 @@ class ApiClient {
     message?: string
   }> {
     return this.request(`/test/async/${testId}/results`)
-  }
-
-  async getWebSocketConnections(): Promise<{
-    total_connections: number
-    active_tests: string[]
-  }> {
-    return this.request('/ws/connections')
   }
 
   // ==================== История тестов ====================
@@ -294,48 +234,12 @@ class ApiClient {
     return this.request(`/history/tests/${testId}`)
   }
 
-  async getHistoryTimeSeries(testId: string, dbType?: string, limit?: number): Promise<{
-    timeseries: Array<{
-      id: number
-      test_run_id: string
-      db_type: string
-      timestamp: string
-      response_time: number | null
-      tps: number | null
-      throughput: number | null
-      active_connections: number | null
-      error_count: number
-      cpu_usage: number | null
-      memory_usage: number | null
-      memory_usage_mb: number | null
-      disk_iops: number | null
-      network_in: number | null
-      network_out: number | null
-    }>
-  }> {
-    const queryParams = new URLSearchParams()
-    if (dbType) queryParams.set('db_type', dbType)
-    if (limit) queryParams.set('limit', limit.toString())
-    
-    const queryString = queryParams.toString()
-    return this.request(`/history/tests/${testId}/timeseries${queryString ? `?${queryString}` : ''}`)
-  }
-
   async compareHistoryTests(testId1: string, testId2: string): Promise<HistoryComparison> {
     return this.request(`/history/compare/${testId1}/${testId2}`)
   }
 
   async deleteHistoryTest(testId: string): Promise<{ deleted: boolean; test_id: string }> {
     return this.request(`/history/tests/${testId}`, { method: 'DELETE' })
-  }
-
-  async getHistoryStatistics(): Promise<{
-    total_runs: number
-    completed_runs: number
-    failed_runs: number
-    success_rate: number
-  }> {
-    return this.request('/history/statistics')
   }
 
   // ==================== Сценарии тестирования ====================
@@ -440,30 +344,87 @@ class ApiClient {
     return this.request(`/scenarios/${scenarioId}/queries/${queryId}/params/${paramId}`, { method: 'DELETE' })
   }
 
-  // Запуск теста по сценарию
-  async runScenarioTest(request: ScenarioTestRequest): Promise<{
-    test_id: string
-    scenario: {
-      id: string
-      name: string
-      type: string
-    }
-    results: Array<{
-      db_type: string
-      scenario: string
-      stats: TestStats
-    }>
-    system_metrics: Record<string, SystemMetrics>
-    dbms_metrics: Record<string, DBMSMetrics>
-    summary: {
-      total_duration: number
-      total_transactions: number
-      overall_tps: number
-    }
+  // ==================== Database State Management ====================
+
+  async getDatabaseState(dbmsType: string): Promise<{
+    dbms_type: string
+    tables: Record<string, { row_count: number; has_backup: boolean }>
+    has_pending_backups: boolean
+    backup_tables: string[]
+    status: 'clean' | 'modified' | 'backup_exists'
   }> {
-    return this.request('/test/scenario', {
+    return this.request(`/api/database/${dbmsType}/state`)
+  }
+
+  async createBackup(dbmsType: string, tables?: string[]): Promise<{
+    backup_id: string
+    dbms_type: string
+    tables: string[]
+    row_counts: Record<string, number>
+    created_at: string
+  }> {
+    return this.request(`/api/database/${dbmsType}/backup`, {
       method: 'POST',
-      body: JSON.stringify(request),
+      body: JSON.stringify({ tables }),
+    })
+  }
+
+  async restoreBackup(dbmsType: string, backupId?: string): Promise<{
+    success: boolean
+    duration_ms: number
+    verified: boolean
+    errors: string[]
+  }> {
+    return this.request(`/api/database/${dbmsType}/restore`, {
+      method: 'POST',
+      body: JSON.stringify({ backup_id: backupId }),
+    })
+  }
+
+  async cleanupBackups(dbmsType: string): Promise<{
+    deleted_tables: string[]
+  }> {
+    return this.request(`/api/database/${dbmsType}/cleanup`, {
+      method: 'POST',
+    })
+  }
+
+  async estimateBackup(dbmsType: string, tables: string[]): Promise<{
+    tables: Record<string, { rows: number; size_bytes: number }>
+    total_rows: number
+    total_size_bytes: number
+    estimated_time_sec: number
+    warnings: string[]
+  }> {
+    const params = new URLSearchParams({ tables: tables.join(',') })
+    return this.request(`/api/database/${dbmsType}/estimate?${params}`)
+  }
+
+  async getRestoreSettings(): Promise<{
+    auto_restore: boolean
+    verify_after_restore: boolean
+    strategy: 'sql' | 'native'
+    large_table_warning_threshold: number
+    large_table_confirm_threshold: number
+    backup_table_prefix: string
+  }> {
+    return this.request('/api/settings/restore')
+  }
+
+  async updateRestoreSettings(settings: {
+    auto_restore?: boolean
+    verify_after_restore?: boolean
+    strategy?: 'sql' | 'native'
+    large_table_warning_threshold?: number
+  }): Promise<{
+    auto_restore: boolean
+    verify_after_restore: boolean
+    strategy: 'sql' | 'native'
+    large_table_warning_threshold: number
+  }> {
+    return this.request('/api/settings/restore', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
     })
   }
 }

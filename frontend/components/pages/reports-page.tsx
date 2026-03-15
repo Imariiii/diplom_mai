@@ -29,6 +29,11 @@ export function ReportsPage() {
 
   // Вычисляем длительность теста
   const getTestDuration = () => {
+    // Если сервер прислал итоговую длительность, используем её (согласованно с историей тестов)
+    if (latestTest?.summary?.total_duration) {
+      return Math.round(latestTest.summary.total_duration)
+    }
+
     if (latestTest?.endTime && latestTest?.startTime) {
       const durationMs = new Date(latestTest.endTime).getTime() - new Date(latestTest.startTime).getTime()
       return Math.round(durationMs / 1000) // в секундах

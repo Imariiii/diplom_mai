@@ -9,6 +9,7 @@ import asyncio
 import uuid
 import sys
 import os
+from datetime import datetime, timedelta, timezone
 
 # Добавляем корневую директорию в путь
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,8 +18,26 @@ from backend.load_tester.tester import LoadTester
 from backend.database.connection import DatabaseConnection
 from backend.database.queries import QueryManager
 from backend.websocket_manager import manager, TestStreamingCallback
+from backend.database.state_manager import DatabaseStateManager
+from backend.config import get_restore_config
 
 app = FastAPI(title="Database Load Testing API", version="2.0.0")
+
+# Инициализация менеджеров состояния БД (lazy - при первом использовании)
+db_state_manager: DatabaseStateManager = None
+db_connection_instance: DatabaseConnection = None
+
+def get_db_state_manager() -> DatabaseStateManager:
+    global db_state_manager
+    if db_state_manager is None:
+        db_state_manager = DatabaseStateManager()
+    return db_state_manager
+
+def get_db_connection() -> DatabaseConnection:
+    global db_connection_instance
+    if db_connection_instance is None:
+        db_connection_instance = DatabaseConnection()
+    return db_connection_instance
 
 # Определяем пути относительно расположения файлов
 backend_root = os.path.dirname(os.path.abspath(__file__))
@@ -275,33 +294,6 @@ async def get_queries():
     return query_manager.get_all_queries()
 
 
-@app.get("/queries/{query_id}")
-async def get_query(query_id: str):
-    """Получить конкретный запрос"""
-    try:
-        return query_manager.get_query(query_id)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-
-@app.get("/metrics/system/{db_type}")
-async def get_system_metrics(db_type: str):
-    """Получить системные метрики для СУБД"""
-    try:
-        metrics = await tester.get_system_metrics(db_type)
-        return metrics
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/metrics/dbms/{db_type}")
-async def get_dbms_metrics(db_type: str):
-    """Получить внутренние метрики СУБД"""
-    try:
-        metrics = await tester.get_dbms_metrics(db_type)
-        return metrics
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==================== WebSocket Endpoints ====================
@@ -403,7 +395,9 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
     """Фоновая задача для выполнения теста с WebSocket стримингом"""
     import time
     import uuid
-    start_time = time.time()
+    # Момент старта теста (UTC) + монотонный таймер для точного вычисления длительности.
+    start_ts = datetime.now(timezone.utc)
+    start_time = time.perf_counter()
     
     # Создаём callback для streaming
     streaming_callback = TestStreamingCallback(test_id, manager)
@@ -450,18 +444,10 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                 warmup_time=request.warmup_time
             )
         
-        end_time = time.time()
+        end_time = time.perf_counter()
         actual_duration = end_time - start_time
-        
-        # Сохраняем результаты
-        config = {
-            'db_types': request.db_types,
-            'iterations': request.iterations,
-            'virtual_users': request.virtual_users,
-            'scenario': request.scenario,
-            'warmup_time': request.warmup_time
-        }
-        
+        finish_ts = start_ts + timedelta(seconds=actual_duration)
+
         # Собираем системные и СУБД метрики
         system_metrics = {}
         dbms_metrics = {}
@@ -471,7 +457,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                 dbms_metrics[db_type] = await test_tester.get_dbms_metrics(db_type)
             except Exception as e:
                 print(f"Ошибка сбора метрик для {db_type}: {e}")
-        
+
         # Вычисляем итоговую статистику (поддержка обоих форматов результатов)
         total_transactions = 0
         for result in results:
@@ -496,7 +482,13 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
             try:
                 # Обновляем статус теста
                 print(f"[HISTORY_DB] Обновление статуса теста {test_id} на 'completed'...")
-                test_repository.update_test_run_status(test_id, 'completed', summary)
+                test_repository.update_test_run_status(
+                    test_id,
+                    'completed',
+                    summary,
+                    started_at=start_ts,
+                    finished_at=finish_ts
+                )
                 print(f"[HISTORY_DB] Статус обновлён")
                 
                 # Сохраняем результаты по каждой СУБД (поддержка обоих форматов)
@@ -555,7 +547,14 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         
         if HISTORY_ENABLED and test_repository:
             try:
-                test_repository.update_test_run_status(test_id, 'failed')
+                finish_ts = start_ts + timedelta(seconds=(time.perf_counter() - start_time))
+                test_repository.update_test_run_status(
+                    test_id,
+                    'failed',
+                    None,
+                    started_at=start_ts,
+                    finished_at=finish_ts
+                )
             except:
                 pass
     finally:
@@ -631,19 +630,6 @@ async def get_history_test(test_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/history/tests/{test_id}/timeseries")
-async def get_history_timeseries(test_id: str, db_type: Optional[str] = None, limit: int = 1000):
-    """Получить временной ряд теста"""
-    if not HISTORY_ENABLED or not test_repository:
-        raise HTTPException(status_code=503, detail="История тестов не настроена")
-    
-    try:
-        timeseries = test_repository.get_time_series(test_id, db_type=db_type, limit=limit)
-        return {"timeseries": timeseries}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.get("/history/compare/{test_id_1}/{test_id_2}")
 async def compare_history_tests(test_id_1: str, test_id_2: str):
     """Сравнить два теста из истории"""
@@ -678,26 +664,7 @@ async def delete_history_test(test_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/history/statistics")
-async def get_history_statistics():
-    """Получить статистику по истории тестов"""
-    if not HISTORY_ENABLED or not test_repository:
-        raise HTTPException(status_code=503, detail="История тестов не настроена")
-
-    try:
-        stats = test_repository.get_statistics()
-        return stats
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 # ==================== Scenario Endpoints ====================
-
-@app.get("/scenarios/enabled")
-async def scenarios_enabled():
-    """Проверить, включена ли функциональность сценариев"""
-    return {"enabled": SCENARIOS_ENABLED}
-
 
 @app.get("/scenarios")
 async def get_scenarios(
@@ -1152,141 +1119,208 @@ async def delete_query_param(scenario_id: str, query_id: str, param_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ==================== Scenario-based Testing Endpoints ====================
+# ==================== API endpoints для управления состоянием БД ====================
 
-class ScenarioTestRequest(BaseModel):
-    scenario_id: str
-    db_types: Optional[List[str]] = ["mysql", "postgresql"]
-    iterations: int = 100
-    virtual_users: Optional[int] = 10
-    warmup_time: Optional[int] = 5
-    test_name: Optional[str] = None
-
-
-@app.post("/test/scenario")
-async def run_scenario_test_endpoint(
-    request: ScenarioTestRequest,
-    background_tasks: BackgroundTasks
-):
-    """
-    Запуск нагрузочного теста на основе сценария из БД.
-    
-    В отличие от старого метода, использует параметризованные SQL-запросы
-    из сценария с динамической подстановкой значений.
-    """
-    if not scenario_repository:
-        raise HTTPException(status_code=503, detail="Сценарии тестирования не настроены")
+@app.get("/api/database/{dbms_type}/state")
+async def get_database_state(dbms_type: str):
+    """Получить текущее состояние БД (row counts, backup-таблицы)"""
+    if dbms_type not in ['mysql', 'postgresql']:
+        raise HTTPException(status_code=400, detail=f"Unsupported DB type: {dbms_type}")
     
     try:
-        import time
-        start_time = time.time()
-        
-        # Проверяем, что сценарий существует
-        scenario = scenario_repository.get_scenario(request.scenario_id)
-        if not scenario:
-            raise HTTPException(status_code=404, detail=f"Сценарий {request.scenario_id} не найден")
-        
-        # Генерируем ID теста
-        test_id = result_saver.generate_test_id() if 'result_saver' in globals() else str(uuid.uuid4())[:8]
-        
-        # Конфигурация для сохранения
-        config = {
-            'scenario_id': request.scenario_id,
-            'scenario_name': scenario['name'],
-            'scenario_type': scenario['scenario_type'],
-            'db_types': request.db_types,
-            'iterations': request.iterations,
-            'virtual_users': request.virtual_users,
-            'warmup_time': request.warmup_time
-        }
-        
-        # Устанавливаем callbacks для WebSocket
-        if manager:
-            callback = TestStreamingCallback(test_id, manager)
-            callback.set_total_queries(len(request.db_types))
-            tester.set_streaming_callback(callback)
-        
-        # Запуск теста
-        results = await tester.run_full_scenario_test_suite(
-            scenario_id=request.scenario_id,
-            db_types=request.db_types,
-            iterations=request.iterations,
-            virtual_users=request.virtual_users,
-            warmup_time=request.warmup_time
-        )
-        
-        end_time = time.time()
-        actual_duration = end_time - start_time
-        
-        # Собираем системные метрики
-        system_metrics = {}
-        dbms_metrics = {}
-        for db_type in request.db_types:
-            try:
-                system_metrics[db_type] = await tester.get_system_metrics(db_type)
-                dbms_metrics[db_type] = await tester.get_dbms_metrics(db_type)
-            except Exception as e:
-                print(f"Ошибка сбора метрик для {db_type}: {e}")
-        
-        # Подсчет общей статистики
-        total_transactions = 0
-        for result in results:
-            stats = result.get('stats', {})
-            total_transactions += stats.get('successful', 0) + stats.get('failed', 0)
-        
-        summary = {
-            'total_transactions': total_transactions,
-            'overall_tps': total_transactions / actual_duration if actual_duration > 0 else 0,
-            'total_duration': actual_duration
-        }
-        
-        # Сохраняем в БД истории
-        if HISTORY_ENABLED and test_repository:
-            try:
-                test_name = request.test_name or f"Сценарий: {scenario['name']}"
-                test_repository.create_test_run(
-                    name=test_name,
-                    config=config,
-                    status='completed',
-                    test_run_id=test_id
-                )
-                test_repository.update_test_run_status(test_id, 'completed', summary)
-                
-                for result in results:
-                    db_type = result.get('db_type')
-                    stats = result.get('stats', {})
-                    test_repository.add_test_result(
-                        test_run_id=test_id,
-                        db_type=db_type,
-                        metrics=stats,
-                        query_id=request.scenario_id,
-                        system_metrics=system_metrics.get(db_type),
-                        dbms_metrics=dbms_metrics.get(db_type)
-                    )
-                print(f"✅ Результаты теста {test_id} сохранены в БД истории")
-            except Exception as e:
-                print(f"⚠️ Ошибка сохранения в БД истории: {e}")
-        
-        return {
-            "test_id": test_id,
-            "scenario": {
-                "id": request.scenario_id,
-                "name": scenario['name'],
-                "type": scenario['scenario_type']
-            },
-            "results": results,
-            "system_metrics": system_metrics,
-            "dbms_metrics": dbms_metrics,
-            "summary": {
-                "total_duration": actual_duration,
-                "total_transactions": total_transactions,
-                "overall_tps": total_transactions / actual_duration if actual_duration > 0 else 0
-            }
-        }
-    except HTTPException:
-        raise
+        engine = get_db_connection().get_engine(dbms_type)
+        state = await get_db_state_manager().get_database_state(engine, dbms_type)
+        return state
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class BackupRequest(BaseModel):
+    tables: Optional[List[str]] = None
+
+
+class BackupResponse(BaseModel):
+    backup_id: str
+    dbms_type: str
+    tables: List[str]
+    row_counts: Dict[str, int]
+    created_at: str
+
+
+@app.post("/api/database/{dbms_type}/backup", response_model=BackupResponse)
+async def create_backup(dbms_type: str, request: BackupRequest):
+    """Создать backup вручную"""
+    if dbms_type not in ['mysql', 'postgresql']:
+        raise HTTPException(status_code=400, detail=f"Unsupported DB type: {dbms_type}")
+    
+    try:
+        engine = get_db_connection().get_engine(dbms_type)
+        state_manager = get_db_state_manager()
+        
+        # Если таблицы не указаны - backup всех таблиц
+        if request.tables:
+            tables = set(request.tables)
+        else:
+            # Получаем список всех таблиц
+            from sqlalchemy import inspect
+            inspector = inspect(engine)
+            tables = set(inspector.get_table_names())
+        
+        # Для ручного backup используем стратегию напрямую, bypassing write-check
+        backup_info = await state_manager._strategy.create_backup(engine, tables)
+        
+        if not backup_info:
+            raise HTTPException(status_code=500, detail="Failed to create backup - strategy returned None")
+        
+        # Сохраняем в active_backups для возможности восстановления
+        backup_key = f"{dbms_type}:{backup_info.backup_id}"
+        state_manager._active_backups[backup_key] = backup_info
+        
+        return BackupResponse(
+            backup_id=backup_info.backup_id,
+            dbms_type=dbms_type,
+            tables=list(backup_info.tables),
+            row_counts=backup_info.row_counts,
+            created_at=backup_info.created_at.isoformat()
+        )
+    except Exception as e:
+        import traceback
+        error_detail = f"{str(e)}\n{traceback.format_exc()}"
+        print(f"[BACKUP ERROR] {error_detail}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class RestoreRequest(BaseModel):
+    backup_id: Optional[str] = None
+
+
+class RestoreResponse(BaseModel):
+    success: bool
+    duration_ms: float
+    verified: bool
+    errors: List[str]
+
+
+@app.post("/api/database/{dbms_type}/restore", response_model=RestoreResponse)
+async def restore_backup(dbms_type: str, request: RestoreRequest):
+    """Восстановить из существующего backup"""
+    if dbms_type not in ['mysql', 'postgresql']:
+        raise HTTPException(status_code=400, detail=f"Unsupported DB type: {dbms_type}")
+    
+    try:
+        if request.backup_id:
+            # Ручное восстановление по ID
+            engine = get_db_connection().get_engine(dbms_type)
+            restore_result = await get_db_state_manager().manual_restore(
+                engine, dbms_type, request.backup_id
+            )
+        else:
+            raise HTTPException(status_code=400, detail="backup_id is required")
+        
+        return RestoreResponse(
+            success=restore_result.success,
+            duration_ms=restore_result.duration_ms,
+            verified=restore_result.verified,
+            errors=restore_result.errors
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class CleanupResponse(BaseModel):
+    deleted_tables: List[str]
+
+
+@app.post("/api/database/{dbms_type}/cleanup", response_model=CleanupResponse)
+async def cleanup_backups(dbms_type: str):
+    """Удалить backup-таблицы"""
+    if dbms_type not in ['mysql', 'postgresql']:
+        raise HTTPException(status_code=400, detail=f"Unsupported DB type: {dbms_type}")
+    
+    try:
+        engine = get_db_connection().get_engine(dbms_type)
+        deleted = await get_db_state_manager().cleanup_all_backups(engine, dbms_type)
+        return CleanupResponse(deleted_tables=deleted)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class EstimateResponse(BaseModel):
+    tables: Dict[str, Dict]
+    total_rows: int
+    total_size_bytes: int
+    estimated_time_sec: float
+    warnings: List[str]
+
+
+@app.get("/api/database/{dbms_type}/estimate", response_model=EstimateResponse)
+async def estimate_backup(dbms_type: str, tables: str):
+    """Оценить размер backup для указанных таблиц"""
+    if dbms_type not in ['mysql', 'postgresql']:
+        raise HTTPException(status_code=400, detail=f"Unsupported DB type: {dbms_type}")
+    
+    try:
+        engine = get_db_connection().get_engine(dbms_type)
+        table_list = tables.split(',')
+        
+        size_estimate = await get_db_state_manager()._strategy.estimate_size(
+            engine, set(table_list)
+        )
+        
+        return EstimateResponse(
+            tables=size_estimate.tables,
+            total_rows=size_estimate.total_rows,
+            total_size_bytes=size_estimate.total_size_bytes,
+            estimated_time_sec=size_estimate.estimated_backup_time_sec,
+            warnings=size_estimate.warnings
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class RestoreSettings(BaseModel):
+    auto_restore: Optional[bool] = None
+    verify_after_restore: Optional[bool] = None
+    strategy: Optional[str] = None
+    large_table_warning_threshold: Optional[int] = None
+
+
+@app.get("/api/settings/restore")
+async def get_restore_settings():
+    """Получить настройки восстановления"""
+    config = get_restore_config()
+    return {
+        "auto_restore": config.get("auto_restore", True),
+        "verify_after_restore": config.get("verify_after_restore", True),
+        "strategy": config.get("default_strategy", "sql"),
+        "large_table_warning_threshold": config.get("large_table_warning_threshold", 1000000),
+        "large_table_confirm_threshold": config.get("large_table_confirm_threshold", 10000000),
+        "backup_table_prefix": config.get("backup_table_prefix", "_loadtest_backup_")
+    }
+
+
+@app.put("/api/settings/restore")
+async def update_restore_settings(request: RestoreSettings):
+    """Обновить настройки восстановления"""
+    from backend.config import update_restore_config
+    
+    updates = {}
+    if request.auto_restore is not None:
+        updates["auto_restore"] = request.auto_restore
+    if request.verify_after_restore is not None:
+        updates["verify_after_restore"] = request.verify_after_restore
+    if request.strategy is not None:
+        updates["default_strategy"] = request.strategy
+    if request.large_table_warning_threshold is not None:
+        updates["large_table_warning_threshold"] = request.large_table_warning_threshold
+    
+    updated_config = update_restore_config(updates)
+    return {
+        "auto_restore": updated_config.get("auto_restore", True),
+        "verify_after_restore": updated_config.get("verify_after_restore", True),
+        "strategy": updated_config.get("default_strategy", "sql"),
+        "large_table_warning_threshold": updated_config.get("large_table_warning_threshold", 1000000)
+    }
 
 
 if __name__ == "__main__":

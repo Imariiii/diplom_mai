@@ -2,10 +2,10 @@
 WebSocket менеджер для real-time обновлений тестирования
 """
 import asyncio
-import json
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 from typing import Dict, List, Set, Any, Optional, Callable
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
 from dataclasses import dataclass, asdict
 
 
@@ -157,6 +157,26 @@ class ConnectionManager:
         # Также отправляем в глобальный канал
         await self.broadcast_to_test("global", message)
     
+    async def send_backup_status(self, test_id: str, status: str, data: Dict[str, Any]):
+        """
+        Отправить статус backup/restore операции
+        
+        Args:
+            test_id: ID теста
+            status: Тип статуса (backup_started, backup_completed, restore_started, restore_completed, etc.)
+            data: Данные статуса (tables, duration_ms, verified, etc.)
+        """
+        message = {
+            "type": "backup_status",
+            "status": status,
+            "test_id": test_id,
+            "data": data,
+            "timestamp": datetime.now().isoformat()
+        }
+        await self.broadcast_to_test(test_id, message)
+        # Также отправляем в глобальный канал
+        await self.broadcast_to_test("global", message)
+    
     def get_connection_count(self, test_id: str = None) -> int:
         """Получить количество соединений"""
         if test_id:
@@ -176,7 +196,7 @@ class TestStreamingCallback:
     def __init__(self, test_id: str, connection_manager: ConnectionManager):
         self.test_id = test_id
         self.manager = connection_manager
-        self.start_time = datetime.now()
+        self.start_time = time.perf_counter()
         self.total_queries = 1  # Общее количество запросов для теста
         self.current_query = 0  # Текущий обрабатываемый запрос
         self.metrics_buffer: List[TestMetricsUpdate] = []
@@ -218,8 +238,11 @@ class TestStreamingCallback:
         deadlocks: int = 0
     ):
         """Callback вызываемый при получении новых метрик"""
-        now = datetime.now()
-        elapsed = (now - self.start_time).total_seconds()
+        now = datetime.now(timezone.utc)
+        elapsed = time.perf_counter() - self.start_time
+        # Защита от отрицательного elapsed при reconnect или изменении системного времени
+        if elapsed < 0:
+            elapsed = 0
         progress = self._calculate_progress()
         
         update = TestMetricsUpdate(
@@ -266,7 +289,10 @@ class TestStreamingCallback:
     
     async def on_test_start(self):
         """Вызывается при начале теста"""
-        self.start_time = datetime.now()
+        # Не сбрасываем start_time если она уже установлена (при reconnect)
+        if not hasattr(self, '_start_time_set') or not self._start_time_set:
+            self.start_time = time.perf_counter()
+            self._start_time_set = True
         self.current_query = 0
         await self.on_status_change("running", "Тестирование начато")
     
@@ -275,7 +301,7 @@ class TestStreamingCallback:
         self.current_query = self.total_queries
         message = "Тестирование завершено"
         if summary:
-            actual_duration = (datetime.now() - self.start_time).total_seconds()
+            actual_duration = time.perf_counter() - self.start_time
             message += f". Длительность: {actual_duration:.1f} сек, TPS: {summary.get('overall_tps', 0):.2f}"
         await self.on_status_change("completed", message)
     

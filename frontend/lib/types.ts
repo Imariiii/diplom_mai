@@ -1,10 +1,3 @@
-export interface Database {
-  id: string
-  name: string
-  type: "postgresql" | "mysql" | "mariadb" | "sqlite" | "mssql"
-  icon: string
-}
-
 // Режим тестирования
 export type TestMode = 
   | "scenario"       // Режим со сценарием тестирования
@@ -208,31 +201,26 @@ export interface CreateScenarioParamRequest {
   string_length?: number
 }
 
-export interface ScenarioTestRequest {
-  scenario_id: string
-  db_types?: string[]
-  iterations?: number
-  virtual_users?: number
-  warmup_time?: number
-  test_name?: string
+// ==================== Database State Management Types ====================
+
+export interface DatabaseState {
+  dbms_type: string
+  tables: Record<string, {
+    row_count: number
+    has_backup: boolean
+  }>
+  has_pending_backups: boolean
+  backup_tables: string[]
+  status: 'clean' | 'modified' | 'backup_exists'
 }
 
-export interface SystemMetrics {
-  cpu_usage: number
-  memory_usage_mb: number
-  memory_usage_percent: number
-  disk_iops: number
-  network_in_mbps: number
-  network_out_mbps: number
+
+export interface RestoreSettings {
+  auto_restore: boolean
+  verify_after_restore: boolean
+  strategy: 'sql' | 'native'
+  large_table_warning_threshold: number
+  large_table_confirm_threshold: number
+  backup_table_prefix: string
 }
 
-export interface DBMSMetrics {
-  cache_hit_ratio: number
-  buffer_pool_hit_ratio: number
-  lock_waits: number
-  deadlocks: number
-  active_connections: number
-  table_sizes_mb: Record<string, number>
-  index_sizes_mb: Record<string, number>
-  total_db_size_mb: number
-}

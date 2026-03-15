@@ -6,10 +6,11 @@ import asyncio
 import statistics
 import psutil
 from typing import Dict, List, Optional, Callable, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import text
 from backend.database.connection import DatabaseConnection
 from backend.database.queries import QueryManager
+from backend.database.state_manager import DatabaseStateManager
 
 
 class LoadTester:
@@ -18,11 +19,13 @@ class LoadTester:
     def __init__(self):
         self.db_connection = DatabaseConnection()
         self.query_manager = QueryManager()
+        self.state_manager = DatabaseStateManager()
         self.results: List[Dict] = []
         
         # Callback для real-time обновлений
         self._metrics_callback: Optional[Callable] = None
         self._status_callback: Optional[Callable] = None
+        self._backup_callback: Optional[Callable] = None  # Callback для backup/restore статусов
         self._is_streaming: bool = False
         self._streaming_interval: float = 1.0  # Интервал отправки метрик в секундах
     
@@ -30,6 +33,18 @@ class LoadTester:
         """Установить callback для потоковой отправки метрик"""
         self._metrics_callback = callback
         self._is_streaming = callback is not None
+    
+    def set_backup_callback(self, callback: Callable):
+        """Установить callback для статуса backup/restore"""
+        self._backup_callback = callback
+    
+    async def _emit_backup_status(self, status: str, data: Dict = None):
+        """Отправить статус backup/restore через callback"""
+        if self._backup_callback:
+            try:
+                await self._backup_callback(status, data or {})
+            except Exception as e:
+                print(f"Ошибка отправки статуса backup: {e}")
     
     def set_status_callback(self, callback: Callable):
         """Установить callback для обновления статуса"""
@@ -91,7 +106,7 @@ class LoadTester:
     
     async def execute_query(self, db_type: str, query: str, query_id: str) -> Dict:
         """Выполнение одного запроса с измерением времени"""
-        start_time = time.time()
+        start_time = time.perf_counter()
         error = None
         rows_count = 0
         
@@ -104,7 +119,7 @@ class LoadTester:
         except Exception as e:
             error = str(e)
         
-        end_time = time.time()
+        end_time = time.perf_counter()
         execution_time = (end_time - start_time) * 1000  # в миллисекундах
         
         return {
@@ -113,7 +128,7 @@ class LoadTester:
             'execution_time_ms': execution_time,
             'rows_count': rows_count,
             'error': error,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         }
     
     async def run_single_test(
@@ -122,12 +137,20 @@ class LoadTester:
         query_id: str, 
         iterations: int = 10,
         virtual_users: int = 1,
-        scenario: str = "mixed_light"
+        scenario: str = "mixed_light",
+        auto_restore: bool = True
     ) -> Dict:
-        """Запуск одного теста с несколькими итерациями"""
+        """Запуск одного теста с несколькими итерациями и автовосстановлением БД"""
         query = self.query_manager.get_query(query_id)
+        queries = [query['sql']]
+        
+        # Подготовка БД (backup если нужно)
+        prepare_info = await self.prepare_database_for_test(
+            db_type, queries, auto_restore
+        )
+        
         results = []
-        start_time = time.time()
+        start_time = time.perf_counter()
         last_emit_time = start_time
         
         # Буферы для потоковых метрик
@@ -135,44 +158,51 @@ class LoadTester:
         recent_successful = 0
         recent_failed = 0
         
-        # Запуск итераций (симуляция виртуальных пользователей)
-        for i in range(iterations):
-            result = await self.execute_query(db_type, query['sql'], query_id)
-            results.append(result)
-            
-            # Накапливаем метрики для потоковой отправки
-            if result['error'] is None:
-                recent_times.append(result['execution_time_ms'])
-                recent_successful += 1
-            else:
-                recent_failed += 1
-            
-            # Отправляем метрики каждые N миллисекунд
-            current_time = time.time()
-            if self._is_streaming and (current_time - last_emit_time) >= self._streaming_interval:
-                if recent_times:
-                    avg_response_time = statistics.mean(recent_times) if recent_times else 0
-                    elapsed = current_time - start_time
-                    tps = (recent_successful + recent_failed) / (current_time - last_emit_time) if (current_time - last_emit_time) > 0 else 0
-                    
-                    await self._emit_metrics(
-                        db_type=db_type,
-                        response_time=avg_response_time,
-                        tps=tps,
-                        successful=recent_successful,
-                        failed=recent_failed
-                    )
+        try:
+            # Запуск итераций (симуляция виртуальных пользователей)
+            for i in range(iterations):
+                result = await self.execute_query(db_type, query['sql'], query_id)
+                results.append(result)
                 
-                # Сбрасываем буферы
-                recent_times = []
-                recent_successful = 0
-                recent_failed = 0
-                last_emit_time = current_time
+                # Накапливаем метрики для потоковой отправки
+                if result['error'] is None:
+                    recent_times.append(result['execution_time_ms'])
+                    recent_successful += 1
+                else:
+                    recent_failed += 1
+                
+                # Отправляем метрики каждые N миллисекунд
+                current_time = time.perf_counter()
+                if self._is_streaming and (current_time - last_emit_time) >= self._streaming_interval:
+                    if recent_times:
+                        avg_response_time = statistics.mean(recent_times) if recent_times else 0
+                        elapsed = current_time - start_time
+                        tps = (recent_successful + recent_failed) / (current_time - last_emit_time) if (current_time - last_emit_time) > 0 else 0
+                        
+                        await self._emit_metrics(
+                            db_type=db_type,
+                            response_time=avg_response_time,
+                            tps=tps,
+                            successful=recent_successful,
+                            failed=recent_failed
+                        )
+                    
+                    # Сбрасываем буферы
+                    recent_times = []
+                    recent_successful = 0
+                    recent_failed = 0
+                    last_emit_time = current_time
+                
+                await asyncio.sleep(0.01)  # Небольшая задержка между запросами
             
-            await asyncio.sleep(0.01)  # Небольшая задержка между запросами
-        
-        end_time = time.time()
-        total_test_time = end_time - start_time
+            end_time = time.perf_counter()
+            total_test_time = end_time - start_time
+            
+        finally:
+            # Восстановление БД (даже при ошибке)
+            restore_info = await self.restore_database_after_test(
+                db_type, prepare_info, auto_restore
+            )
         
         # Статистика
         execution_times = [r['execution_time_ms'] for r in results if r['error'] is None]
@@ -211,7 +241,17 @@ class LoadTester:
                 'error_count': failed_count,
                 'error_rate': (failed_count / iterations) * 100 if iterations > 0 else 0,
                 
-                'timestamp': datetime.now().isoformat()
+                # Информация о restore
+                'restore_info': {
+                    'needed': prepare_info.get('needs_restore', False),
+                    'restored': restore_info.get('restored', False),
+                    'affected_tables': prepare_info.get('affected_tables', []),
+                    'duration_ms': restore_info.get('duration_ms'),
+                    'verified': restore_info.get('verified'),
+                    'errors': restore_info.get('errors')
+                },
+                
+                'timestamp': datetime.now(timezone.utc).isoformat()
             }
         else:
             stats = {
@@ -228,7 +268,15 @@ class LoadTester:
                 'active_connections': virtual_users,
                 'error_count': len(results),
                 'error_rate': 100,
-                'timestamp': datetime.now().isoformat()
+                'restore_info': {
+                    'needed': prepare_info.get('needs_restore', False),
+                    'restored': restore_info.get('restored', False),
+                    'affected_tables': prepare_info.get('affected_tables', []),
+                    'duration_ms': restore_info.get('duration_ms'),
+                    'verified': restore_info.get('verified'),
+                    'errors': restore_info.get('errors')
+                },
+                'timestamp': datetime.now(timezone.utc).isoformat()
             }
         
         return stats
@@ -239,29 +287,60 @@ class LoadTester:
         db_types: List[str] = None,
         iterations: int = 10,
         virtual_users: int = 1,
-        scenario: str = "mixed_light"
+        scenario: str = "mixed_light",
+        auto_restore: bool = True
     ) -> Dict:
-        """Запуск сравнительного теста для нескольких БД"""
+        """Запуск сравнительного теста для нескольких БД с автовосстановлением"""
         if db_types is None:
             db_types = ['mysql', 'postgresql']
         
         results = {}
+        prepare_infos = {}
         
+        # Получаем запрос для анализа
+        query = self.query_manager.get_query(query_id)
+        queries = [query['sql']]
+        
+        # Подготовка для всех БД
         for db_type in db_types:
-            print(f"Тестирование {db_type}...")
-            stats = await self.run_single_test(
-                db_type, 
-                query_id, 
-                iterations,
-                virtual_users=virtual_users,
-                scenario=scenario
+            print(f"Подготовка {db_type}...")
+            prepare_info = await self.prepare_database_for_test(
+                db_type, queries, auto_restore
             )
-            results[db_type] = stats
+            prepare_infos[db_type] = prepare_info
+        
+        # Запуск тестов
+        try:
+            for db_type in db_types:
+                print(f"Тестирование {db_type}...")
+                stats = await self.run_single_test(
+                    db_type, 
+                    query_id, 
+                    iterations,
+                    virtual_users=virtual_users,
+                    scenario=scenario,
+                    auto_restore=False  # Restore сделаем вручную после всех тестов
+                )
+                results[db_type] = stats
+        finally:
+            # Восстановление всех БД
+            for db_type in db_types:
+                if prepare_infos[db_type].get('needs_restore'):
+                    await self.restore_database_after_test(
+                        db_type, prepare_infos[db_type], auto_restore
+                    )
         
         return {
             'query_id': query_id,
             'comparison': results,
-            'timestamp': datetime.now().isoformat()
+            'restore_info': {
+                db_type: {
+                    'needed': info.get('needs_restore', False),
+                    'affected_tables': info.get('affected_tables', [])
+                }
+                for db_type, info in prepare_infos.items()
+            },
+            'timestamp': datetime.now(timezone.utc).isoformat()
         }
     
     async def run_full_test_suite(
@@ -501,7 +580,7 @@ class LoadTester:
         scenario_name: str
     ) -> Dict:
         """Выполнение запроса сценария с подстановкой параметров"""
-        start_time = time.time()
+        start_time = time.perf_counter()
         error = None
         rows_count = 0
 
@@ -530,7 +609,7 @@ class LoadTester:
         except Exception as e:
             error = str(e)
 
-        end_time = time.time()
+        end_time = time.perf_counter()
         execution_time = (end_time - start_time) * 1000
 
         return {
@@ -540,7 +619,7 @@ class LoadTester:
             'execution_time_ms': execution_time,
             'rows_count': rows_count,
             'error': error,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
     async def _generate_param_value(
@@ -612,9 +691,10 @@ class LoadTester:
         db_type: str,
         scenario: Dict,
         iterations: int = 10,
-        virtual_users: int = 1
+        virtual_users: int = 1,
+        auto_restore: bool = True
     ) -> Dict:
-        """Запуск теста на основе сценария"""
+        """Запуск теста на основе сценария с автовосстановлением БД"""
         import random
 
         queries = scenario.get('queries', [])
@@ -627,8 +707,16 @@ class LoadTester:
                 'failed': 0
             }
 
+        # Получаем SQL запросы для анализа
+        sql_queries = [q['sql_template'] for q in queries]
+        
+        # Подготовка БД
+        prepare_info = await self.prepare_database_for_test(
+            db_type, sql_queries, auto_restore
+        )
+
         results = []
-        start_time = time.time()
+        start_time = time.perf_counter()
 
         # Создаем взвешенный список запросов
         weighted_queries = []
@@ -642,48 +730,55 @@ class LoadTester:
         recent_successful = 0
         recent_failed = 0
 
-        for i in range(iterations):
-            # Выбираем случайный запрос из взвешенного списка
-            query = random.choice(weighted_queries)
+        try:
+            for i in range(iterations):
+                # Выбираем случайный запрос из взвешенного списка
+                query = random.choice(weighted_queries)
 
-            result = await self.execute_scenario_query(
-                db_type,
-                query['sql_template'],
-                query.get('params', []),
-                scenario.get('name', 'unknown')
+                result = await self.execute_scenario_query(
+                    db_type,
+                    query['sql_template'],
+                    query.get('params', []),
+                    scenario.get('name', 'unknown')
+                )
+                results.append(result)
+
+                if result['error'] is None:
+                    recent_times.append(result['execution_time_ms'])
+                    recent_successful += 1
+                else:
+                    recent_failed += 1
+
+                # Потоковая отправка метрик
+                current_time = time.perf_counter()
+                if self._is_streaming and (current_time - last_emit_time) >= self._streaming_interval:
+                    if recent_times:
+                        avg_response_time = statistics.mean(recent_times)
+                        tps = (recent_successful + recent_failed) / (current_time - last_emit_time)
+
+                        await self._emit_metrics(
+                            db_type=db_type,
+                            response_time=avg_response_time,
+                            tps=tps,
+                            successful=recent_successful,
+                            failed=recent_failed
+                        )
+
+                    recent_times = []
+                    recent_successful = 0
+                    recent_failed = 0
+                    last_emit_time = current_time
+
+                await asyncio.sleep(0.01)
+
+            end_time = time.perf_counter()
+            total_test_time = end_time - start_time
+            
+        finally:
+            # Восстановление БД
+            restore_info = await self.restore_database_after_test(
+                db_type, prepare_info, auto_restore
             )
-            results.append(result)
-
-            if result['error'] is None:
-                recent_times.append(result['execution_time_ms'])
-                recent_successful += 1
-            else:
-                recent_failed += 1
-
-            # Потоковая отправка метрик
-            current_time = time.time()
-            if self._is_streaming and (current_time - last_emit_time) >= self._streaming_interval:
-                if recent_times:
-                    avg_response_time = statistics.mean(recent_times)
-                    tps = (recent_successful + recent_failed) / (current_time - last_emit_time)
-
-                    await self._emit_metrics(
-                        db_type=db_type,
-                        response_time=avg_response_time,
-                        tps=tps,
-                        successful=recent_successful,
-                        failed=recent_failed
-                    )
-
-                recent_times = []
-                recent_successful = 0
-                recent_failed = 0
-                last_emit_time = current_time
-
-            await asyncio.sleep(0.01)
-
-        end_time = time.time()
-        total_test_time = end_time - start_time
 
         # Статистика
         execution_times = [r['execution_time_ms'] for r in results if r['error'] is None]
@@ -704,7 +799,15 @@ class LoadTester:
             'p95_time_ms': self.calculate_percentile(execution_times, 95) if execution_times else 0,
             'tps': successful_count / total_test_time if total_test_time > 0 else 0,
             'error_rate': (failed_count / iterations) * 100 if iterations > 0 else 0,
-            'timestamp': datetime.now().isoformat()
+            'restore_info': {
+                'needed': prepare_info.get('needs_restore', False),
+                'restored': restore_info.get('restored', False),
+                'affected_tables': prepare_info.get('affected_tables', []),
+                'duration_ms': restore_info.get('duration_ms'),
+                'verified': restore_info.get('verified'),
+                'errors': restore_info.get('errors')
+            },
+            'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
         return stats
@@ -780,7 +883,8 @@ class LoadTester:
                 db_type,
                 scenario,
                 iterations=iterations,
-                virtual_users=virtual_users
+                virtual_users=virtual_users,
+                auto_restore=True
             )
 
             all_results.append({
@@ -814,7 +918,7 @@ class LoadTester:
         import random
         import uuid
 
-        start_time = time.time()
+        start_time = time.perf_counter()
         error = None
         rows_count = 0
 
@@ -843,7 +947,7 @@ class LoadTester:
         except Exception as e:
             error = str(e)
 
-        end_time = time.time()
+        end_time = time.perf_counter()
         execution_time = (end_time - start_time) * 1000
 
         return {
@@ -853,7 +957,7 @@ class LoadTester:
             'execution_time_ms': execution_time,
             'rows_count': rows_count,
             'error': error,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
     async def _generate_param_value(
@@ -927,9 +1031,10 @@ class LoadTester:
         db_type: str,
         scenario: Dict,
         iterations: int = 10,
-        virtual_users: int = 1
+        virtual_users: int = 1,
+        auto_restore: bool = True
     ) -> Dict:
-        """Запуск теста на основе сценария"""
+        """Запуск теста на основе сценария с автовосстановлением БД"""
         import random
 
         queries = scenario.get('queries', [])
@@ -942,8 +1047,16 @@ class LoadTester:
                 'failed': 0
             }
 
+        # Получаем SQL запросы для анализа
+        sql_queries = [q['sql_template'] for q in queries]
+        
+        # Подготовка БД
+        prepare_info = await self.prepare_database_for_test(
+            db_type, sql_queries, auto_restore
+        )
+
         results = []
-        start_time = time.time()
+        start_time = time.perf_counter()
 
         # Создаем взвешенный список запросов
         weighted_queries = []
@@ -957,48 +1070,55 @@ class LoadTester:
         recent_successful = 0
         recent_failed = 0
 
-        for i in range(iterations):
-            # Выбираем случайный запрос из взвешенного списка
-            query = random.choice(weighted_queries)
+        try:
+            for i in range(iterations):
+                # Выбираем случайный запрос из взвешенного списка
+                query = random.choice(weighted_queries)
 
-            result = await self.execute_scenario_query(
-                db_type,
-                query['sql_template'],
-                query.get('params', []),
-                scenario.get('name', 'unknown')
+                result = await self.execute_scenario_query(
+                    db_type,
+                    query['sql_template'],
+                    query.get('params', []),
+                    scenario.get('name', 'unknown')
+                )
+                results.append(result)
+
+                if result['error'] is None:
+                    recent_times.append(result['execution_time_ms'])
+                    recent_successful += 1
+                else:
+                    recent_failed += 1
+
+                # Потоковая отправка метрик
+                current_time = time.perf_counter()
+                if self._is_streaming and (current_time - last_emit_time) >= self._streaming_interval:
+                    if recent_times:
+                        avg_response_time = statistics.mean(recent_times)
+                        tps = (recent_successful + recent_failed) / (current_time - last_emit_time)
+
+                        await self._emit_metrics(
+                            db_type=db_type,
+                            response_time=avg_response_time,
+                            tps=tps,
+                            successful=recent_successful,
+                            failed=recent_failed
+                        )
+
+                    recent_times = []
+                    recent_successful = 0
+                    recent_failed = 0
+                    last_emit_time = current_time
+
+                await asyncio.sleep(0.01)
+
+            end_time = time.perf_counter()
+            total_test_time = end_time - start_time
+            
+        finally:
+            # Восстановление БД
+            restore_info = await self.restore_database_after_test(
+                db_type, prepare_info, auto_restore
             )
-            results.append(result)
-
-            if result['error'] is None:
-                recent_times.append(result['execution_time_ms'])
-                recent_successful += 1
-            else:
-                recent_failed += 1
-
-            # Потоковая отправка метрик
-            current_time = time.time()
-            if self._is_streaming and (current_time - last_emit_time) >= self._streaming_interval:
-                if recent_times:
-                    avg_response_time = statistics.mean(recent_times)
-                    tps = (recent_successful + recent_failed) / (current_time - last_emit_time)
-
-                    await self._emit_metrics(
-                        db_type=db_type,
-                        response_time=avg_response_time,
-                        tps=tps,
-                        successful=recent_successful,
-                        failed=recent_failed
-                    )
-
-                recent_times = []
-                recent_successful = 0
-                recent_failed = 0
-                last_emit_time = current_time
-
-            await asyncio.sleep(0.01)
-
-        end_time = time.time()
-        total_test_time = end_time - start_time
 
         # Статистика
         execution_times = [r['execution_time_ms'] for r in results if r['error'] is None]
@@ -1019,7 +1139,15 @@ class LoadTester:
             'p95_time_ms': self.calculate_percentile(execution_times, 95) if execution_times else 0,
             'tps': successful_count / total_test_time if total_test_time > 0 else 0,
             'error_rate': (failed_count / iterations) * 100 if iterations > 0 else 0,
-            'timestamp': datetime.now().isoformat()
+            'restore_info': {
+                'needed': prepare_info.get('needs_restore', False),
+                'restored': restore_info.get('restored', False),
+                'affected_tables': prepare_info.get('affected_tables', []),
+                'duration_ms': restore_info.get('duration_ms'),
+                'verified': restore_info.get('verified'),
+                'errors': restore_info.get('errors')
+            },
+            'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
         return stats
@@ -1095,7 +1223,8 @@ class LoadTester:
                 db_type,
                 scenario,
                 iterations=iterations,
-                virtual_users=virtual_users
+                virtual_users=virtual_users,
+                auto_restore=True
             )
 
             all_results.append({
@@ -1121,3 +1250,126 @@ class LoadTester:
     def close(self):
         """Закрытие подключений"""
         self.db_connection.close_all()
+    
+    # ==================== Методы для backup/restore ====================
+    
+    async def prepare_database_for_test(
+        self, 
+        db_type: str, 
+        queries: List[str],
+        auto_restore: bool = True
+    ) -> Dict:
+        """
+        Подготовка БД к тесту: анализ запросов и создание backup если нужно
+        
+        Args:
+            db_type: Тип СУБД
+            queries: Список SQL запросов
+            auto_restore: Включить автовосстановление после теста
+            
+        Returns:
+            Dict с результатами подготовки
+        """
+        needs_restore = self.state_manager.needs_restore(queries)
+        
+        if not needs_restore:
+            return {
+                "needs_restore": False,
+                "affected_tables": [],
+                "prepare_result": None
+            }
+        
+        affected_tables = self.state_manager.get_affected_tables(queries)
+        
+        # Отправляем статус
+        await self._emit_backup_status("backup_started", {
+            "dbms_type": db_type,
+            "tables": list(affected_tables),
+            "auto_restore": auto_restore
+        })
+        
+        try:
+            engine = self.db_connection.get_engine(db_type)
+            prepare_result = await self.state_manager.prepare_for_test(
+                engine, db_type, queries
+            )
+            
+            # Отправляем статус о завершении backup
+            await self._emit_backup_status("backup_completed", {
+                "dbms_type": db_type,
+                "tables": list(affected_tables),
+                "row_counts": prepare_result.backup_info.row_counts if prepare_result.backup_info else {},
+                "warnings": prepare_result.warnings
+            })
+            
+            return {
+                "needs_restore": True,
+                "affected_tables": list(affected_tables),
+                "prepare_result": prepare_result
+            }
+            
+        except Exception as e:
+            await self._emit_backup_status("backup_failed", {
+                "dbms_type": db_type,
+                "error": str(e)
+            })
+            raise
+    
+    async def restore_database_after_test(
+        self,
+        db_type: str,
+        prepare_result: Dict,
+        auto_restore: bool = True
+    ) -> Dict:
+        """
+        Восстановление БД после теста
+        
+        Args:
+            db_type: Тип СУБД
+            prepare_result: Результат подготовки (от prepare_database_for_test)
+            auto_restore: Выполнить восстановление
+            
+        Returns:
+            Dict с результатами восстановления
+        """
+        if not prepare_result.get("needs_restore") or not auto_restore:
+            return {
+                "restored": False,
+                "reason": "No restore needed or auto_restore disabled"
+            }
+        
+        await self._emit_backup_status("restore_started", {
+            "dbms_type": db_type,
+            "tables": prepare_result.get("affected_tables", [])
+        })
+        
+        try:
+            engine = self.db_connection.get_engine(db_type)
+            restore_result = await self.state_manager.restore_after_test(
+                engine, db_type, prepare_result["prepare_result"]
+            )
+            
+            await self._emit_backup_status("restore_completed", {
+                "dbms_type": db_type,
+                "success": restore_result.success,
+                "duration_ms": restore_result.duration_ms,
+                "verified": restore_result.verified,
+                "errors": restore_result.errors
+            })
+            
+            return {
+                "restored": restore_result.success,
+                "duration_ms": restore_result.duration_ms,
+                "verified": restore_result.verified,
+                "errors": restore_result.errors
+            }
+            
+        except Exception as e:
+            await self._emit_backup_status("restore_failed", {
+                "dbms_type": db_type,
+                "error": str(e)
+            })
+            return {
+                "restored": False,
+                "error": str(e)
+            }

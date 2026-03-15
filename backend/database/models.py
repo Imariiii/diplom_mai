@@ -2,8 +2,8 @@
 SQLAlchemy модели для хранения истории тестов
 """
 import uuid
-from datetime import datetime
-from typing import Optional, Dict, Any
+from datetime import datetime, timezone
+from typing import Dict, Any
 from sqlalchemy import (
     Column, String, Integer, Float, DateTime, ForeignKey, 
     Text, JSON, BigInteger, Index, create_engine
@@ -22,8 +22,8 @@ class TestRun(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(255), nullable=False)
     status = Column(String(50), nullable=False, default='pending')  # pending, running, completed, failed
-    started_at = Column(DateTime, default=datetime.utcnow)
-    finished_at = Column(DateTime, nullable=True)
+    started_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    finished_at = Column(DateTime(timezone=True), nullable=True)
     
     # Конфигурация теста
     config = Column(JSON, nullable=False, default=dict)
@@ -44,11 +44,20 @@ class TestRun(Base):
     #   "total_duration": 60
     # }
     
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     
     # Relationships
     results = relationship("TestResult", back_populates="test_run", cascade="all, delete-orphan")
     time_series = relationship("TimeSeries", back_populates="test_run", cascade="all, delete-orphan")
+    
+    # Restore-related fields
+    has_write_operations = Column(String(1), nullable=False, default='f')  # 't' - есть write-операции
+    affected_tables = Column(JSON, nullable=True)  # ["film", "customer"]
+    auto_restore_enabled = Column(String(1), nullable=False, default='t')  # 't' - авто-восстановление включено
+    restore_status = Column(String(50), nullable=True)  # pending/success/failed/skipped/null
+    restore_duration_ms = Column(Float, nullable=True)
+    restore_verified = Column(String(1), nullable=True)  # 't'/'f' - верификация прошла
+    restore_errors = Column(JSON, nullable=True)  # Список ошибок
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -60,6 +69,14 @@ class TestRun(Base):
             'config': self.config,
             'summary': self.summary,
             'created_at': self.created_at.isoformat() if self.created_at else None,
+            # Restore fields
+            'has_write_operations': self.has_write_operations == 't',
+            'affected_tables': self.affected_tables,
+            'auto_restore_enabled': self.auto_restore_enabled == 't',
+            'restore_status': self.restore_status,
+            'restore_duration_ms': self.restore_duration_ms,
+            'restore_verified': self.restore_verified == 't' if self.restore_verified else None,
+            'restore_errors': self.restore_errors,
         }
 
 
@@ -108,7 +125,7 @@ class TestResult(Base):
     #   "total_db_size_mb": 512.5
     # }
     
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     
     # Relationships
     test_run = relationship("TestRun", back_populates="results")
@@ -139,7 +156,7 @@ class TimeSeries(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     test_run_id = Column(UUID(as_uuid=True), ForeignKey('test_runs.id', ondelete='CASCADE'), nullable=False)
     db_type = Column(String(50), nullable=False)
-    timestamp = Column(DateTime, nullable=False)
+    timestamp = Column(DateTime(timezone=True), nullable=False)
     
     # Метрики в реальном времени
     response_time = Column(Float, nullable=True)
@@ -197,8 +214,8 @@ class TestScenario(Base):
     scenario_type = Column(String(50), nullable=False)  # read_only, write_only, mixed_light, mixed_heavy, oltp, olap, custom
     is_builtin = Column(String(1), nullable=False, default='f')  # 't' - системный (нельзя удалить), 'f' - пользовательский
     is_active = Column(String(1), nullable=False, default='t')  # 't' - активен, 'f' - неактивен
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     # Relationships
     queries = relationship("ScenarioQuery", back_populates="scenario", cascade="all, delete-orphan", order_by="ScenarioQuery.order_index")
@@ -234,7 +251,7 @@ class ScenarioQuery(Base):
     weight = Column(Integer, nullable=False, default=1)  # Вес для распределения нагрузки (1-100)
     order_index = Column(Integer, nullable=False, default=0)  # Порядок выполнения
     description = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     
     # Relationships
     scenario = relationship("TestScenario", back_populates="queries")
@@ -280,7 +297,7 @@ class ScenarioParam(Base):
     # Для sequential_int
     current_value = Column(Integer, nullable=True, default=0)  # Текущее значение счётчика
     step = Column(Integer, nullable=True, default=1)  # Шаг инкремента
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     
     # Relationships
     query = relationship("ScenarioQuery", back_populates="params")

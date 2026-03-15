@@ -188,10 +188,12 @@ export function DashboardsPage() {
 
                 setCurrentTest({
                   ...updatedTest,
+                  summary: response.summary,
                   results: formattedResults,
                 })
                 addTestToHistory({
                   ...updatedTest,
+                  summary: response.summary,
                   results: formattedResults,
                 })
                 toast.success("Тестирование завершено!")

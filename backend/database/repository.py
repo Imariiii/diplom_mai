@@ -6,9 +6,6 @@ from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from sqlalchemy import create_engine, desc
 from sqlalchemy.orm import sessionmaker, Session, joinedload
-from sqlalchemy.exc import SQLAlchemyError
-from collections import defaultdict  # Для подсчета запросов в списке сценариев
-import time  # Для таймаутов при инициализации
 
 from backend.database.models import (
     Base, TestRun, TestResult, TimeSeries,
@@ -17,8 +14,13 @@ from backend.database.models import (
 
 
 def get_local_now():
-    """Получить текущее локальное время"""
-    return datetime.now()
+    """
+    Получить текущее время в UTC (timezone-aware).
+
+    Мы сохраняем все метки времени в БД в UTC, чтобы избежать ошибок при
+    отображении локального времени и при пересчёте длительности.
+    """
+    return datetime.now(timezone.utc)
 
 
 class TestRepository:
@@ -97,7 +99,9 @@ class TestRepository:
         self, 
         test_run_id: str, 
         status: str,
-        summary: Optional[Dict[str, Any]] = None
+        summary: Optional[Dict[str, Any]] = None,
+        started_at: Optional[datetime] = None,
+        finished_at: Optional[datetime] = None,
     ) -> Optional[TestRun]:
         """Обновить статус тестового прогона"""
         with self.get_session() as session:
@@ -107,8 +111,16 @@ class TestRepository:
             
             if test_run:
                 test_run.status = status
-                if status in ['completed', 'failed']:
+
+                # Обновляем время начала/окончания, если передано
+                if started_at is not None:
+                    test_run.started_at = started_at
+                if finished_at is not None:
+                    test_run.finished_at = finished_at
+                elif status in ['completed', 'failed']:
+                    # По‑умолчанию ставим момент обновления, если не задано явно
                     test_run.finished_at = get_local_now()
+
                 if summary:
                     test_run.summary = summary
                 session.commit()
