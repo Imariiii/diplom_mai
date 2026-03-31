@@ -1,0 +1,39 @@
+# Конфигурация подключений к базам данных
+
+databases:
+  mysql:
+    host: localhost
+    port: 3306
+    user: sakila
+    password: "sakila"
+    database: sakila
+    driver: mysql
+    
+  postgresql:
+    host: localhost
+    port: 5432
+    user: postgres
+    password: "123456"
+    database: pagila
+    driver: postgresql
+
+  # Отдельная БД для хранения истории тестов
+  test_history:
+    host: localhost
+    port: 5433
+    user: postgres
+    password: "history123"
+    database: test_history
+    driver: postgresql
+
+# Настройки тестирования
+test_settings:
+  default_users: 10
+  default_spawn_rate: 2
+  default_duration: 60  # секунды
+  default_queries:
+    - "SELECT * FROM actor LIMIT 100"
+    - "SELECT * FROM film WHERE length > 120"
+    - "SELECT COUNT(*) FROM rental"
+    - "SELECT customer_id, COUNT(*) FROM rental GROUP BY customer_id"
+
