@@ -525,10 +525,9 @@ A change is complete when:
 
 ## 🔗 Related Resources
 
-- **Full codebase analysis:** See [CODEBASE_ANALYSIS.md](CODEBASE_ANALYSIS.md)
-- **Implementation summary:** See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)
-- **QUICKSTART guide:** See [QUICKSTART.md](QUICKSTART.md)
-- **Task definition:** See [task.md](task.md)
+- **Full codebase analysis:** See [CODEBASE_ANALYSIS.md](../CODEBASE_ANALYSIS.md)
+- **Implementation summary:** See [IMPLEMENTATION_SUMMARY.md](../IMPLEMENTATION_SUMMARY.md)
+- **QUICKSTART guide:** See [QUICKSTART.md](../QUICKSTART.md)
 - **Database config:** `backend/config/database_config.yaml`
 
 ---
