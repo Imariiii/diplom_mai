@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, Set, Optional, Any
-from sqlalchemy import Engine
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 
 @dataclass
@@ -47,12 +47,12 @@ class BackupStrategy(ABC):
         self.config = config or {}
     
     @abstractmethod
-    async def create_backup(self, engine: Engine, tables: Set[str]) -> BackupInfo:
+    async def create_backup(self, engine: AsyncEngine, tables: Set[str]) -> BackupInfo:
         """
         Создать бэкап указанных таблиц
         
         Args:
-            engine: SQLAlchemy engine
+            engine: SQLAlchemy async engine
             tables: Множество имён таблиц для бэкапа
             
         Returns:
@@ -61,34 +61,34 @@ class BackupStrategy(ABC):
         pass
     
     @abstractmethod
-    async def restore_backup(self, engine: Engine, backup_info: BackupInfo) -> None:
+    async def restore_backup(self, engine: AsyncEngine, backup_info: BackupInfo) -> None:
         """
         Восстановить данные из бэкапа
         
         Args:
-            engine: SQLAlchemy engine
+            engine: SQLAlchemy async engine
             backup_info: Информация о бэкапе (получена из create_backup)
         """
         pass
     
     @abstractmethod
-    async def cleanup(self, engine: Engine, backup_info: BackupInfo) -> None:
+    async def cleanup(self, engine: AsyncEngine, backup_info: BackupInfo) -> None:
         """
         Удалить временные объекты бэкапа
         
         Args:
-            engine: SQLAlchemy engine
+            engine: SQLAlchemy async engine
             backup_info: Информация о бэкапе
         """
         pass
     
     @abstractmethod
-    async def estimate_size(self, engine: Engine, tables: Set[str]) -> SizeEstimate:
+    async def estimate_size(self, engine: AsyncEngine, tables: Set[str]) -> SizeEstimate:
         """
         Оценить размер бэкапа
         
         Args:
-            engine: SQLAlchemy engine
+            engine: SQLAlchemy async engine
             tables: Множество имён таблиц
             
         Returns:

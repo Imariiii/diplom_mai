@@ -3,14 +3,15 @@
 """
 import uuid
 from typing import Dict, Set, List
-from sqlalchemy import Engine, text
+from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy import text
 
 from .. import BackupInfo, SizeEstimate
 from .helpers import save_postgres_sequences, save_mysql_auto_increments
 
 
 async def create_backup_logic(
-    engine: Engine,
+    engine: AsyncEngine,
     tables: Set[str],
     get_backup_table_name_func,
     config: Dict
@@ -19,7 +20,7 @@ async def create_backup_logic(
     Логика создания бэкапа таблиц через CREATE TABLE AS SELECT
     
     Args:
-        engine: SQLAlchemy engine
+        engine: SQLAlchemy async engine
         tables: Множество таблиц для бэкапа
         get_backup_table_name_func: Функция для получения имени backup-таблицы
         config: Конфигурация стратегии
@@ -64,19 +65,19 @@ async def create_backup_logic(
     )
 
 
-async def create_table_backup(engine: Engine, table: str, backup_table: str) -> int:
+async def create_table_backup(engine: AsyncEngine, table: str, backup_table: str) -> int:
     """
     Создать backup таблицы через CREATE TABLE AS SELECT
     
     Args:
-        engine: SQLAlchemy engine
+        engine: SQLAlchemy async engine
         table: Исходная таблица
         backup_table: Имя backup-таблицы
         
     Returns:
         Количество скопированных строк
     """
-    with engine.connect() as conn:
+    async with engine.connect() as conn:
         dbms_type = engine.dialect.name
         
         # Создаём копию таблицы с учётом синтаксиса БД
@@ -85,34 +86,34 @@ async def create_table_backup(engine: Engine, table: str, backup_table: str) -> 
         else:
             sql = f'CREATE TABLE `{backup_table}` AS SELECT * FROM `{table}`'
         
-        conn.execute(text(sql))
-        conn.commit()
+        await conn.execute(text(sql))
+        await conn.commit()
         
         # Получаем количество строк
         if dbms_type == 'postgresql':
-            result = conn.execute(text(f'SELECT COUNT(*) FROM "{backup_table}"'))
+            result = await conn.execute(text(f'SELECT COUNT(*) FROM "{backup_table}"'))
         else:
-            result = conn.execute(text(f'SELECT COUNT(*) FROM `{backup_table}`'))
+            result = await conn.execute(text(f'SELECT COUNT(*) FROM `{backup_table}`'))
         
         row_count = result.scalar()
         
         return row_count
 
 
-async def drop_table_if_exists(engine: Engine, table: str) -> None:
+async def drop_table_if_exists(engine: AsyncEngine, table: str) -> None:
     """Удалить таблицу если существует"""
-    with engine.connect() as conn:
+    async with engine.connect() as conn:
         # Учитываем различия в синтаксисе DROP
         if engine.dialect.name == 'postgresql':
             sql = f'DROP TABLE IF EXISTS "{table}" CASCADE'
         else:
             sql = f'DROP TABLE IF EXISTS `{table}`'
         
-        conn.execute(text(sql))
-        conn.commit()
+        await conn.execute(text(sql))
+        await conn.commit()
 
 
-async def cleanup_backup(engine: Engine, tables: Set[str], get_backup_table_name_func) -> None:
+async def cleanup_backup(engine: AsyncEngine, tables: Set[str], get_backup_table_name_func) -> None:
     """Удалить backup-таблицы"""
     for table in tables:
         backup_table = get_backup_table_name_func(table)
@@ -120,7 +121,7 @@ async def cleanup_backup(engine: Engine, tables: Set[str], get_backup_table_name
 
 
 async def estimate_size_logic(
-    engine: Engine,
+    engine: AsyncEngine,
     tables: Set[str],
     config: Dict
 ) -> SizeEstimate:
@@ -128,7 +129,7 @@ async def estimate_size_logic(
     Оценить размер бэкапа
     
     Args:
-        engine: SQLAlchemy engine
+        engine: SQLAlchemy async engine
         tables: Множество таблиц
         config: Конфигурация стратегии
         
@@ -184,27 +185,27 @@ async def estimate_size_logic(
     )
 
 
-async def get_row_count(engine: Engine, table: str) -> int:
+async def get_row_count(engine: AsyncEngine, table: str) -> int:
     """Получить количество строк в таблице"""
-    with engine.connect() as conn:
+    async with engine.connect() as conn:
         dbms_type = engine.dialect.name
         if dbms_type == 'postgresql':
             sql = f'SELECT COUNT(*) FROM "{table}"'
         else:
             sql = f'SELECT COUNT(*) FROM `{table}`'
         
-        result = conn.execute(text(sql))
+        result = await conn.execute(text(sql))
         return result.scalar()
 
 
-async def get_table_size(engine: Engine, table: str) -> int:
+async def get_table_size(engine: AsyncEngine, table: str) -> int:
     """Получить размер таблицы в байтах"""
     dbms_type = engine.dialect.name
     
-    with engine.connect() as conn:
+    async with engine.connect() as conn:
         if dbms_type == 'postgresql':
             sql = f"SELECT pg_total_relation_size('\"{table}\"')"
-            result = conn.execute(text(sql))
+            result = await conn.execute(text(sql))
             return result.scalar() or 0
         
         elif dbms_type == 'mysql':
@@ -214,7 +215,7 @@ async def get_table_size(engine: Engine, table: str) -> int:
                 WHERE TABLE_SCHEMA = DATABASE() 
                 AND TABLE_NAME = :table
             """
-            result = conn.execute(text(sql), {"table": table})
+            result = await conn.execute(text(sql), {"table": table})
             row = result.fetchone()
             return row[0] if row else 0
         

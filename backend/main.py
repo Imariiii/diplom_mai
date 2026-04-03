@@ -80,8 +80,8 @@ active_tests: Dict[str, Dict] = {}
 @app.get("/health")
 async def health_check():
     """Проверка здоровья сервиса"""
-    mysql_status = db_connection.test_connection("mysql")
-    postgres_status = db_connection.test_connection("postgresql")
+    mysql_status = await db_connection.test_connection("mysql")
+    postgres_status = await db_connection.test_connection("postgresql")
     
     return {
         "status": "ok",

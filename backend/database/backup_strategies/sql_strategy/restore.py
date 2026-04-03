@@ -2,19 +2,15 @@
 Логика восстановления для SQL Backup Strategy
 """
 from typing import List
-from sqlalchemy import Engine, text
+from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy import text
 
 from .. import BackupInfo
-from .helpers import (
-    get_fk_dependencies,
-    topological_sort_restore_order,
-    restore_postgres_sequences,
-    restore_mysql_auto_increments
-)
+from .helpers import get_fk_dependencies, topological_sort_restore_order
 
 
 async def restore_backup_logic(
-    engine: Engine,
+    engine: AsyncEngine,
     backup_info: BackupInfo,
     get_backup_table_name_func
 ) -> None:
@@ -22,7 +18,7 @@ async def restore_backup_logic(
     Восстановить базу данных из бэкапа
     
     Args:
-        engine: SQLAlchemy engine
+        engine: SQLAlchemy async engine
         backup_info: Информация о бэкапе
         get_backup_table_name_func: Функция для получения имени backup-таблицы
     """
@@ -34,14 +30,14 @@ async def restore_backup_logic(
     
     # Используем одно соединение для всех операций восстановления
     # Это важно для MySQL, где SET FOREIGN_KEY_CHECKS сессионный
-    with engine.connect() as conn:
+    async with engine.connect() as conn:
         # Отключаем constraints
         if dbms_type == 'postgresql':
-            conn.execute(text("SET session_replication_role = 'replica'"))
+            await conn.execute(text("SET session_replication_role = 'replica'"))
         elif dbms_type == 'mysql':
-            conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
+            await conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
         
-        conn.commit()
+        await conn.commit()
         
         try:
             # Восстанавливаем таблицы в правильном порядке
@@ -53,26 +49,34 @@ async def restore_backup_logic(
             if dbms_type == 'postgresql' and backup_info.sequences:
                 for seq_name, info in backup_info.sequences.items():
                     sql = f"SELECT setval('{seq_name}', {info['last_value']}, {str(info['is_called']).lower()})"
-                    conn.execute(text(sql))
-                conn.commit()
+                    await conn.execute(text(sql))
+                await conn.commit()
             elif dbms_type == 'mysql' and backup_info.auto_increments:
                 for table, value in backup_info.auto_increments.items():
                     sql = f"ALTER TABLE `{table}` AUTO_INCREMENT = {value}"
-                    conn.execute(text(sql))
-                conn.commit()
+                    await conn.execute(text(sql))
+                    await conn.commit()
         finally:
             # Включаем constraints обратно
             if dbms_type == 'postgresql':
-                conn.execute(text("SET session_replication_role = 'origin'"))
+                await conn.execute(text("SET session_replication_role = 'origin'"))
             elif dbms_type == 'mysql':
-                conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
-            conn.commit()
+                await conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
+            
+            await conn.commit()
 
 
-async def get_restore_order(engine: Engine, tables: set) -> List[str]:
+async def get_restore_order(engine: AsyncEngine, tables: set) -> List[str]:
     """
     Определить порядок восстановления таблиц с учётом FK-зависимостей
-    Таблицы, на которые ссылаются другие, восстанавливаются первыми
+    Таблицы, на которые ссылаются другие, восстанавливаются первыми.
+    
+    Args:
+        engine: SQLAlchemy async engine
+        tables: Множество таблиц
+        
+    Returns:
+        Список таблиц в порядке восстановления
     """
     # Получаем FK зависимости
     dependencies = await get_fk_dependencies(engine, tables)
@@ -82,7 +86,7 @@ async def get_restore_order(engine: Engine, tables: set) -> List[str]:
 
 
 async def restore_table(
-    engine: Engine,
+    engine: AsyncEngine,
     table: str,
     backup_table: str,
     conn=None
@@ -92,7 +96,7 @@ async def restore_table(
     
     # Используем переданное соединение или создаём новое
     if conn is None:
-        with engine.connect() as new_conn:
+        async with engine.connect() as new_conn:
             await do_restore_table(dbms_type, table, backup_table, new_conn)
     else:
         await do_restore_table(dbms_type, table, backup_table, conn)
@@ -110,10 +114,10 @@ async def do_restore_table(dbms_type: str, table: str, backup_table: str, conn) 
     """
     # Очищаем таблицу
     if dbms_type == 'postgresql':
-        conn.execute(text(f'TRUNCATE TABLE "{table}" CASCADE'))
+        await conn.execute(text(f'TRUNCATE TABLE "{table}" CASCADE'))
     else:
-        conn.execute(text(f'TRUNCATE TABLE `{table}`'))
-    conn.commit()  # Commit после TRUNCATE для MySQL
+        await conn.execute(text(f'TRUNCATE TABLE `{table}`'))
+    await conn.commit()  # Commit после TRUNCATE для MySQL
     
     # Вставляем данные из backup
     if dbms_type == 'postgresql':
@@ -121,25 +125,25 @@ async def do_restore_table(dbms_type: str, table: str, backup_table: str, conn) 
     else:
         sql = f'INSERT INTO `{table}` SELECT * FROM `{backup_table}`'
     
-    conn.execute(text(sql))
-    conn.commit()
+    await conn.execute(text(sql))
+    await conn.commit()
 
 
-async def disable_constraints(engine: Engine, dbms_type: str) -> None:
+async def disable_constraints(engine: AsyncEngine, dbms_type: str) -> None:
     """Отключить FK constraints"""
-    with engine.connect() as conn:
+    async with engine.connect() as conn:
         if dbms_type == 'postgresql':
-            conn.execute(text("SET session_replication_role = 'replica'"))
+            await conn.execute(text("SET session_replication_role = 'replica'"))
         elif dbms_type == 'mysql':
-            conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
-        conn.commit()
+            await conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
+        await conn.commit()
 
 
-async def enable_constraints(engine: Engine, dbms_type: str) -> None:
+async def enable_constraints(engine: AsyncEngine, dbms_type: str) -> None:
     """Включить FK constraints"""
-    with engine.connect() as conn:
+    async with engine.connect() as conn:
         if dbms_type == 'postgresql':
-            conn.execute(text("SET session_replication_role = 'origin'"))
+            await conn.execute(text("SET session_replication_role = 'origin'"))
         elif dbms_type == 'mysql':
-            conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
-        conn.commit()
+            await conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
+        await conn.commit()

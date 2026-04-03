@@ -44,7 +44,7 @@ async def run_async_test(request: AsyncTestRequest, background_tasks: Background
     if HISTORY_ENABLED and test_repository:
         try:
             from datetime import datetime, timezone
-            test_repository.create_test_run(
+            await test_repository.create_test_run(
                 name=test_name,
                 config=request.model_dump(),
                 status='pending',
@@ -161,7 +161,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         # Сохраняем в БД истории
         if HISTORY_ENABLED and test_repository:
             try:
-                test_repository.update_test_run_status(
+                await test_repository.update_test_run_status(
                     test_id,
                     'completed',
                     summary,
@@ -172,7 +172,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                 for result in results:
                     if 'comparison' in result:
                         for db_type, stats in result.get('comparison', {}).items():
-                            test_repository.add_test_result(
+                            await test_repository.add_test_result(
                                 test_run_id=test_id,
                                 db_type=db_type,
                                 metrics=stats,
@@ -184,7 +184,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                         db_type = result['db_type']
                         stats = result['stats']
                         scenario_name = result.get('scenario', 'unknown')
-                        test_repository.add_test_result(
+                        await test_repository.add_test_result(
                             test_run_id=test_id,
                             db_type=db_type,
                             metrics=stats,
@@ -215,7 +215,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         if HISTORY_ENABLED and test_repository:
             try:
                 finish_ts = start_ts + timedelta(seconds=(time.perf_counter() - start_time))
-                test_repository.update_test_run_status(
+                await test_repository.update_test_run_status(
                     test_id,
                     'failed',
                     None,
@@ -225,7 +225,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
             except:
                 pass
     finally:
-        test_tester.close()
+        await test_tester.close()
 
 
 @router.get("/async/{test_id}")

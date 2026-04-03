@@ -44,7 +44,7 @@ def get_history_db_url():
                 database = history_config.get('database', 'test_history')
                 
                 print(f"[HISTORY_DB] Подключение к: {host}:{port}/{database}")
-                return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+                return f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{database}"
             else:
                 print("[HISTORY_DB] ❌ Секция 'test_history' не найдена в конфиге")
         else:

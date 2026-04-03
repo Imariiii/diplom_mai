@@ -5,7 +5,8 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, Set
-from sqlalchemy import Engine, text
+from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy import text
 
 
 @dataclass
@@ -48,7 +49,7 @@ class VerifyResult:
     details: Dict[str, dict] = field(default_factory=dict)
     
     def add_table_result(self, table: str, expected_rows: int, actual_rows: int, 
-                         expected_checksum: str = None, actual_checksum: str = None):
+                         expected_checksum: Optional[str] = None, actual_checksum: Optional[str] = None):
         """Добавить результат проверки таблицы"""
         match = expected_rows == actual_rows
         if expected_checksum and actual_checksum:
@@ -80,17 +81,17 @@ class VerifyResult:
 class StateVerifier:
     """Верификатор состояния базы данных"""
     
-    def __init__(self, config: dict = None):
+    def __init__(self, config: Optional[dict] = None):
         self.config = config or {}
         self.verify_checksums = self.config.get("verify_checksums", False)
         self.checksum_max_rows = self.config.get("checksum_max_rows", 100_000)
     
-    async def capture_fingerprint(self, engine: Engine, tables: Set[str]) -> StateFingerprint:
+    async def capture_fingerprint(self, engine: AsyncEngine, tables: Set[str]) -> StateFingerprint:
         """
         Создать "фингерпринт" текущего состояния БД
         
         Args:
-            engine: SQLAlchemy engine
+            engine: SQLAlchemy async engine
             tables: Множество имён таблиц
             
         Returns:
@@ -146,7 +147,7 @@ class StateVerifier:
         
         return result
     
-    async def _capture_table_fingerprint(self, engine: Engine, table: str, 
+    async def _capture_table_fingerprint(self, engine: AsyncEngine, table: str, 
                                           dbms_type: str) -> TableFingerprint:
         """Создать фингерпринт отдельной таблицы"""
         
@@ -175,20 +176,20 @@ class StateVerifier:
             auto_increment_value=auto_increment_value
         )
     
-    async def _get_row_count(self, engine: Engine, table: str, dbms_type: str) -> int:
+    async def _get_row_count(self, engine: AsyncEngine, table: str, dbms_type: str) -> int:
         """Получить количество строк в таблице"""
-        with engine.connect() as conn:
+        async with engine.connect() as conn:
             if dbms_type == 'postgresql':
                 sql = f'SELECT COUNT(*) FROM "{table}"'
             else:
                 sql = f'SELECT COUNT(*) FROM `{table}`'
             
-            result = conn.execute(text(sql))
+            result = await conn.execute(text(sql))
             return result.scalar()
     
-    async def _compute_checksum(self, engine: Engine, table: str, dbms_type: str) -> str:
+    async def _compute_checksum(self, engine: AsyncEngine, table: str, dbms_type: str) -> str:
         """Вычислить чексумму данных таблицы"""
-        with engine.connect() as conn:
+        async with engine.connect() as conn:
             if dbms_type == 'postgresql':
                 # Используем MD5 агрегацию PostgreSQL
                 sql = f"""
@@ -199,7 +200,7 @@ class StateVerifier:
                     ) subq
                 """
                 try:
-                    result = conn.execute(text(sql))
+                    result = await conn.execute(text(sql))
                     return result.scalar() or ""
                 except:
                     # Fallback: просто считаем строки
@@ -209,7 +210,7 @@ class StateVerifier:
                 # MySQL не имеет встроенной MD5 агрегации, используем простой хеш
                 sql = f"SELECT COUNT(*), MD5(CONCAT(GROUP_CONCAT(id))) FROM `{table}`"
                 try:
-                    result = conn.execute(text(sql))
+                    result = await conn.execute(text(sql))
                     row = result.fetchone()
                     return row[1] if row else ""
                 except:
@@ -217,9 +218,9 @@ class StateVerifier:
         
         return ""
     
-    async def _get_postgres_sequence_value(self, engine: Engine, table: str) -> Optional[int]:
+    async def _get_postgres_sequence_value(self, engine: AsyncEngine, table: str) -> Optional[int]:
         """Получить текущее значение sequence для таблицы PostgreSQL"""
-        with engine.connect() as conn:
+        async with engine.connect() as conn:
             # Находим primary key column с sequence
             sql = """
                 SELECT column_name, pg_get_serial_sequence(:table, column_name) as seq_name
@@ -228,25 +229,25 @@ class StateVerifier:
                 AND data_type IN ('integer', 'bigint')
                 AND column_default LIKE 'nextval%'
             """
-            result = conn.execute(text(sql), {"table": table})
+            result = await conn.execute(text(sql), {"table": table})
             row = result.fetchone()
             
             if row and row[1]:  # seq_name
-                seq_result = conn.execute(text(f"SELECT last_value FROM {row[1]}"))
+                seq_result = await conn.execute(text(f"SELECT last_value FROM {row[1]}"))
                 seq_row = seq_result.fetchone()
                 return seq_row[0] if seq_row else None
         
         return None
     
-    async def _get_mysql_auto_increment(self, engine: Engine, table: str) -> Optional[int]:
+    async def _get_mysql_auto_increment(self, engine: AsyncEngine, table: str) -> Optional[int]:
         """Получить AUTO_INCREMENT значение для таблицы MySQL"""
-        with engine.connect() as conn:
+        async with engine.connect() as conn:
             sql = """
                 SELECT AUTO_INCREMENT 
                 FROM information_schema.TABLES 
                 WHERE TABLE_SCHEMA = DATABASE() 
                 AND TABLE_NAME = :table
             """
-            result = conn.execute(text(sql), {"table": table})
+            result = await conn.execute(text(sql), {"table": table})
             row = result.fetchone()
             return row[0] if row else None

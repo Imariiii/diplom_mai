@@ -112,10 +112,10 @@ class LoadTester:
         
         try:
             engine = self.db_connection.get_engine(db_type)
-            with engine.connect() as conn:
-                result = conn.execute(text(query))
+            async with engine.connect() as conn:
+                result = await conn.execute(text(query))
                 rows_count = len(result.fetchall()) if result.returns_rows else 0
-                conn.commit()
+                await conn.commit()
         except Exception as e:
             error = str(e)
         
@@ -459,9 +459,9 @@ class LoadTester:
             engine = self.db_connection.get_engine(db_type)
             
             if db_type == 'postgresql':
-                with engine.connect() as conn:
+                async with engine.connect() as conn:
                     # Cache hit ratio
-                    result = conn.execute(text("""
+                    result = await conn.execute(text("""
                         SELECT 
                             CASE WHEN blks_hit + blks_read = 0 THEN 0
                             ELSE round(100.0 * blks_hit / (blks_hit + blks_read), 2)
@@ -475,7 +475,7 @@ class LoadTester:
                         metrics['buffer_pool_hit_ratio'] = float(row[0] or 0)
                     
                     # Active connections
-                    result = conn.execute(text("""
+                    result = await conn.execute(text("""
                         SELECT count(*) FROM pg_stat_activity 
                         WHERE datname = current_database()
                     """))
@@ -484,7 +484,7 @@ class LoadTester:
                         metrics['active_connections'] = int(row[0] or 0)
                     
                     # Lock waits
-                    result = conn.execute(text("""
+                    result = await conn.execute(text("""
                         SELECT count(*) FROM pg_locks WHERE NOT granted
                     """))
                     row = result.fetchone()
@@ -492,7 +492,7 @@ class LoadTester:
                         metrics['lock_waits'] = int(row[0] or 0)
                     
                     # Table sizes
-                    result = conn.execute(text("""
+                    result = await conn.execute(text("""
                         SELECT relname, pg_total_relation_size(relid) / (1024*1024) as size_mb
                         FROM pg_stat_user_tables
                         ORDER BY pg_total_relation_size(relid) DESC
@@ -502,7 +502,7 @@ class LoadTester:
                         metrics['table_sizes_mb'][row[0]] = float(row[1] or 0)
                     
                     # Total DB size
-                    result = conn.execute(text("""
+                    result = await conn.execute(text("""
                         SELECT pg_database_size(current_database()) / (1024*1024) as size_mb
                     """))
                     row = result.fetchone()
@@ -510,9 +510,9 @@ class LoadTester:
                         metrics['total_db_size_mb'] = float(row[0] or 0)
                     
             elif db_type == 'mysql':
-                with engine.connect() as conn:
+                async with engine.connect() as conn:
                     # Buffer pool hit ratio
-                    result = conn.execute(text("""
+                    result = await conn.execute(text("""
                         SELECT 
                             (1 - (Innodb_buffer_pool_reads / Innodb_buffer_pool_read_requests)) * 100 
                             as hit_ratio
@@ -530,7 +530,7 @@ class LoadTester:
                         metrics['cache_hit_ratio'] = float(row[0])
                     
                     # Active connections
-                    result = conn.execute(text("""
+                    result = await conn.execute(text("""
                         SELECT COUNT(*) FROM information_schema.PROCESSLIST
                     """))
                     row = result.fetchone()
@@ -538,7 +538,7 @@ class LoadTester:
                         metrics['active_connections'] = int(row[0] or 0)
                     
                     # Lock waits
-                    result = conn.execute(text("""
+                    result = await conn.execute(text("""
                         SELECT COUNT(*) FROM performance_schema.data_lock_waits
                     """))
                     row = result.fetchone()
@@ -546,7 +546,7 @@ class LoadTester:
                         metrics['lock_waits'] = int(row[0] or 0)
                     
                     # Table sizes
-                    result = conn.execute(text("""
+                    result = await conn.execute(text("""
                         SELECT TABLE_NAME, 
                                ROUND((DATA_LENGTH + INDEX_LENGTH) / (1024 * 1024), 2) AS size_mb
                         FROM information_schema.TABLES
@@ -558,7 +558,7 @@ class LoadTester:
                         metrics['table_sizes_mb'][row[0]] = float(row[1] or 0)
                     
                     # Total DB size
-                    result = conn.execute(text("""
+                    result = await conn.execute(text("""
                         SELECT ROUND(SUM(DATA_LENGTH + INDEX_LENGTH) / (1024 * 1024), 2) AS size_mb
                         FROM information_schema.TABLES
                         WHERE TABLE_SCHEMA = DATABASE()
@@ -602,10 +602,10 @@ class LoadTester:
 
         try:
             engine = self.db_connection.get_engine(db_type)
-            with engine.connect() as conn:
-                result = conn.execute(text(final_sql))
+            async with engine.connect() as conn:
+                result = await conn.execute(text(final_sql))
                 rows_count = len(result.fetchall()) if result.returns_rows else 0
-                conn.commit()
+                await conn.commit()
         except Exception as e:
             error = str(e)
 
@@ -675,8 +675,8 @@ class LoadTester:
         """Получение случайного значения из таблицы"""
         try:
             engine = self.db_connection.get_engine(db_type)
-            with engine.connect() as conn:
-                result = conn.execute(text(f"""
+            async with engine.connect() as conn:
+                result = await conn.execute(text(f"""
                     SELECT {column} FROM {table}
                     ORDER BY RANDOM() LIMIT 1
                 """))
@@ -833,10 +833,10 @@ class LoadTester:
         else:
             # Fallback: создаем репозиторий с дефолтным URL
             import os
-            db_url = os.getenv('HISTORY_DATABASE_URL', 'postgresql://postgres:postgres@localhost:5433/test_history')
+            db_url = os.getenv('HISTORY_DATABASE_URL', 'postgresql+asyncpg://postgres:postgres@localhost:5433/test_history')
             scenario_repo = ScenarioRepository(db_url)
         
-        scenario = scenario_repo.get_scenario_for_execution(scenario_id)
+        scenario = await scenario_repo.get_scenario_for_execution(scenario_id)
 
         if not scenario:
             raise ValueError(f"Scenario {scenario_id} not found")
@@ -940,10 +940,10 @@ class LoadTester:
 
         try:
             engine = self.db_connection.get_engine(db_type)
-            with engine.connect() as conn:
-                result = conn.execute(text(final_sql))
+            async with engine.connect() as conn:
+                result = await conn.execute(text(final_sql))
                 rows_count = len(result.fetchall()) if result.returns_rows else 0
-                conn.commit()
+                await conn.commit()
         except Exception as e:
             error = str(e)
 
@@ -1013,10 +1013,10 @@ class LoadTester:
         """Получение случайного значения из таблицы"""
         try:
             engine = self.db_connection.get_engine(db_type)
-            with engine.connect() as conn:
+            async with engine.connect() as conn:
                 # PostgreSQL использует RANDOM(), MySQL использует RAND()
                 order_func = "RANDOM()" if db_type == "postgresql" else "RAND()"
-                result = conn.execute(text(f"""
+                result = await conn.execute(text(f"""
                     SELECT {column} FROM {table}
                     ORDER BY {order_func} LIMIT 1
                 """))
@@ -1173,10 +1173,10 @@ class LoadTester:
         else:
             # Fallback: создаем репозиторий с дефолтным URL
             import os
-            db_url = os.getenv('HISTORY_DATABASE_URL', 'postgresql://postgres:postgres@localhost:5433/test_history')
+            db_url = os.getenv('HISTORY_DATABASE_URL', 'postgresql+asyncpg://postgres:postgres@localhost:5433/test_history')
             scenario_repo = ScenarioRepository(db_url)
         
-        scenario = scenario_repo.get_scenario_for_execution(scenario_id)
+        scenario = await scenario_repo.get_scenario_for_execution(scenario_id)
 
         if not scenario:
             raise ValueError(f"Scenario {scenario_id} not found")
@@ -1247,9 +1247,9 @@ class LoadTester:
 
         return all_results
 
-    def close(self):
+    async def close(self):
         """Закрытие подключений"""
-        self.db_connection.close_all()
+        await self.db_connection.close_all()
     
     # ==================== Методы для backup/restore ====================
     

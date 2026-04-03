@@ -2,7 +2,7 @@
 Основной класс SQL Backup Strategy
 """
 from typing import Dict, Set
-from sqlalchemy import Engine
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from .. import BackupStrategy, BackupInfo, SizeEstimate
 from . import backup as backup_module
@@ -21,7 +21,7 @@ class SqlBackupStrategy(BackupStrategy):
         super().__init__(config)
         self._locks = {}  # Блокировки для каждой БД
     
-    async def create_backup(self, engine: Engine, tables: Set[str]) -> BackupInfo:
+    async def create_backup(self, engine: AsyncEngine, tables: Set[str]) -> BackupInfo:
         """Создать бэкап таблиц через CREATE TABLE AS SELECT"""
         return await backup_module.create_backup_logic(
             engine=engine,
@@ -30,7 +30,7 @@ class SqlBackupStrategy(BackupStrategy):
             config=self.config
         )
     
-    async def restore_backup(self, engine: Engine, backup_info: BackupInfo) -> None:
+    async def restore_backup(self, engine: AsyncEngine, backup_info: BackupInfo) -> None:
         """Восстановить базу данных из бэкапа"""
         await restore_module.restore_backup_logic(
             engine=engine,
@@ -38,7 +38,7 @@ class SqlBackupStrategy(BackupStrategy):
             get_backup_table_name_func=self.get_backup_table_name
         )
     
-    async def cleanup(self, engine: Engine, backup_info: BackupInfo) -> None:
+    async def cleanup(self, engine: AsyncEngine, backup_info: BackupInfo) -> None:
         """Удалить backup-таблицы"""
         await backup_module.cleanup_backup(
             engine=engine,
@@ -46,7 +46,7 @@ class SqlBackupStrategy(BackupStrategy):
             get_backup_table_name_func=self.get_backup_table_name
         )
     
-    async def estimate_size(self, engine: Engine, tables: Set[str]) -> SizeEstimate:
+    async def estimate_size(self, engine: AsyncEngine, tables: Set[str]) -> SizeEstimate:
         """Оценить размер бэкапа"""
         return await backup_module.estimate_size_logic(
             engine=engine,

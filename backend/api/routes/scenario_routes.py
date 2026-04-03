@@ -24,7 +24,7 @@ async def get_scenarios(
 ):
     """Получить список всех сценариев тестирования"""
     repo = get_scenario_repository()
-    scenarios = repo.get_all_scenarios(
+    scenarios = await repo.get_all_scenarios(
         limit=limit,
         offset=offset,
         scenario_type=scenario_type,
@@ -37,7 +37,7 @@ async def get_scenarios(
 async def get_scenario(scenario_id: str):
     """Получить сценарий по ID с запросами и параметрами"""
     repo = get_scenario_repository()
-    scenario = repo.get_scenario(scenario_id)
+    scenario = await repo.get_scenario(scenario_id)
     if not scenario:
         raise HTTPException(status_code=404, detail=f"Сценарий {scenario_id} не найден")
     return scenario.to_dict()
@@ -51,12 +51,12 @@ async def create_scenario(request):
     repo = get_scenario_repository()
     
     # Проверяем уникальность имени
-    existing = repo.get_scenario_by_name(request.name)
+    existing = await repo.get_scenario_by_name(request.name)
     if existing:
         raise HTTPException(status_code=409, detail=f"Сценарий с именем '{request.name}' уже существует")
 
     # Создаём сценарий
-    scenario = repo.create_scenario(
+    scenario = await repo.create_scenario(
         name=request.name,
         description=request.description,
         scenario_type=request.scenario_type,
@@ -65,7 +65,7 @@ async def create_scenario(request):
 
     # Добавляем запросы к сценарию
     for idx, query_data in enumerate(request.queries):
-        query = repo.add_query_to_scenario(
+        query = await repo.add_query_to_scenario(
             scenario_id=str(scenario.id),
             sql_template=query_data.sql_template,
             query_type=query_data.query_type,
@@ -76,7 +76,7 @@ async def create_scenario(request):
 
         # Добавляем параметры к запросу
         for param_data in query_data.params:
-            repo.add_param_to_query(
+            await repo.add_param_to_query(
                 query_id=str(query.id),
                 param_name=param_data.param_name,
                 param_type=param_data.param_type,
@@ -90,7 +90,8 @@ async def create_scenario(request):
                 step=param_data.step
             )
 
-    return repo.get_scenario(str(scenario.id)).to_dict()
+    scenario_with_queries = await repo.get_scenario(str(scenario.id))
+    return scenario_with_queries.to_dict()
 
 
 @router.put("/{scenario_id}")
@@ -101,7 +102,7 @@ async def update_scenario(scenario_id: str, request):
     repo = get_scenario_repository()
     
     # Проверяем существование
-    scenario = repo.get_scenario(scenario_id)
+    scenario = await repo.get_scenario(scenario_id)
     if not scenario:
         raise HTTPException(status_code=404, detail=f"Сценарий {scenario_id} не найден")
 
@@ -111,11 +112,11 @@ async def update_scenario(scenario_id: str, request):
 
     # Проверяем уникальность имени
     if request.name and request.name != scenario.name:
-        existing = repo.get_scenario_by_name(request.name)
+        existing = await repo.get_scenario_by_name(request.name)
         if existing:
             raise HTTPException(status_code=409, detail=f"Сценарий с именем '{request.name}' уже существует")
 
-    updated = repo.update_scenario(
+    updated = await repo.update_scenario(
         scenario_id=scenario_id,
         name=request.name,
         description=request.description,
@@ -131,11 +132,11 @@ async def delete_scenario(scenario_id: str):
     """Удалить сценарий тестирования"""
     repo = get_scenario_repository()
     
-    scenario = repo.get_scenario(scenario_id)
+    scenario = await repo.get_scenario(scenario_id)
     if not scenario:
         raise HTTPException(status_code=404, detail=f"Сценарий {scenario_id} не найден")
 
-    deleted = repo.delete_scenario(scenario_id)
+    deleted = await repo.delete_scenario(scenario_id)
     if not deleted:
         raise HTTPException(status_code=403, detail="Встроенные сценарии нельзя удалить")
 
@@ -150,16 +151,16 @@ async def clone_scenario(scenario_id: str, request):
     repo = get_scenario_repository()
     
     # Проверяем существование оригинала
-    original = repo.get_scenario(scenario_id)
+    original = await repo.get_scenario(scenario_id)
     if not original:
         raise HTTPException(status_code=404, detail=f"Сценарий {scenario_id} не найден")
 
     # Проверяем уникальность нового имени
-    existing = repo.get_scenario_by_name(request.new_name)
+    existing = await repo.get_scenario_by_name(request.new_name)
     if existing:
         raise HTTPException(status_code=409, detail=f"Сценарий с именем '{request.new_name}' уже существует")
 
-    cloned = repo.clone_scenario(scenario_id, request.new_name)
+    cloned = await repo.clone_scenario(scenario_id, request.new_name)
     return cloned.to_dict()
 
 
@@ -170,7 +171,7 @@ async def get_scenario_queries(scenario_id: str):
     """Получить все запросы сценария"""
     repo = get_scenario_repository()
     
-    scenario = repo.get_scenario(scenario_id)
+    scenario = await repo.get_scenario(scenario_id)
     if not scenario:
         raise HTTPException(status_code=404, detail=f"Сценарий {scenario_id} не найден")
 
@@ -185,14 +186,14 @@ async def add_query_to_scenario(scenario_id: str, request):
     request = ScenarioQueryCreate(**request)
     repo = get_scenario_repository()
     
-    scenario = repo.get_scenario(scenario_id)
+    scenario = await repo.get_scenario(scenario_id)
     if not scenario:
         raise HTTPException(status_code=404, detail=f"Сценарий {scenario_id} не найден")
 
     if scenario.is_builtin == 't':
         raise HTTPException(status_code=403, detail="Встроенные сценарии нельзя редактировать")
 
-    query = repo.add_query_to_scenario(
+    query = await repo.add_query_to_scenario(
         scenario_id=scenario_id,
         sql_template=request.sql_template,
         query_type=request.query_type,
@@ -202,7 +203,7 @@ async def add_query_to_scenario(scenario_id: str, request):
     )
 
     for param_data in request.params:
-        repo.add_param_to_query(
+        await repo.add_param_to_query(
             query_id=str(query.id),
             param_name=param_data.param_name,
             param_type=param_data.param_type,
@@ -216,7 +217,8 @@ async def add_query_to_scenario(scenario_id: str, request):
             step=param_data.step
         )
 
-    return repo.get_query(str(query.id)).to_dict()
+    query_result = await repo.get_query(str(query.id))
+    return query_result.to_dict()
 
 
 @router.put("/{scenario_id}/queries/{query_id}")
@@ -226,18 +228,18 @@ async def update_scenario_query(scenario_id: str, query_id: str, request):
     request = ScenarioQueryUpdate(**request)
     repo = get_scenario_repository()
     
-    scenario = repo.get_scenario(scenario_id)
+    scenario = await repo.get_scenario(scenario_id)
     if not scenario:
         raise HTTPException(status_code=404, detail=f"Сценарий {scenario_id} не найден")
 
     if scenario.is_builtin == 't':
         raise HTTPException(status_code=403, detail="Встроенные сценарии нельзя редактировать")
 
-    query = repo.get_query(query_id)
+    query = await repo.get_query(query_id)
     if not query or str(query.scenario_id) != scenario_id:
         raise HTTPException(status_code=404, detail=f"Запрос {query_id} не найден в сценарии {scenario_id}")
 
-    updated = repo.update_query(
+    updated = await repo.update_query(
         query_id=query_id,
         sql_template=request.sql_template,
         query_type=request.query_type,
@@ -254,18 +256,18 @@ async def delete_scenario_query(scenario_id: str, query_id: str):
     """Удалить запрос из сценария"""
     repo = get_scenario_repository()
     
-    scenario = repo.get_scenario(scenario_id)
+    scenario = await repo.get_scenario(scenario_id)
     if not scenario:
         raise HTTPException(status_code=404, detail=f"Сценарий {scenario_id} не найден")
 
     if scenario.is_builtin == 't':
         raise HTTPException(status_code=403, detail="Встроенные сценарии нельзя редактировать")
 
-    query = repo.get_query(query_id)
+    query = await repo.get_query(query_id)
     if not query or str(query.scenario_id) != scenario_id:
         raise HTTPException(status_code=404, detail=f"Запрос {query_id} не найден в сценарии {scenario_id}")
 
-    repo.delete_query(query_id)
+    await repo.delete_query(query_id)
     return {"deleted": True, "query_id": query_id}
 
 
@@ -276,7 +278,7 @@ async def get_query_params(scenario_id: str, query_id: str):
     """Получить все параметры запроса"""
     repo = get_scenario_repository()
     
-    query = repo.get_query(query_id)
+    query = await repo.get_query(query_id)
     if not query or str(query.scenario_id) != scenario_id:
         raise HTTPException(status_code=404, detail=f"Запрос {query_id} не найден в сценарии {scenario_id}")
 
@@ -291,18 +293,18 @@ async def add_param_to_query(scenario_id: str, query_id: str, request):
     request = ScenarioParamCreate(**request)
     repo = get_scenario_repository()
     
-    scenario = repo.get_scenario(scenario_id)
+    scenario = await repo.get_scenario(scenario_id)
     if not scenario:
         raise HTTPException(status_code=404, detail=f"Сценарий {scenario_id} не найден")
 
     if scenario.is_builtin == 't':
         raise HTTPException(status_code=403, detail="Встроенные сценарии нельзя редактировать")
 
-    query = repo.get_query(query_id)
+    query = await repo.get_query(query_id)
     if not query or str(query.scenario_id) != scenario_id:
         raise HTTPException(status_code=404, detail=f"Запрос {query_id} не найден в сценарии {scenario_id}")
 
-    param = repo.add_param_to_query(
+    param = await repo.add_param_to_query(
         query_id=query_id,
         param_name=request.param_name,
         param_type=request.param_type,
@@ -326,22 +328,22 @@ async def update_query_param(scenario_id: str, query_id: str, param_id: str, req
     request = ScenarioParamUpdate(**request)
     repo = get_scenario_repository()
     
-    scenario = repo.get_scenario(scenario_id)
+    scenario = await repo.get_scenario(scenario_id)
     if not scenario:
         raise HTTPException(status_code=404, detail=f"Сценарий {scenario_id} не найден")
 
     if scenario.is_builtin == 't':
         raise HTTPException(status_code=403, detail="Встроенные сценарии нельзя редактировать")
 
-    query = repo.get_query(query_id)
+    query = await repo.get_query(query_id)
     if not query or str(query.scenario_id) != scenario_id:
         raise HTTPException(status_code=404, detail=f"Запрос {query_id} не найден в сценарии {scenario_id}")
 
-    param = repo.get_param(param_id)
+    param = await repo.get_param(param_id)
     if not param or str(param.query_id) != query_id:
         raise HTTPException(status_code=404, detail=f"Параметр {param_id} не найден в запросе {query_id}")
 
-    updated = repo.update_param(
+    updated = await repo.update_param(
         param_id=param_id,
         param_name=request.param_name,
         param_type=request.param_type,
@@ -363,20 +365,20 @@ async def delete_query_param(scenario_id: str, query_id: str, param_id: str):
     """Удалить параметр запроса"""
     repo = get_scenario_repository()
     
-    scenario = repo.get_scenario(scenario_id)
+    scenario = await repo.get_scenario(scenario_id)
     if not scenario:
         raise HTTPException(status_code=404, detail=f"Сценарий {scenario_id} не найден")
 
     if scenario.is_builtin == 't':
         raise HTTPException(status_code=403, detail="Встроенные сценарии нельзя редактировать")
 
-    query = repo.get_query(query_id)
+    query = await repo.get_query(query_id)
     if not query or str(query.scenario_id) != scenario_id:
         raise HTTPException(status_code=404, detail=f"Запрос {query_id} не найден в сценарии {scenario_id}")
 
-    param = repo.get_param(param_id)
+    param = await repo.get_param(param_id)
     if not param or str(param.query_id) != query_id:
         raise HTTPException(status_code=404, detail=f"Параметр {param_id} не найден в запросе {query_id}")
 
-    repo.delete_param(param_id)
+    await repo.delete_param(param_id)
     return {"deleted": True, "param_id": param_id}

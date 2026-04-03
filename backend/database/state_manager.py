@@ -6,13 +6,13 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Any
-from sqlalchemy import Engine
+from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy import text
 
 from backend.config import get_restore_config
 from backend.database.query_analyzer import QueryAnalyzer
 from backend.database.backup_strategies import BackupInfo, SizeEstimate, SqlBackupStrategy
 from backend.database.state_verifier import StateVerifier, StateFingerprint, VerifyResult
-from sqlalchemy import text
 
 
 @dataclass
@@ -38,7 +38,7 @@ class RestoreResult:
 
 class DatabaseStateManager:
     """
-    Оркестратор управления состоянием баз данных
+    Оркестратор управления состояем баз данных
     
     Управляет процессом:
     1. Анализ запросов (нужен ли backup?)
@@ -95,13 +95,49 @@ class DatabaseStateManager:
         """
         return self._analyzer.extract_affected_tables(queries)
     
-    async def prepare_for_test(self, engine: Engine, dbms_type: str, 
+    async def _get_all_tables(self, engine: AsyncEngine, dbms_type: str) -> Set[str]:
+        """Получить все таблицы базы данных"""
+        async with engine.connect() as conn:
+            if dbms_type == 'postgresql':
+                sql = """
+                    SELECT table_name 
+                    FROM information_schema.tables 
+                    WHERE table_schema = 'public'
+                    AND table_type = 'BASE TABLE'
+                """
+            else:
+                sql = """
+                    SELECT table_name 
+                    FROM information_schema.tables 
+                    WHERE table_schema = DATABASE()
+                    AND table_type = 'BASE TABLE'
+                """
+            
+            result = await conn.execute(text(sql))
+            return {row[0] for row in result}
+    
+    async def _get_row_count(self, engine: AsyncEngine, table: str, dbms_type: str) -> int:
+        """Получить количество строк в таблице"""
+        async with engine.connect() as conn:
+            if dbms_type == 'postgresql':
+                sql = f'SELECT COUNT(*) FROM "{table}"'
+            else:
+                sql = f'SELECT COUNT(*) FROM `{table}`'
+            
+            result = await conn.execute(text(sql))
+            return result.scalar()
+    
+    def _get_lock(self, dbms_type: str) -> asyncio.Lock:
+        """Получить блокировку для СУБД"""
+        return self._locks.get(dbms_type, asyncio.Lock())
+    
+    async def prepare_for_test(self, engine: AsyncEngine, dbms_type: str, 
                              queries: List[str]) -> PrepareResult:
         """
         Подготовка к тесту: анализ, оценка, создание backup
         
         Args:
-            engine: SQLAlchemy engine
+            engine: SQLAlchemy async engine
             dbms_type: Тип СУБД ("mysql" или "postgresql")
             queries: Список SQL запросов теста
             
@@ -109,16 +145,14 @@ class DatabaseStateManager:
             PrepareResult с результатами подготовки
         """
         # Проверяем, нужен ли backup
-        needs_backup = self.needs_restore(queries)
-        
-        if not needs_backup:
+        if not self.needs_restore(queries):
             return PrepareResult(
                 needs_backup=False,
                 affected_tables=set(),
                 size_estimate=None
             )
         
-        # Получаем затронутые таблицы (для информации)
+        # Получаем затронутые таблицы (для информации - какие таблицы были затронуты write-операциями)
         affected_tables = self.get_affected_tables(queries)
         
         if not affected_tables:
@@ -134,7 +168,8 @@ class DatabaseStateManager:
         warnings = []
         
         # Проверяем остаточные backup-таблицы от предыдущих падений
-        existing_backups = await self._check_existing_backups(engine, all_tables)
+        prefix = self.config.get("backup_table_prefix", "_loadtest_backup_")
+        existing_backups = [t for t in all_tables if t.startswith(prefix)]
         if existing_backups:
             warnings.append(
                 f"Found existing backup tables from previous test: {existing_backups}. "
@@ -148,7 +183,7 @@ class DatabaseStateManager:
         if size_estimate.total_rows > self.config.get("large_table_confirm_threshold", 10_000_000):
             warnings.append(
                 f"Very large backup: {size_estimate.total_rows:,} rows total. "
-                f"Consider using native dump strategy or excluding large tables."
+                f"Consider using native dump strategy when excluding large tables."
             )
         elif size_estimate.warnings:
             warnings.extend(size_estimate.warnings)
@@ -172,21 +207,19 @@ class DatabaseStateManager:
             warnings=warnings
         )
     
-    async def restore_after_test(self, engine: Engine, dbms_type: str,
+    async def restore_after_test(self, engine: AsyncEngine, dbms_type: str,
                                 prepare_result: PrepareResult) -> RestoreResult:
         """
         Восстановление данных после теста
         
         Args:
-            engine: SQLAlchemy engine
+            engine: SQLAlchemy async engine
             dbms_type: Тип СУБД
             prepare_result: Результат подготовки (от prepare_for_test)
             
         Returns:
             RestoreResult с результатами восстановления
         """
-        import time
-        
         if not prepare_result.needs_backup or not prepare_result.backup_info:
             return RestoreResult(
                 success=True,
@@ -195,7 +228,7 @@ class DatabaseStateManager:
             )
         
         start_time = time.time()
-        errors = []
+        errors: List[str] = []
         
         # Блокируем СУБД на время restore
         async with self._get_lock(dbms_type):
@@ -215,7 +248,6 @@ class DatabaseStateManager:
                         prepare_result.pre_test_fingerprint, post_fingerprint
                     )
                     verified = verify_result.success
-                    
                     if not verified:
                         errors.extend(verify_result.errors)
                 
@@ -229,7 +261,7 @@ class DatabaseStateManager:
                 duration_ms = (time.time() - start_time) * 1000
                 
                 return RestoreResult(
-                    success=verified,  # Если верификация включена и не прошла - считаем неудачей
+                    success=verified,
                     duration_ms=duration_ms,
                     verified=verified,
                     verify_result=verify_result,
@@ -247,13 +279,13 @@ class DatabaseStateManager:
                     errors=errors
                 )
     
-    async def manual_restore(self, engine: Engine, dbms_type: str, 
+    async def manual_restore(self, engine: AsyncEngine, dbms_type: str, 
                             backup_id: str) -> RestoreResult:
         """
         Ручное восстановление из сохранённого бэкапа
         
         Args:
-            engine: SQLAlchemy engine
+            engine: SQLAlchemy async engine
             dbms_type: Тип СУБД
             backup_id: ID бэкапа
             
@@ -270,60 +302,68 @@ class DatabaseStateManager:
                 errors=[f"Backup {backup_id} not found for {dbms_type}"]
             )
         
+        start_time = time.time()
+        errors: List[str] = []
+        
         backup_info = self._active_backups[backup_key]
         
         # Создаём фингерпринт текущего состояния
         pre_fingerprint = await self._verifier.capture_fingerprint(engine, backup_info.tables)
         
-        # Выполняем restore
-        start_time = time.time()
-        
-        async with self._get_lock(dbms_type):
-            try:
-                await self._strategy.restore_backup(engine, backup_info)
-                
-                # Верификация
-                verified = True
-                verify_result = None
-                
-                if self.config.get("verify_after_restore", True):
-                    post_fingerprint = await self._verifier.capture_fingerprint(
-                        engine, backup_info.tables
-                    )
-                    verify_result = await self._verifier.verify(pre_fingerprint, post_fingerprint)
-                    verified = verify_result.success
-                
-                # Очистка
-                await self._strategy.cleanup(engine, backup_info)
-                self._active_backups.pop(backup_key, None)
-                
-                duration_ms = (time.time() - start_time) * 1000
-                
-                return RestoreResult(
-                    success=True,
-                    duration_ms=duration_ms,
-                    verified=verified,
-                    verify_result=verify_result
+        try:
+            # Выполняем restore
+            await self._strategy.restore_backup(engine, backup_info)
+            
+            # Верификация
+            verified = True
+            verify_result = None
+            if self.config.get("verify_after_restore", True):
+                post_fingerprint = await self._verifier.capture_fingerprint(
+                    engine, backup_info.tables
                 )
-                
-            except Exception as e:
-                duration_ms = (time.time() - start_time) * 1000
-                return RestoreResult(
-                    success=False,
-                    duration_ms=duration_ms,
-                    verified=False,
-                    errors=[str(e)]
-                )
+                verify_result = await self._verifier.verify(pre_fingerprint, post_fingerprint)
+                verified = verify_result.success
+                if not verified:
+                    errors.extend(verify_result.errors)
+            
+            # Очищаем backup после restore
+            await self._strategy.cleanup(engine, backup_info)
+            
+            # Удаляем из активных бэкапов
+            self._active_backups.pop(backup_key, None)
+            
+            duration_ms = (time.time() - start_time) * 1000
+            
+            return RestoreResult(
+                success=verified,
+                duration_ms=duration_ms,
+                verified=verified,
+                verify_result=verify_result,
+                errors=errors
+            )
+            
+        except Exception as e:
+            duration_ms = (time.time() - start_time) * 1000
+            errors.append(str(e))
+            
+            return RestoreResult(
+                success=False,
+                duration_ms=duration_ms,
+                verified=False,
+                errors=errors
+            )
     
-    async def get_database_state(self, engine: Engine, dbms_type: str) -> Dict:
+    async def get_database_state(self, engine: AsyncEngine, dbms_type: str) -> Dict:
         """
         Получить текущее состояние БД
         
         Returns:
-            Словарь с информацией о состоянии БД
+            Словарь с информацией о состоянии
         """
-        with engine.connect() as conn:
-            # Получаем список таблиц (только BASE TABLE, исключаем views)
+        prefix = self.config.get("backup_table_prefix", "_loadtest_backup_")
+        
+        async with engine.connect() as conn:
+            # Получаем список таблиц (только BASE TABLE, исключая views)
             if dbms_type == 'postgresql':
                 sql = """
                     SELECT table_name 
@@ -339,26 +379,20 @@ class DatabaseStateManager:
                     AND table_type = 'BASE TABLE'
                 """
             
-            result = conn.execute(text(sql))
+            result = await conn.execute(text(sql))
             all_tables = [row[0] for row in result]
             
             # Проверяем backup-таблицы
-            prefix = self.config.get("backup_table_prefix", "_loadtest_backup_")
             backup_tables = [t for t in all_tables if t.startswith(prefix)]
-            original_backup_tables = [t[len(prefix):] for t in backup_tables]
+            original_tables = {t[len(prefix):] for t in backup_tables}
             
             # Собираем информацию о каждой таблице
             tables_info = {}
             for table in all_tables:
-                if table.startswith(prefix):
-                    continue  # Пропускаем backup-таблицы
-                
                 row_count = await self._get_row_count(engine, table, dbms_type)
-                has_backup = table in original_backup_tables
-                
                 tables_info[table] = {
                     "row_count": row_count,
-                    "has_backup": has_backup
+                    "has_backup": table in original_tables
                 }
             
             # Определяем статус
@@ -374,114 +408,3 @@ class DatabaseStateManager:
                 "backup_tables": backup_tables,
                 "status": status
             }
-    
-    async def cleanup_all_backups(self, engine: Engine, dbms_type: str) -> List[str]:
-        """
-        Удалить все backup-таблицы
-        
-        Returns:
-            Список удалённых таблиц
-        """
-        prefix = self.config.get("backup_table_prefix", "_loadtest_backup_")
-        deleted = []
-        
-        with engine.connect() as conn:
-            # Получаем список backup-таблиц
-            if dbms_type == 'postgresql':
-                sql = f"""
-                    SELECT table_name 
-                    FROM information_schema.tables 
-                    WHERE table_schema = 'public'
-                    AND table_name LIKE '{prefix}%'
-                """
-            else:
-                sql = f"""
-                    SELECT table_name 
-                    FROM information_schema.tables 
-                    WHERE table_schema = DATABASE()
-                    AND table_name LIKE '{prefix}%'
-                """
-            
-            result = conn.execute(text(sql))
-            backup_tables = [row[0] for row in result]
-            
-            # Удаляем каждую
-            for table in backup_tables:
-                if dbms_type == 'postgresql':
-                    drop_sql = f'DROP TABLE IF EXISTS "{table}" CASCADE'
-                else:
-                    drop_sql = f'DROP TABLE IF EXISTS `{table}`'
-                
-                conn.execute(text(drop_sql))
-                deleted.append(table)
-            
-            conn.commit()
-        
-        # Очищаем активные бэкапы для этой СУБД
-        keys_to_remove = [k for k in self._active_backups.keys() if k.startswith(f"{dbms_type}:")]
-        for key in keys_to_remove:
-            del self._active_backups[key]
-        
-        return deleted
-    
-    def _get_lock(self, dbms_type: str) -> asyncio.Lock:
-        """Получить блокировку для указанной СУБД"""
-        if dbms_type not in self._locks:
-            self._locks[dbms_type] = asyncio.Lock()
-        return self._locks[dbms_type]
-    
-    async def _check_existing_backups(self, engine: Engine, tables: Set[str]) -> List[str]:
-        """Проверить существование backup-таблиц"""
-        prefix = self.config.get("backup_table_prefix", "_loadtest_backup_")
-        existing = []
-        
-        with engine.connect() as conn:
-            for table in tables:
-                backup_table = f"{prefix}{table}"
-                
-                # Проверяем существование
-                try:
-                    check_sql = f"SELECT 1 FROM {backup_table} LIMIT 1"
-                    conn.execute(text(check_sql))
-                    existing.append(backup_table)
-                except:
-                    pass
-        
-        return existing
-    
-    async def _get_row_count(self, engine: Engine, table: str, dbms_type: str) -> int:
-        """Получить количество строк"""
-        with engine.connect() as conn:
-            if dbms_type == 'postgresql':
-                sql = f'SELECT COUNT(*) FROM "{table}"'
-            else:
-                sql = f'SELECT COUNT(*) FROM `{table}`'
-            result = conn.execute(text(sql))
-            return result.scalar()
-    
-    async def _get_all_tables(self, engine: Engine, dbms_type: str) -> Set[str]:
-        """Получить все таблицы базы данных (исключая backup таблицы и views)"""
-        with engine.connect() as conn:
-            if dbms_type == 'postgresql':
-                sql = """
-                    SELECT table_name 
-                    FROM information_schema.tables 
-                    WHERE table_schema = 'public'
-                    AND table_type = 'BASE TABLE'
-                """
-            else:  # mysql
-                sql = """
-                    SELECT table_name 
-                    FROM information_schema.tables 
-                    WHERE table_schema = DATABASE()
-                    AND table_type = 'BASE TABLE'
-                """
-            
-            result = conn.execute(text(sql))
-            all_tables = {row[0] for row in result}
-            
-            # Исключаем backup таблицы
-            prefix = self.config.get("backup_table_prefix", "_loadtest_backup_")
-            all_tables = {t for t in all_tables if not t.startswith(prefix)}
-            
-            return all_tables

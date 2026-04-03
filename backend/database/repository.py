@@ -1,11 +1,12 @@
 """
-Repository для работы с историей тестов в PostgreSQL
+Async Repository для работы с историей тестов в PostgreSQL
 """
 import uuid
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
-from sqlalchemy import create_engine, desc
-from sqlalchemy.orm import sessionmaker, Session, joinedload
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy import select, func, desc
+from sqlalchemy.orm import joinedload
 
 from backend.database.models import (
     Base, TestRun, TestResult, TimeSeries,
@@ -27,17 +28,21 @@ class TestRepository:
     """Репозиторий для работы с тестами"""
     
     def __init__(self, database_url: str):
-        self.engine = create_engine(database_url, pool_pre_ping=True)
-        Base.metadata.create_all(self.engine)
-        self.SessionLocal = sessionmaker(bind=self.engine, autocommit=False, autoflush=False)
+        self.engine = create_async_engine(database_url, pool_pre_ping=True)
+        self.SessionLocal = async_sessionmaker(bind=self.engine, expire_on_commit=False)
     
-    def get_session(self) -> Session:
+    async def init_db(self):
+        """Создать все таблицы"""
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    
+    async def get_session(self) -> AsyncSession:
         """Получить новую сессию БД"""
         return self.SessionLocal()
     
     # ==================== TestRun CRUD ====================
     
-    def create_test_run(
+    async def create_test_run(
         self,
         name: str,
         config: Dict[str, Any],
@@ -45,7 +50,7 @@ class TestRepository:
         test_run_id: Optional[str] = None
     ) -> TestRun:
         """Создать новый тестовый прогон"""
-        with self.get_session() as session:
+        async with self.SessionLocal() as session:
             test_run = TestRun(
                 id=uuid.UUID(test_run_id) if test_run_id else uuid.uuid4(),
                 name=name,
@@ -54,48 +59,54 @@ class TestRepository:
                 started_at=get_local_now()
             )
             session.add(test_run)
-            session.commit()
-            session.refresh(test_run)
+            await session.commit()
+            await session.refresh(test_run)
             return test_run
     
-    def get_test_run(self, test_run_id: str) -> Optional[TestRun]:
+    async def get_test_run(self, test_run_id: str) -> Optional[TestRun]:
         """Получить тестовый прогон по ID"""
-        with self.get_session() as session:
-            return session.query(TestRun).filter(
-                TestRun.id == uuid.UUID(test_run_id)
-            ).first()
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(TestRun).where(TestRun.id == uuid.UUID(test_run_id))
+            )
+            return result.scalar_one_or_none()
     
-    def get_test_run_with_results(self, test_run_id: str) -> Optional[Dict[str, Any]]:
+    async def get_test_run_with_results(self, test_run_id: str) -> Optional[Dict[str, Any]]:
         """Получить тестовый прогон с результатами"""
-        with self.get_session() as session:
-            test_run = session.query(TestRun).filter(
-                TestRun.id == uuid.UUID(test_run_id)
-            ).first()
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(TestRun)
+                .options(joinedload(TestRun.results))
+                .where(TestRun.id == uuid.UUID(test_run_id))
+            )
+            test_run = result.unique().scalar_one_or_none()
             
             if not test_run:
                 return None
             
-            result = test_run.to_dict()
-            result['results'] = [r.to_dict() for r in test_run.results]
-            return result
+            result_dict = test_run.to_dict()
+            result_dict['results'] = [r.to_dict() for r in test_run.results]
+            return result_dict
     
-    def get_all_test_runs(
+    async def get_all_test_runs(
         self, 
         limit: int = 50, 
         offset: int = 0,
         status: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Получить список всех тестовых прогонов"""
-        with self.get_session() as session:
-            query = session.query(TestRun).order_by(desc(TestRun.created_at))
+        async with self.SessionLocal() as session:
+            query = select(TestRun).order_by(desc(TestRun.created_at))
             
             if status:
-                query = query.filter(TestRun.status == status)
+                query = query.where(TestRun.status == status)
             
-            test_runs = query.offset(offset).limit(limit).all()
+            query = query.offset(offset).limit(limit)
+            result = await session.execute(query)
+            test_runs = result.scalars().all()
             return [tr.to_dict() for tr in test_runs]
     
-    def update_test_run_status(
+    async def update_test_run_status(
         self, 
         test_run_id: str, 
         status: str,
@@ -104,46 +115,46 @@ class TestRepository:
         finished_at: Optional[datetime] = None,
     ) -> Optional[TestRun]:
         """Обновить статус тестового прогона"""
-        with self.get_session() as session:
-            test_run = session.query(TestRun).filter(
-                TestRun.id == uuid.UUID(test_run_id)
-            ).first()
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(TestRun).where(TestRun.id == uuid.UUID(test_run_id))
+            )
+            test_run = result.scalar_one_or_none()
             
             if test_run:
                 test_run.status = status
 
-                # Обновляем время начала/окончания, если передано
                 if started_at is not None:
                     test_run.started_at = started_at
                 if finished_at is not None:
                     test_run.finished_at = finished_at
                 elif status in ['completed', 'failed']:
-                    # По‑умолчанию ставим момент обновления, если не задано явно
                     test_run.finished_at = get_local_now()
 
                 if summary:
                     test_run.summary = summary
-                session.commit()
-                session.refresh(test_run)
+                await session.commit()
+                await session.refresh(test_run)
             
             return test_run
     
-    def delete_test_run(self, test_run_id: str) -> bool:
+    async def delete_test_run(self, test_run_id: str) -> bool:
         """Удалить тестовый прогон"""
-        with self.get_session() as session:
-            test_run = session.query(TestRun).filter(
-                TestRun.id == uuid.UUID(test_run_id)
-            ).first()
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(TestRun).where(TestRun.id == uuid.UUID(test_run_id))
+            )
+            test_run = result.scalar_one_or_none()
             
             if test_run:
-                session.delete(test_run)
-                session.commit()
+                await session.delete(test_run)
+                await session.commit()
                 return True
             return False
     
     # ==================== TestResult CRUD ====================
     
-    def add_test_result(
+    async def add_test_result(
         self,
         test_run_id: str,
         db_type: str,
@@ -153,7 +164,7 @@ class TestRepository:
         dbms_metrics: Optional[Dict[str, Any]] = None
     ) -> TestResult:
         """Добавить результат теста для СУБД"""
-        with self.get_session() as session:
+        async with self.SessionLocal() as session:
             result = TestResult(
                 id=uuid.uuid4(),
                 test_run_id=uuid.UUID(test_run_id),
@@ -164,21 +175,22 @@ class TestRepository:
                 dbms_metrics=dbms_metrics
             )
             session.add(result)
-            session.commit()
-            session.refresh(result)
+            await session.commit()
+            await session.refresh(result)
             return result
     
-    def get_test_results(self, test_run_id: str) -> List[Dict[str, Any]]:
+    async def get_test_results(self, test_run_id: str) -> List[Dict[str, Any]]:
         """Получить все результаты для тестового прогона"""
-        with self.get_session() as session:
-            results = session.query(TestResult).filter(
-                TestResult.test_run_id == uuid.UUID(test_run_id)
-            ).all()
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(TestResult).where(TestResult.test_run_id == uuid.UUID(test_run_id))
+            )
+            results = result.scalars().all()
             return [r.to_dict() for r in results]
     
     # ==================== TimeSeries CRUD ====================
     
-    def add_time_series_point(
+    async def add_time_series_point(
         self,
         test_run_id: str,
         db_type: str,
@@ -196,7 +208,7 @@ class TestRepository:
         network_out: Optional[float] = None
     ) -> TimeSeries:
         """Добавить точку временного ряда"""
-        with self.get_session() as session:
+        async with self.SessionLocal() as session:
             point = TimeSeries(
                 test_run_id=uuid.UUID(test_run_id),
                 db_type=db_type,
@@ -214,54 +226,56 @@ class TestRepository:
                 network_out=network_out
             )
             session.add(point)
-            session.commit()
-            session.refresh(point)
+            await session.commit()
+            await session.refresh(point)
             return point
     
-    def add_time_series_batch(
+    async def add_time_series_batch(
         self,
         test_run_id: str,
         points: List[Dict[str, Any]]
     ) -> int:
         """Добавить несколько точек временного ряда"""
-        with self.get_session() as session:
+        async with self.SessionLocal() as session:
             for point_data in points:
                 point = TimeSeries(
                     test_run_id=uuid.UUID(test_run_id),
                     **point_data
                 )
                 session.add(point)
-            session.commit()
+            await session.commit()
             return len(points)
     
-    def get_time_series(
+    async def get_time_series(
         self, 
         test_run_id: str, 
         db_type: Optional[str] = None,
         limit: int = 1000
     ) -> List[Dict[str, Any]]:
         """Получить временной ряд для теста"""
-        with self.get_session() as session:
-            query = session.query(TimeSeries).filter(
+        async with self.SessionLocal() as session:
+            query = select(TimeSeries).where(
                 TimeSeries.test_run_id == uuid.UUID(test_run_id)
             ).order_by(TimeSeries.timestamp)
             
             if db_type:
-                query = query.filter(TimeSeries.db_type == db_type)
+                query = query.where(TimeSeries.db_type == db_type)
             
-            points = query.limit(limit).all()
+            query = query.limit(limit)
+            result = await session.execute(query)
+            points = result.scalars().all()
             return [p.to_dict() for p in points]
     
     # ==================== Comparison ====================
     
-    def compare_test_runs(
+    async def compare_test_runs(
         self, 
         test_run_id_1: str, 
         test_run_id_2: str
     ) -> Optional[Dict[str, Any]]:
         """Сравнить два тестовых прогона"""
-        run1 = self.get_test_run_with_results(test_run_id_1)
-        run2 = self.get_test_run_with_results(test_run_id_2)
+        run1 = await self.get_test_run_with_results(test_run_id_1)
+        run2 = await self.get_test_run_with_results(test_run_id_2)
         
         if not run1 or not run2:
             return None
@@ -272,7 +286,6 @@ class TestRepository:
             'delta': {}
         }
         
-        # Вычисляем дельту по каждой СУБД
         results_1 = {r['db_type']: r for r in run1.get('results', [])}
         results_2 = {r['db_type']: r for r in run2.get('results', [])}
         
@@ -285,7 +298,6 @@ class TestRepository:
                 v1 = r1.get(metric, 0)
                 v2 = r2.get(metric, 0)
                 if v1 and v2:
-                    # Положительная дельта = улучшение для TPS, ухудшение для времени
                     delta[metric] = {
                         'test_1': v1,
                         'test_2': v2,
@@ -297,12 +309,21 @@ class TestRepository:
         
         return comparison
     
-    def get_statistics(self) -> Dict[str, Any]:
+    async def get_statistics(self) -> Dict[str, Any]:
         """Получить общую статистику по тестам"""
-        with self.get_session() as session:
-            total_runs = session.query(TestRun).count()
-            completed_runs = session.query(TestRun).filter(TestRun.status == 'completed').count()
-            failed_runs = session.query(TestRun).filter(TestRun.status == 'failed').count()
+        async with self.SessionLocal() as session:
+            total_result = await session.execute(select(func.count()).select_from(TestRun))
+            total_runs = total_result.scalar()
+            
+            completed_result = await session.execute(
+                select(func.count()).select_from(TestRun).where(TestRun.status == 'completed')
+            )
+            completed_runs = completed_result.scalar()
+            
+            failed_result = await session.execute(
+                select(func.count()).select_from(TestRun).where(TestRun.status == 'failed')
+            )
+            failed_runs = failed_result.scalar()
 
             return {
                 'total_runs': total_runs,
@@ -316,17 +337,21 @@ class ScenarioRepository:
     """Репозиторий для работы со сценариями тестирования"""
 
     def __init__(self, database_url: str):
-        self.engine = create_engine(database_url, pool_pre_ping=True)
-        Base.metadata.create_all(self.engine)
-        self.SessionLocal = sessionmaker(bind=self.engine, autocommit=False, autoflush=False)
+        self.engine = create_async_engine(database_url, pool_pre_ping=True)
+        self.SessionLocal = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
-    def get_session(self) -> Session:
+    async def init_db(self):
+        """Создать все таблицы"""
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    async def get_session(self) -> AsyncSession:
         """Получить новую сессию БД"""
         return self.SessionLocal()
 
     # ==================== TestScenario CRUD ====================
 
-    def create_scenario(
+    async def create_scenario(
         self,
         name: str,
         description: Optional[str],
@@ -334,7 +359,7 @@ class ScenarioRepository:
         is_builtin: bool = False
     ) -> TestScenario:
         """Создать новый сценарий"""
-        with self.get_session() as session:
+        async with self.SessionLocal() as session:
             scenario = TestScenario(
                 id=uuid.uuid4(),
                 name=name,
@@ -344,32 +369,32 @@ class ScenarioRepository:
                 is_active='t'
             )
             session.add(scenario)
-            session.commit()
-            session.refresh(scenario)
+            await session.commit()
+            await session.refresh(scenario)
             return scenario
 
-    def get_scenario(self, scenario_id: str) -> Optional[TestScenario]:
+    async def get_scenario(self, scenario_id: str) -> Optional[TestScenario]:
         """Получить сценарий по ID с запросами и параметрами (eager loading)"""
-        with self.get_session() as session:
-            scenario = session.query(TestScenario).options(
-                joinedload(TestScenario.queries).joinedload(ScenarioQuery.params)
-            ).filter(
-                TestScenario.id == uuid.UUID(scenario_id)
-            ).first()
-            # Явно загружаем связанные данные до закрытия сессии
-            if scenario:
-                for query in scenario.queries:
-                    _ = query.params  # Touch to load
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(TestScenario)
+                .options(
+                    joinedload(TestScenario.queries).joinedload(ScenarioQuery.params)
+                )
+                .where(TestScenario.id == uuid.UUID(scenario_id))
+            )
+            scenario = result.unique().scalar_one_or_none()
             return scenario
 
-    def get_scenario_by_name(self, name: str) -> Optional[TestScenario]:
+    async def get_scenario_by_name(self, name: str) -> Optional[TestScenario]:
         """Получить сценарий по имени"""
-        with self.get_session() as session:
-            return session.query(TestScenario).filter(
-                TestScenario.name == name
-            ).first()
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(TestScenario).where(TestScenario.name == name)
+            )
+            return result.scalar_one_or_none()
 
-    def get_all_scenarios(
+    async def get_all_scenarios(
         self,
         limit: int = 100,
         offset: int = 0,
@@ -377,19 +402,23 @@ class ScenarioRepository:
         include_builtin: bool = True
     ) -> List[Dict[str, Any]]:
         """Получить список всех сценариев"""
-        with self.get_session() as session:
-            query = session.query(TestScenario)
+        async with self.SessionLocal() as session:
+            query = select(TestScenario).options(
+                joinedload(TestScenario.queries).joinedload(ScenarioQuery.params)
+            )
 
             if scenario_type:
-                query = query.filter(TestScenario.scenario_type == scenario_type)
+                query = query.where(TestScenario.scenario_type == scenario_type)
 
             if not include_builtin:
-                query = query.filter(TestScenario.is_builtin == 'f')
+                query = query.where(TestScenario.is_builtin == 'f')
 
-            scenarios = query.order_by(desc(TestScenario.created_at)).offset(offset).limit(limit).all()
+            query = query.order_by(desc(TestScenario.created_at)).offset(offset).limit(limit)
+            result = await session.execute(query)
+            scenarios = result.unique().scalars().all()
             return [s.to_dict() for s in scenarios]
 
-    def update_scenario(
+    async def update_scenario(
         self,
         scenario_id: str,
         name: Optional[str] = None,
@@ -398,10 +427,11 @@ class ScenarioRepository:
         is_active: Optional[bool] = None
     ) -> Optional[TestScenario]:
         """Обновить сценарий"""
-        with self.get_session() as session:
-            scenario = session.query(TestScenario).filter(
-                TestScenario.id == uuid.UUID(scenario_id)
-            ).first()
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(TestScenario).where(TestScenario.id == uuid.UUID(scenario_id))
+            )
+            scenario = result.scalar_one_or_none()
 
             if scenario:
                 if name is not None:
@@ -413,35 +443,36 @@ class ScenarioRepository:
                 if is_active is not None:
                     scenario.is_active = 't' if is_active else 'f'
 
-                session.commit()
-                session.refresh(scenario)
+                await session.commit()
+                await session.refresh(scenario)
 
             return scenario
 
-    def delete_scenario(self, scenario_id: str) -> bool:
+    async def delete_scenario(self, scenario_id: str) -> bool:
         """Удалить сценарий (только если не built-in)"""
-        with self.get_session() as session:
-            scenario = session.query(TestScenario).filter(
-                TestScenario.id == uuid.UUID(scenario_id)
-            ).first()
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(TestScenario).where(TestScenario.id == uuid.UUID(scenario_id))
+            )
+            scenario = result.scalar_one_or_none()
 
             if scenario and scenario.is_builtin == 'f':
-                session.delete(scenario)
-                session.commit()
+                await session.delete(scenario)
+                await session.commit()
                 return True
             return False
 
-    def clone_scenario(self, scenario_id: str, new_name: str) -> Optional[TestScenario]:
+    async def clone_scenario(self, scenario_id: str, new_name: str) -> Optional[TestScenario]:
         """Клонировать сценарий"""
-        with self.get_session() as session:
-            original = session.query(TestScenario).filter(
-                TestScenario.id == uuid.UUID(scenario_id)
-            ).first()
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(TestScenario).where(TestScenario.id == uuid.UUID(scenario_id))
+            )
+            original = result.scalar_one_or_none()
 
             if not original:
                 return None
 
-            # Создаём новый сценарий
             cloned = TestScenario(
                 id=uuid.uuid4(),
                 name=new_name,
@@ -451,9 +482,8 @@ class ScenarioRepository:
                 is_active='t'
             )
             session.add(cloned)
-            session.flush()
+            await session.flush()
 
-            # Копируем запросы
             for orig_query in original.queries:
                 new_query = ScenarioQuery(
                     id=uuid.uuid4(),
@@ -465,9 +495,8 @@ class ScenarioRepository:
                     description=orig_query.description
                 )
                 session.add(new_query)
-                session.flush()
+                await session.flush()
 
-                # Копируем параметры
                 for orig_param in orig_query.params:
                     new_param = ScenarioParam(
                         id=uuid.uuid4(),
@@ -485,13 +514,13 @@ class ScenarioRepository:
                     )
                     session.add(new_param)
 
-            session.commit()
-            session.refresh(cloned)
+            await session.commit()
+            await session.refresh(cloned)
             return cloned
 
     # ==================== ScenarioQuery CRUD ====================
 
-    def add_query_to_scenario(
+    async def add_query_to_scenario(
         self,
         scenario_id: str,
         sql_template: str,
@@ -501,7 +530,7 @@ class ScenarioRepository:
         description: Optional[str] = None
     ) -> ScenarioQuery:
         """Добавить запрос в сценарий"""
-        with self.get_session() as session:
+        async with self.SessionLocal() as session:
             query = ScenarioQuery(
                 id=uuid.uuid4(),
                 scenario_id=uuid.UUID(scenario_id),
@@ -512,18 +541,19 @@ class ScenarioRepository:
                 description=description
             )
             session.add(query)
-            session.commit()
-            session.refresh(query)
+            await session.commit()
+            await session.refresh(query)
             return query
 
-    def get_query(self, query_id: str) -> Optional[ScenarioQuery]:
+    async def get_query(self, query_id: str) -> Optional[ScenarioQuery]:
         """Получить запрос по ID"""
-        with self.get_session() as session:
-            return session.query(ScenarioQuery).filter(
-                ScenarioQuery.id == uuid.UUID(query_id)
-            ).first()
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(ScenarioQuery).where(ScenarioQuery.id == uuid.UUID(query_id))
+            )
+            return result.scalar_one_or_none()
 
-    def update_query(
+    async def update_query(
         self,
         query_id: str,
         sql_template: Optional[str] = None,
@@ -533,10 +563,11 @@ class ScenarioRepository:
         description: Optional[str] = None
     ) -> Optional[ScenarioQuery]:
         """Обновить запрос"""
-        with self.get_session() as session:
-            query = session.query(ScenarioQuery).filter(
-                ScenarioQuery.id == uuid.UUID(query_id)
-            ).first()
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(ScenarioQuery).where(ScenarioQuery.id == uuid.UUID(query_id))
+            )
+            query = result.scalar_one_or_none()
 
             if query:
                 if sql_template is not None:
@@ -550,27 +581,28 @@ class ScenarioRepository:
                 if description is not None:
                     query.description = description
 
-                session.commit()
-                session.refresh(query)
+                await session.commit()
+                await session.refresh(query)
 
             return query
 
-    def delete_query(self, query_id: str) -> bool:
+    async def delete_query(self, query_id: str) -> bool:
         """Удалить запрос из сценария"""
-        with self.get_session() as session:
-            query = session.query(ScenarioQuery).filter(
-                ScenarioQuery.id == uuid.UUID(query_id)
-            ).first()
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(ScenarioQuery).where(ScenarioQuery.id == uuid.UUID(query_id))
+            )
+            query = result.scalar_one_or_none()
 
             if query:
-                session.delete(query)
-                session.commit()
+                await session.delete(query)
+                await session.commit()
                 return True
             return False
 
     # ==================== ScenarioParam CRUD ====================
 
-    def add_param_to_query(
+    async def add_param_to_query(
         self,
         query_id: str,
         param_name: str,
@@ -585,7 +617,7 @@ class ScenarioRepository:
         step: int = 1
     ) -> ScenarioParam:
         """Добавить параметр к запросу"""
-        with self.get_session() as session:
+        async with self.SessionLocal() as session:
             param = ScenarioParam(
                 id=uuid.uuid4(),
                 query_id=uuid.UUID(query_id),
@@ -601,18 +633,19 @@ class ScenarioRepository:
                 step=step
             )
             session.add(param)
-            session.commit()
-            session.refresh(param)
+            await session.commit()
+            await session.refresh(param)
             return param
 
-    def get_param(self, param_id: str) -> Optional[ScenarioParam]:
+    async def get_param(self, param_id: str) -> Optional[ScenarioParam]:
         """Получить параметр по ID"""
-        with self.get_session() as session:
-            return session.query(ScenarioParam).filter(
-                ScenarioParam.id == uuid.UUID(param_id)
-            ).first()
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(ScenarioParam).where(ScenarioParam.id == uuid.UUID(param_id))
+            )
+            return result.scalar_one_or_none()
 
-    def update_param(
+    async def update_param(
         self,
         param_id: str,
         param_name: Optional[str] = None,
@@ -627,10 +660,11 @@ class ScenarioRepository:
         step: Optional[int] = None
     ) -> Optional[ScenarioParam]:
         """Обновить параметр"""
-        with self.get_session() as session:
-            param = session.query(ScenarioParam).filter(
-                ScenarioParam.id == uuid.UUID(param_id)
-            ).first()
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(ScenarioParam).where(ScenarioParam.id == uuid.UUID(param_id))
+            )
+            param = result.scalar_one_or_none()
 
             if param:
                 if param_name is not None:
@@ -654,47 +688,54 @@ class ScenarioRepository:
                 if step is not None:
                     param.step = step
 
-                session.commit()
-                session.refresh(param)
+                await session.commit()
+                await session.refresh(param)
 
             return param
 
-    def delete_param(self, param_id: str) -> bool:
+    async def delete_param(self, param_id: str) -> bool:
         """Удалить параметр"""
-        with self.get_session() as session:
-            param = session.query(ScenarioParam).filter(
-                ScenarioParam.id == uuid.UUID(param_id)
-            ).first()
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(ScenarioParam).where(ScenarioParam.id == uuid.UUID(param_id))
+            )
+            param = result.scalar_one_or_none()
 
             if param:
-                session.delete(param)
-                session.commit()
+                await session.delete(param)
+                await session.commit()
                 return True
             return False
 
-    def increment_sequential_param(self, param_id: str) -> int:
+    async def increment_sequential_param(self, param_id: str) -> int:
         """Инкрементировать значение sequential параметра"""
-        with self.get_session() as session:
-            param = session.query(ScenarioParam).filter(
-                ScenarioParam.id == uuid.UUID(param_id)
-            ).first()
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(ScenarioParam).where(ScenarioParam.id == uuid.UUID(param_id))
+            )
+            param = result.scalar_one_or_none()
 
             if param and param.param_type == 'sequential_int':
                 old_value = param.current_value
                 param.current_value += param.step
-                session.commit()
+                await session.commit()
                 return old_value
             return 0
 
     # ==================== Helper Methods ====================
 
-    def get_scenario_for_execution(self, scenario_id: str) -> Optional[Dict[str, Any]]:
+    async def get_scenario_for_execution(self, scenario_id: str) -> Optional[Dict[str, Any]]:
         """Получить сценарий в формате для выполнения теста"""
-        with self.get_session() as session:
-            scenario = session.query(TestScenario).filter(
-                TestScenario.id == uuid.UUID(scenario_id),
-                TestScenario.is_active == 't'
-            ).first()
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(TestScenario)
+                .options(joinedload(TestScenario.queries).joinedload(ScenarioQuery.params))
+                .where(
+                    TestScenario.id == uuid.UUID(scenario_id),
+                    TestScenario.is_active == 't'
+                )
+            )
+            scenario = result.unique().scalar_one_or_none()
 
             if not scenario:
                 return None

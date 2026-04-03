@@ -2,12 +2,13 @@
 Native dump strategy for database backup/restore using pg_dump/mysqldump
 Optional fallback strategy when SQL-based strategy is not suitable for large databases
 """
+import asyncio
 import os
 import shutil
-import subprocess
 import uuid
 from typing import Dict, Set, Optional
-from sqlalchemy import Engine, text
+from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy import text
 
 from . import BackupStrategy, BackupInfo, SizeEstimate
 
@@ -23,27 +24,26 @@ class NativeDumpStrategy(BackupStrategy):
     def __init__(self, config: Dict = None):
         super().__init__(config)
         self.snapshots_dir = config.get("snapshots_dir", "./snapshots") if config else "./snapshots"
-        # Ensure snapshots directory exists
         os.makedirs(self.snapshots_dir, exist_ok=True)
     
     def is_available(self) -> bool:
         """Check if native utilities are available"""
         return bool(shutil.which("pg_dump") or shutil.which("mysqldump"))
     
-    def _get_connection_params(self, engine: Engine) -> Dict:
-        """Extract connection parameters from SQLAlchemy engine"""
+    def _get_connection_params(self, engine: AsyncEngine) -> Dict:
+        """Extract connection parameters from SQLAlchemy async engine"""
         url = engine.url
         return {
             "host": url.host or "localhost",
-            "port": url.port or (5432 if engine.dialect.name == "postgresql" else 3306),
+            "port": url.port or (5432 if engine.sync_engine.dialect.name == "postgresql" else 3306),
             "user": url.username or "postgres",
             "password": url.password or "",
             "database": url.database or "postgres"
         }
     
-    async def create_backup(self, engine: Engine, tables: Set[str]) -> BackupInfo:
+    async def create_backup(self, engine: AsyncEngine, tables: Set[str]) -> BackupInfo:
         """Create backup using native dump utilities"""
-        dbms_type = engine.dialect.name
+        dbms_type = engine.sync_engine.dialect.name
         backup_id = str(uuid.uuid4())[:8]
         
         conn_params = self._get_connection_params(engine)
@@ -57,16 +57,20 @@ class NativeDumpStrategy(BackupStrategy):
         
         # Get row counts for metadata
         row_counts = {}
-        with engine.connect() as conn:
+        async with engine.connect() as conn:
             for table in tables:
-                result = conn.execute(text(f'SELECT COUNT(*) FROM "{table}"' if dbms_type == "postgresql" else f"SELECT COUNT(*) FROM `{table}`"))
+                if dbms_type == "postgresql":
+                    sql = f'SELECT COUNT(*) FROM "{table}"'
+                else:
+                    sql = f'SELECT COUNT(*) FROM `{table}`'
+                result = await conn.execute(text(sql))
                 row_counts[table] = result.scalar()
         
         return BackupInfo(
             backup_id=backup_id,
             dbms_type=dbms_type,
             tables=tables,
-            backup_tables=set(),  # Native strategy doesn't use backup tables
+            backup_tables=set(),
             row_counts=row_counts,
             file_path=file_path
         )
@@ -75,7 +79,6 @@ class NativeDumpStrategy(BackupStrategy):
         """Create PostgreSQL backup using pg_dump"""
         file_path = os.path.join(self.snapshots_dir, f"{backup_id}.dump")
         
-        # Build table arguments
         table_args = []
         for table in tables:
             table_args.extend(["-t", table])
@@ -95,16 +98,16 @@ class NativeDumpStrategy(BackupStrategy):
         if conn_params["password"]:
             env["PGPASSWORD"] = conn_params["password"]
         
-        result = subprocess.run(
-            cmd,
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
             env=env,
-            capture_output=True,
-            text=True,
-            timeout=300  # 5 minutes timeout
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
         )
+        stdout, stderr = await proc.communicate()
         
-        if result.returncode != 0:
-            raise RuntimeError(f"pg_dump failed: {result.stderr}")
+        if proc.returncode != 0:
+            raise RuntimeError(f"pg_dump failed: {stderr.decode()}")
         
         return file_path
     
@@ -129,24 +132,24 @@ class NativeDumpStrategy(BackupStrategy):
             conn_params["database"]
         ] + list(tables))
         
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=300  # 5 minutes timeout
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
         )
+        stdout, stderr = await proc.communicate()
         
-        if result.returncode != 0:
-            raise RuntimeError(f"mysqldump failed: {result.stderr}")
+        if proc.returncode != 0:
+            raise RuntimeError(f"mysqldump failed: {stderr.decode()}")
         
         with open(file_path, 'w') as f:
-            f.write(result.stdout)
+            f.write(stdout.decode())
         
         return file_path
     
-    async def restore_backup(self, engine: Engine, backup_info: BackupInfo) -> None:
+    async def restore_backup(self, engine: AsyncEngine, backup_info: BackupInfo) -> None:
         """Restore database from native dump"""
-        dbms_type = engine.dialect.name
+        dbms_type = engine.sync_engine.dialect.name
         conn_params = self._get_connection_params(engine)
         
         if not backup_info.file_path or not os.path.exists(backup_info.file_path):
@@ -175,17 +178,16 @@ class NativeDumpStrategy(BackupStrategy):
         if conn_params["password"]:
             env["PGPASSWORD"] = conn_params["password"]
         
-        result = subprocess.run(
-            cmd,
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
             env=env,
-            capture_output=True,
-            text=True,
-            timeout=300
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
         )
+        stdout, stderr = await proc.communicate()
         
-        # pg_restore returns 1 if some warnings occurred, which is acceptable
-        if result.returncode not in [0, 1]:
-            raise RuntimeError(f"pg_restore failed: {result.stderr}")
+        if proc.returncode not in [0, 1]:
+            raise RuntimeError(f"pg_restore failed: {stderr.decode()}")
     
     async def _restore_mysql_backup(self, conn_params: Dict, file_path: str) -> None:
         """Restore MySQL database using mysql client"""
@@ -204,46 +206,49 @@ class NativeDumpStrategy(BackupStrategy):
         with open(file_path, 'r') as f:
             sql_content = f.read()
         
-        result = subprocess.run(
-            cmd,
-            input=sql_content,
-            capture_output=True,
-            text=True,
-            timeout=300
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
         )
+        stdout, stderr = await proc.communicate(input=sql_content.encode())
         
-        if result.returncode != 0:
-            raise RuntimeError(f"mysql restore failed: {result.stderr}")
+        if proc.returncode != 0:
+            raise RuntimeError(f"mysql restore failed: {stderr.decode()}")
     
-    async def cleanup(self, engine: Engine, backup_info: BackupInfo) -> None:
+    async def cleanup(self, engine: AsyncEngine, backup_info: BackupInfo) -> None:
         """Remove backup file"""
         if backup_info.file_path and os.path.exists(backup_info.file_path):
             os.remove(backup_info.file_path)
     
-    async def estimate_size(self, engine: Engine, tables: Set[str]) -> SizeEstimate:
+    async def estimate_size(self, engine: AsyncEngine, tables: Set[str]) -> SizeEstimate:
         """Estimate backup size and time using native utilities"""
-        dbms_type = engine.dialect.name
+        dbms_type = engine.sync_engine.dialect.name
         
-        # For estimation, use SQL method
         table_info = {}
         total_rows = 0
         total_size = 0
         warnings = []
         
-        with engine.connect() as conn:
+        async with engine.connect() as conn:
             for table in tables:
-                # Get row count
-                result = conn.execute(text(f'SELECT COUNT(*) FROM "{table}"' if dbms_type == "postgresql" else f"SELECT COUNT(*) FROM `{table}`"))
+                if dbms_type == "postgresql":
+                    row_sql = f'SELECT COUNT(*) FROM "{table}"'
+                else:
+                    row_sql = f'SELECT COUNT(*) FROM `{table}`'
+                result = await conn.execute(text(row_sql))
                 row_count = result.scalar()
                 
-                # Get table size (approximate)
                 if dbms_type == "postgresql":
-                    size_result = conn.execute(text(f'SELECT pg_total_relation_size(\'"{table}"\')'))
+                    size_sql = f"SELECT pg_total_relation_size('\"{table}\"')"
+                    size_result = await conn.execute(text(size_sql))
                 else:
-                    size_result = conn.execute(text(
+                    size_sql = text(
                         "SELECT DATA_LENGTH + INDEX_LENGTH FROM information_schema.TABLES "
-                        f"WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{table}'"
-                    ))
+                        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table"
+                    )
+                    size_result = await conn.execute(size_sql, {"table": table})
                 size_bytes = size_result.scalar() or 0
                 
                 table_info[table] = {
@@ -253,14 +258,12 @@ class NativeDumpStrategy(BackupStrategy):
                 total_rows += row_count
                 total_size += size_bytes
                 
-                # Warnings for large tables
                 if row_count > 10_000_000:
                     warnings.append(f"Very large table {table} ({row_count:,} rows)")
                 elif row_count > 1_000_000:
                     warnings.append(f"Large table {table} ({row_count:,} rows)")
         
-        # Native dump is usually faster than SQL-based
-        estimated_time = max(total_rows / 5000, 0.5)  # ~5000 rows/sec
+        estimated_time = max(total_rows / 5000, 0.5)
         
         return SizeEstimate(
             tables=table_info,
