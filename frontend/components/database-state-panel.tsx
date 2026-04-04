@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { apiClient } from "@/lib/api"
-import type { DatabaseState, RestoreSettings } from "@/lib/types"
+import type { DatabaseConnection, DatabaseState, RestoreSettings } from "@/lib/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -25,26 +25,39 @@ interface DatabaseStatePanelProps {
   className?: string
 }
 
+type DatabaseStateMap = Record<string, DatabaseState>
+
 export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
-  const [mysqlState, setMysqlState] = useState<DatabaseState | null>(null)
-  const [postgresState, setPostgresState] = useState<DatabaseState | null>(null)
+  const [connections, setConnections] = useState<DatabaseConnection[]>([])
+  const [states, setStates] = useState<DatabaseStateMap>({})
   const [settings, setSettings] = useState<RestoreSettings | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [actionLoading, setActionLoading] = useState<{ [key: string]: boolean }>({})
+  const [activeTab, setActiveTab] = useState("overview")
+  const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({})
 
   const fetchStates = useCallback(async () => {
     setLoading(true)
     setError(null)
+
     try {
-      const [mysql, postgres, restoreSettings] = await Promise.all([
-        apiClient.getDatabaseState("mysql"),
-        apiClient.getDatabaseState("postgresql"),
-        apiClient.getRestoreSettings()
+      const [connectionsResponse, restoreSettings] = await Promise.all([
+        apiClient.getConnections(),
+        apiClient.getRestoreSettings(),
       ])
-      setMysqlState(mysql)
-      setPostgresState(postgres)
+
+      const activeConnections = connectionsResponse.connections
+      setConnections(activeConnections)
       setSettings(restoreSettings)
+
+      const stateEntries = await Promise.all(
+        activeConnections.map(async (connection) => {
+          const state = await apiClient.getDatabaseState(connection.id)
+          return [connection.id, state] as const
+        })
+      )
+
+      setStates(Object.fromEntries(stateEntries))
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch database states")
     } finally {
@@ -56,42 +69,53 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
     fetchStates()
   }, [fetchStates])
 
-  const handleCreateBackup = async (dbType: string) => {
-    const key = `backup-${dbType}`
-    setActionLoading(prev => ({ ...prev, [key]: true }))
+  useEffect(() => {
+    if (activeTab === "overview") {
+      return
+    }
+
+    const hasActiveConnection = connections.some((connection) => connection.id === activeTab)
+    if (!hasActiveConnection) {
+      setActiveTab("overview")
+    }
+  }, [activeTab, connections])
+
+  const handleCreateBackup = async (connectionId: string) => {
+    const key = `backup-${connectionId}`
+    setActionLoading((prev) => ({ ...prev, [key]: true }))
     try {
-      await apiClient.createBackup(dbType)
+      await apiClient.createBackup(connectionId)
       await fetchStates()
     } catch (err) {
-      setError(err instanceof Error ? err.message : `Failed to create backup for ${dbType}`)
+      setError(err instanceof Error ? err.message : "Failed to create backup")
     } finally {
-      setActionLoading(prev => ({ ...prev, [key]: false }))
+      setActionLoading((prev) => ({ ...prev, [key]: false }))
     }
   }
 
-  const handleRestore = async (dbType: string) => {
-    const key = `restore-${dbType}`
-    setActionLoading(prev => ({ ...prev, [key]: true }))
+  const handleRestore = async (connectionId: string) => {
+    const key = `restore-${connectionId}`
+    setActionLoading((prev) => ({ ...prev, [key]: true }))
     try {
-      await apiClient.restoreBackup(dbType)
+      await apiClient.restoreBackup(connectionId)
       await fetchStates()
     } catch (err) {
-      setError(err instanceof Error ? err.message : `Failed to restore ${dbType}`)
+      setError(err instanceof Error ? err.message : "Failed to restore database")
     } finally {
-      setActionLoading(prev => ({ ...prev, [key]: false }))
+      setActionLoading((prev) => ({ ...prev, [key]: false }))
     }
   }
 
-  const handleCleanup = async (dbType: string) => {
-    const key = `cleanup-${dbType}`
-    setActionLoading(prev => ({ ...prev, [key]: true }))
+  const handleCleanup = async (connectionId: string) => {
+    const key = `cleanup-${connectionId}`
+    setActionLoading((prev) => ({ ...prev, [key]: true }))
     try {
-      await apiClient.cleanupBackups(dbType)
+      await apiClient.cleanupBackups(connectionId)
       await fetchStates()
     } catch (err) {
-      setError(err instanceof Error ? err.message : `Failed to cleanup ${dbType}`)
+      setError(err instanceof Error ? err.message : "Failed to cleanup backups")
     } finally {
-      setActionLoading(prev => ({ ...prev, [key]: false }))
+      setActionLoading((prev) => ({ ...prev, [key]: false }))
     }
   }
 
@@ -117,18 +141,22 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
     }
   }
 
-  const DatabaseCard = ({ state, title, icon: Icon }: { state: DatabaseState | null; title: string; icon: any }) => {
-    if (!state) return null
-
-    const totalRows = Object.values(state.tables).reduce((sum, t) => sum + t.row_count, 0)
+  const DatabaseCard = ({ connection, state }: { connection: DatabaseConnection; state: DatabaseState }) => {
+    const totalRows = Object.values(state.tables).reduce((sum, table) => sum + table.row_count, 0)
+    const backupKey = `backup-${connection.id}`
+    const restoreKey = `restore-${connection.id}`
+    const cleanupKey = `cleanup-${connection.id}`
 
     return (
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-2">
-              <Icon className="w-5 h-5 text-primary" />
-              <CardTitle className="text-lg">{title}</CardTitle>
+              <Database className="w-5 h-5 text-primary" />
+              <div>
+                <CardTitle className="text-lg">{connection.name}</CardTitle>
+                <CardDescription>{connection.dbms_type} • {connection.database}</CardDescription>
+              </div>
             </div>
             {getStatusBadge(state.status)}
           </div>
@@ -141,10 +169,10 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => handleCreateBackup(state.dbms_type)}
-              disabled={actionLoading[`backup-${state.dbms_type}`]}
+              onClick={() => handleCreateBackup(connection.id)}
+              disabled={actionLoading[backupKey]}
             >
-              {actionLoading[`backup-${state.dbms_type}`] ? (
+              {actionLoading[backupKey] ? (
                 <RefreshCw className="w-4 h-4 animate-spin mr-2" />
               ) : (
                 <Database className="w-4 h-4 mr-2" />
@@ -154,10 +182,10 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => handleRestore(state.dbms_type)}
-              disabled={!state.has_pending_backups || actionLoading[`restore-${state.dbms_type}`]}
+              onClick={() => handleRestore(connection.id)}
+              disabled={!state.has_pending_backups || actionLoading[restoreKey]}
             >
-              {actionLoading[`restore-${state.dbms_type}`] ? (
+              {actionLoading[restoreKey] ? (
                 <RefreshCw className="w-4 h-4 animate-spin mr-2" />
               ) : (
                 <RefreshCw className="w-4 h-4 mr-2" />
@@ -167,10 +195,10 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => handleCleanup(state.dbms_type)}
-              disabled={!state.has_pending_backups || actionLoading[`cleanup-${state.dbms_type}`]}
+              onClick={() => handleCleanup(connection.id)}
+              disabled={!state.has_pending_backups || actionLoading[cleanupKey]}
             >
-              {actionLoading[`cleanup-${state.dbms_type}`] ? (
+              {actionLoading[cleanupKey] ? (
                 <RefreshCw className="w-4 h-4 animate-spin mr-2" />
               ) : (
                 <Trash2 className="w-4 h-4 mr-2" />
@@ -191,6 +219,31 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
       </Card>
     )
   }
+
+  const renderTables = (state: DatabaseState) => (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm">Tables</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2 max-h-64 overflow-y-auto">
+          {Object.entries(state.tables).map(([table, info]) => (
+            <div key={table} className="flex items-center justify-between py-1 border-b last:border-0">
+              <span className="font-medium">{table}</span>
+              <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                <span>{info.row_count.toLocaleString()} rows</span>
+                {info.has_backup && <Badge variant="outline" className="text-green-600">Backed up</Badge>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  )
+
+  const overviewStates = connections
+    .map((connection) => ({ connection, state: states[connection.id] }))
+    .filter((entry) => Boolean(entry.state))
 
   return (
     <Card className={className}>
@@ -280,18 +333,29 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
           </Alert>
         )}
 
-        <Tabs defaultValue="overview" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 bg-transparent p-0">
             <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="mysql">MySQL</TabsTrigger>
-            <TabsTrigger value="postgres">PostgreSQL</TabsTrigger>
+            {connections.map((connection) => (
+              <TabsTrigger key={connection.id} value={connection.id}>
+                {connection.name}
+              </TabsTrigger>
+            ))}
           </TabsList>
 
           <TabsContent value="overview" className="mt-4 space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <DatabaseCard state={mysqlState} title="MySQL" icon={Database} />
-              <DatabaseCard state={postgresState} title="PostgreSQL" icon={Database} />
-            </div>
+            {overviewStates.length > 0 ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                {overviewStates.map(({ connection, state }) => (
+                  <DatabaseCard key={connection.id} connection={connection} state={state as DatabaseState} />
+                ))}
+              </div>
+            ) : (
+              <Alert>
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>Нет активных подключений для отображения состояния.</AlertDescription>
+              </Alert>
+            )}
 
             {settings && (
               <div className="grid gap-4 md:grid-cols-3">
@@ -345,59 +409,28 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
             )}
           </TabsContent>
 
-          <TabsContent value="mysql" className="mt-4">
-            {mysqlState && (
-              <div className="space-y-4">
-                <DatabaseCard state={mysqlState} title="MySQL" icon={Database} />
-                
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-sm">Tables</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2 max-h-64 overflow-y-auto">
-                      {Object.entries(mysqlState.tables).map(([table, info]) => (
-                        <div key={table} className="flex items-center justify-between py-1 border-b last:border-0">
-                          <span className="font-medium">{table}</span>
-                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                            <span>{info.row_count.toLocaleString()} rows</span>
-                            {info.has_backup && <Badge variant="outline" className="text-green-600">Backed up</Badge>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            )}
-          </TabsContent>
+          {connections.map((connection) => {
+            const state = states[connection.id]
+            if (!state) {
+              return (
+                <TabsContent key={connection.id} value={connection.id} className="mt-4">
+                  <Alert>
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>Состояние подключения пока недоступно.</AlertDescription>
+                  </Alert>
+                </TabsContent>
+              )
+            }
 
-          <TabsContent value="postgres" className="mt-4">
-            {postgresState && (
-              <div className="space-y-4">
-                <DatabaseCard state={postgresState} title="PostgreSQL" icon={Database} />
-                
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-sm">Tables</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2 max-h-64 overflow-y-auto">
-                      {Object.entries(postgresState.tables).map(([table, info]) => (
-                        <div key={table} className="flex items-center justify-between py-1 border-b last:border-0">
-                          <span className="font-medium">{table}</span>
-                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                            <span>{info.row_count.toLocaleString()} rows</span>
-                            {info.has_backup && <Badge variant="outline" className="text-green-600">Backed up</Badge>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            )}
-          </TabsContent>
+            return (
+              <TabsContent key={connection.id} value={connection.id} className="mt-4">
+                <div className="space-y-4">
+                  <DatabaseCard connection={connection} state={state} />
+                  {renderTables(state)}
+                </div>
+              </TabsContent>
+            )
+          })}
         </Tabs>
       </CardContent>
     </Card>

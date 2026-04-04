@@ -48,6 +48,7 @@ def get_db_connection() -> DatabaseConnection:
     global db_connection_instance
     if db_connection_instance is None:
         db_connection_instance = DatabaseConnection()
+        db_connection_instance.set_connection_repository(initialize.connection_repository)
     return db_connection_instance
 
 
@@ -73,8 +74,7 @@ app.add_middleware(
 
 # Инициализация компонентов тестирования
 tester = LoadTester(connection_repo=initialize.connection_repository)
-db_connection = DatabaseConnection()
-db_connection.set_connection_repository(initialize.connection_repository)
+db_connection = get_db_connection()
 query_manager = QueryManager()
 
 # Хранилище активных тестов (для WebSocket)
@@ -86,13 +86,12 @@ active_tests: Dict[str, Dict] = {}
 @app.get("/health")
 async def health_check():
     """Проверка здоровья сервиса"""
-    mysql_status = await db_connection.test_connection("mysql")
-    postgres_status = await db_connection.test_connection("postgresql")
-    
+    history_status = "connected" if HISTORY_ENABLED else "disconnected"
+
     return {
         "status": "ok",
-        "mysql": "connected" if mysql_status else "disconnected",
-        "postgresql": "connected" if postgres_status else "disconnected"
+        "api": "connected",
+        "history_db": history_status,
     }
 
 

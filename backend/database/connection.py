@@ -20,14 +20,36 @@ class DatabaseConnection:
         self._connections_loaded = False
         self._loading_lock: Optional[asyncio.Lock] = None
 
+    def _resolve_connection_key(self, connection_key: str) -> str:
+        """Разрешить shorthand ключ подключения в явный ID"""
+        if connection_key in self._connection_configs:
+            return connection_key
+
+        if connection_key in {"mysql", "postgresql"}:
+            matches = [
+                key for key, config in self._connection_configs.items()
+                if config.get("dbms_type") == connection_key
+            ]
+            if len(matches) == 1:
+                return matches[0]
+            if len(matches) > 1:
+                raise ValueError(
+                    f"Найдено несколько активных подключений типа {connection_key}. "
+                    f"Используйте явный connection_id."
+                )
+
+        return connection_key
+
     def get_dbms_type(self, connection_key: str) -> str:
         """Получить тип СУБД для ключа подключения"""
+        connection_key = self._resolve_connection_key(connection_key)
         if connection_key in self._connection_configs:
             return self._connection_configs[connection_key].get('dbms_type', connection_key)
         return connection_key
 
     def get_connection_name(self, connection_key: str) -> str:
         """Получить отображаемое имя подключения"""
+        connection_key = self._resolve_connection_key(connection_key)
         if connection_key in self._connection_configs:
             return self._connection_configs[connection_key].get('name', connection_key)
         return connection_key
@@ -49,7 +71,7 @@ class DatabaseConnection:
                 return
             
             if not self._connection_repo:
-                print("[DB_CONNECTION] ConnectionRepository не установлен, используем YAML конфиг")
+                print("[DB_CONNECTION] ConnectionRepository не установлен")
                 self._connections_loaded = True
                 return
             
@@ -64,9 +86,38 @@ class DatabaseConnection:
             except Exception as e:
                 print(f"[DB_CONNECTION] Ошибка загрузки подключений из БД: {e}")
                 self._connections_loaded = True
+
+    async def ensure_connection_config(self, connection_key: str) -> Dict[str, Any]:
+        """Гарантированно загрузить конфиг конкретного подключения"""
+        await self._ensure_connections_loaded()
+
+        try:
+            resolved_key = self._resolve_connection_key(connection_key)
+        except ValueError:
+            resolved_key = connection_key
+
+        if resolved_key in self._connection_configs:
+            return self._connection_configs[resolved_key]
+
+        if not self._connection_repo:
+            raise ValueError(
+                f"Подключение '{connection_key}' не найдено. "
+                f"Создайте его через UI/API или передайте явный connection_id."
+            )
+
+        decrypted = await self._connection_repo.get_decrypted_connection(connection_key)
+        if not decrypted:
+            raise ValueError(
+                f"Подключение '{connection_key}' не найдено. "
+                f"Создайте его через UI/API или передайте явный connection_id."
+            )
+
+        self._connection_configs[connection_key] = decrypted
+        return decrypted
     
     def get_connection_string(self, connection_key: str) -> str:
         """Формирование строки подключения"""
+        connection_key = self._resolve_connection_key(connection_key)
         dbms_type = self.get_dbms_type(connection_key)
 
         if connection_key in self._connection_configs:
@@ -84,23 +135,14 @@ class DatabaseConnection:
                     f"/{conn['database']}"
                 )
         
-        if dbms_type == 'mysql':
-            return (
-                f"mysql+aiomysql://{settings.database.mysql_user}:{settings.database.mysql_password}"
-                f"@{settings.database.mysql_host}:{settings.database.mysql_port}"
-                f"/{settings.database.mysql_database}"
-            )
-        elif dbms_type == 'postgresql':
-            return (
-                f"postgresql+asyncpg://{settings.database.postgresql_user}:{settings.database.postgresql_password}"
-                f"@{settings.database.postgresql_host}:{settings.database.postgresql_port}"
-                f"/{settings.database.postgresql_database}"
-            )
-        else:
-            raise ValueError(f"Неподдерживаемый тип БД: {dbms_type}")
+        raise ValueError(
+            f"Подключение '{connection_key}' не найдено. "
+            f"Создайте его через UI/API или передайте явный connection_id."
+        )
     
     def get_engine(self, connection_key: str) -> AsyncEngine:
         """Получение или создание async engine для подключения (синхронный)"""
+        connection_key = self._resolve_connection_key(connection_key)
         if connection_key not in self.engines:
             connection_string = self.get_connection_string(connection_key)
             self.engines[connection_key] = create_async_engine(
@@ -113,7 +155,7 @@ class DatabaseConnection:
     
     async def get_engine_async(self, connection_key: str) -> AsyncEngine:
         """Получение engine с предварительной загрузкой подключений из БД"""
-        await self._ensure_connections_loaded()
+        await self.ensure_connection_config(connection_key)
         return self.get_engine(connection_key)
     
     async def test_connection(self, db_type: str) -> bool:
@@ -154,14 +196,10 @@ class DatabaseConnection:
         terminated = 0
         
         db_name = None
-        if db_type in self._connection_configs:
-            db_name = self._connection_configs[db_type].get('database')
-        elif db_type == 'postgresql':
-            db_name = settings.database.postgresql_database
-        elif db_type == 'mysql':
-            db_name = settings.database.mysql_database
-        else:
-            db_name = None
+        db_type = self.get_dbms_type(db_type)
+        resolved_key = self._resolve_connection_key(db_type)
+        if resolved_key in self._connection_configs:
+            db_name = self._connection_configs[resolved_key].get('database')
         
         async with engine.connect() as conn:
             if db_type == 'postgresql':

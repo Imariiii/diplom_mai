@@ -40,11 +40,11 @@ const steps = [
 export function HomePage() {
   const { setCurrentPage } = useAppStore()
   const [healthStatus, setHealthStatus] = useState<{
-    mysql: "connected" | "disconnected" | "checking"
-    postgresql: "connected" | "disconnected" | "checking"
+    api: "connected" | "disconnected" | "checking"
+    history_db: "connected" | "disconnected" | "checking"
   }>({
-    mysql: "checking",
-    postgresql: "checking",
+    api: "checking",
+    history_db: "checking",
   })
 
   useEffect(() => {
@@ -52,15 +52,15 @@ export function HomePage() {
       .getHealth()
       .then((status) => {
         setHealthStatus({
-          mysql: status.mysql,
-          postgresql: status.postgresql,
+          api: status.api,
+          history_db: status.history_db,
         })
       })
       .catch((error) => {
         console.error("Ошибка проверки статуса:", error)
         setHealthStatus({
-          mysql: "disconnected",
-          postgresql: "disconnected",
+          api: "disconnected",
+          history_db: "disconnected",
         })
       })
   }, [])
@@ -79,20 +79,20 @@ export function HomePage() {
         {/* Статус подключений */}
         <div className="flex items-center justify-center gap-4 mt-4">
           <div className="flex items-center gap-2">
-            {healthStatus.mysql === "connected" ? (
+            {healthStatus.api === "connected" ? (
               <CheckCircle2 className="h-5 w-5 text-green-500" />
             ) : (
               <AlertCircle className="h-5 w-5 text-red-500" />
             )}
-            <span className="text-sm">MySQL: {healthStatus.mysql === "connected" ? "Подключено" : "Не подключено"}</span>
+            <span className="text-sm">Backend API: {healthStatus.api === "connected" ? "Подключено" : "Не подключено"}</span>
           </div>
           <div className="flex items-center gap-2">
-            {healthStatus.postgresql === "connected" ? (
+            {healthStatus.history_db === "connected" ? (
               <CheckCircle2 className="h-5 w-5 text-green-500" />
             ) : (
               <AlertCircle className="h-5 w-5 text-red-500" />
             )}
-            <span className="text-sm">PostgreSQL: {healthStatus.postgresql === "connected" ? "Подключено" : "Не подключено"}</span>
+            <span className="text-sm">БД истории: {healthStatus.history_db === "connected" ? "Подключено" : "Не подключено"}</span>
           </div>
         </div>
 

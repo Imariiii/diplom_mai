@@ -15,33 +15,9 @@ from pydantic_settings import BaseSettings
 
 class DatabaseSettings(BaseSettings):
     """Настройки подключения к базам данных"""
-    
-    # PostgreSQL (Pagila)
-    postgresql_host: str = Field(default="localhost", alias="POSTGRES_HOST")
-    postgresql_port: int = Field(default=5432, alias="POSTGRES_PORT")
-    postgresql_user: str = Field(default="postgres", alias="POSTGRES_USER")
-    postgresql_password: str = Field(default="123456", alias="POSTGRES_PASSWORD")
-    postgresql_database: str = Field(default="pagila", alias="POSTGRES_DATABASE")
-    
-    # MySQL (Sakila)
-    mysql_host: str = Field(default="localhost", alias="MYSQL_HOST")
-    mysql_port: int = Field(default=3306, alias="MYSQL_PORT")
-    mysql_user: str = Field(default="root", alias="MYSQL_USER")
-    mysql_password: str = Field(default="root", alias="MYSQL_PASSWORD")
-    mysql_database: str = Field(default="sakila", alias="MYSQL_DATABASE")
-    
+
     # History database
     history_db_url: Optional[str] = Field(default=None, alias="HISTORY_DATABASE_URL")
-    
-    @property
-    def postgresql_url(self) -> str:
-        """Получить URL для подключения к PostgreSQL"""
-        return f"postgresql://{self.postgresql_user}:{self.postgresql_password}@{self.postgresql_host}:{self.postgresql_port}/{self.postgresql_database}"
-    
-    @property
-    def mysql_url(self) -> str:
-        """Получить URL для подключения к MySQL"""
-        return f"mysql+pymysql://{self.mysql_user}:{self.mysql_password}@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
     
     class Config:
         env_file = ".env"
@@ -144,7 +120,7 @@ class Settings(BaseSettings):
     Пример использования:
         from backend.core.config import settings
         
-        print(settings.postgresql_url)  # postgresql://postgres:123456@localhost:5432/pagila
+        print(settings.history_db_url)
         print(settings.auto_restore)    # True
     """
     
@@ -162,16 +138,6 @@ class Settings(BaseSettings):
         extra = "ignore"
     
     # Прокси- свойства для обратной совместимости
-    
-    @property
-    def postgresql_url(self) -> str:
-        """Получить URL для подключения к PostgreSQL"""
-        return self.database.postgresql_url
-    
-    @property
-    def mysql_url(self) -> str:
-        """Получить URL для подключения к MySQL"""
-        return self.database.mysql_url
     
     @property
     def history_db_url(self) -> Optional[str]:
@@ -220,21 +186,7 @@ class Settings(BaseSettings):
         """Преобразовать настройки в словарь"""
         return {
             "database": {
-                "postgresql_url": self.postgresql_url,
-                "mysql_url": self.mysql_url,
                 "history_db_url": self.history_db_url,
-                "postgresql": {
-                    "host": self.database.postgresql_host,
-                    "port": self.database.postgresql_port,
-                    "user": self.database.postgresql_user,
-                    "database": self.database.postgresql_database,
-                },
-                "mysql": {
-                    "host": self.database.mysql_host,
-                    "port": self.database.mysql_port,
-                    "user": self.database.mysql_user,
-                    "database": self.database.mysql_database,
-                },
             },
             "restore": {
                 "default_strategy": self.restore.default_strategy,

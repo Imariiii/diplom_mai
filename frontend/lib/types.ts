@@ -212,6 +212,8 @@ export interface CreateScenarioParamRequest {
 // ==================== Database State Management Types ====================
 
 export interface DatabaseState {
+  connection_id: string
+  connection_name: string
   dbms_type: string
   tables: Record<string, {
     row_count: number

@@ -16,8 +16,8 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 export interface HealthStatus {
   status: string
-  mysql: 'connected' | 'disconnected'
-  postgresql: 'connected' | 'disconnected'
+  api: 'connected' | 'disconnected'
+  history_db: 'connected' | 'disconnected'
 }
 
 export interface Query {
@@ -200,35 +200,35 @@ class ApiClient {
 
   // ==================== Database State Management ====================
 
-  async getDatabaseState(dbmsType: string): Promise<any> {
-    return this.request(`/api/database/${dbmsType}/state`)
+  async getDatabaseState(connectionId: string): Promise<any> {
+    return this.request(`/api/database/connections/${connectionId}/state`)
   }
 
-  async createBackup(dbmsType: string, tables?: string[]): Promise<any> {
+  async createBackup(connectionId: string, tables?: string[]): Promise<any> {
     const body = tables ? { tables } : {}
-    return this.request(`/api/database/${dbmsType}/backup`, {
+    return this.request(`/api/database/connections/${connectionId}/backup`, {
       method: 'POST',
       body: JSON.stringify(body),
     })
   }
 
-  async restoreBackup(dbmsType: string, backupId?: string): Promise<any> {
+  async restoreBackup(connectionId: string, backupId?: string): Promise<any> {
     const body = backupId ? { backup_id: backupId } : {}
-    return this.request(`/api/database/${dbmsType}/restore`, {
+    return this.request(`/api/database/connections/${connectionId}/restore`, {
       method: 'POST',
       body: JSON.stringify(body),
     })
   }
 
-  async cleanupBackups(dbmsType: string): Promise<{ deleted_tables: string[] }> {
-    return this.request(`/api/database/${dbmsType}/cleanup`, {
+  async cleanupBackups(connectionId: string): Promise<{ deleted_tables: string[] }> {
+    return this.request(`/api/database/connections/${connectionId}/cleanup`, {
       method: 'POST',
     })
   }
 
-  async estimateBackup(dbmsType: string, tables: string[]): Promise<any> {
+  async estimateBackup(connectionId: string, tables: string[]): Promise<any> {
     const params = new URLSearchParams({ tables: tables.join(',') })
-    return this.request(`/api/database/${dbmsType}/estimate?${params}`)
+    return this.request(`/api/database/connections/${connectionId}/estimate?${params}`)
   }
 
   // ==================== Настройки ====================
@@ -248,7 +248,7 @@ class ApiClient {
 
   async getConnections(group?: string): Promise<ConnectionListResponse> {
     const params = group ? `?group=${encodeURIComponent(group)}` : ''
-    return this.request<ConnectionListResponse>(`/api/connections${params}`)
+    return this.request<ConnectionListResponse>(`/api/connections/${params}`)
   }
 
   async getConnectionGroups(): Promise<ConnectionGroupsResponse> {

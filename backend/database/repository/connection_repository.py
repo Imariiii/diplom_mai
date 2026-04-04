@@ -71,10 +71,15 @@ class ConnectionRepository(BaseRepository):
 
     async def get_connection_by_id(self, connection_id: str) -> Optional[DatabaseConnectionConfig]:
         """Получить подключение по ID"""
+        try:
+            connection_uuid = uuid.UUID(connection_id)
+        except (ValueError, TypeError, AttributeError):
+            return None
+
         async with self.SessionLocal() as session:
             result = await session.execute(
                 select(DatabaseConnectionConfig).where(
-                    DatabaseConnectionConfig.id == uuid.UUID(connection_id)
+                    DatabaseConnectionConfig.id == connection_uuid
                 )
             )
             return result.scalar_one_or_none()

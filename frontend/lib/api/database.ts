@@ -6,47 +6,49 @@ import { apiClient } from "./client"
 
 // ==================== Database State Management ====================
 
-export async function getDatabaseState(dbmsType: string): Promise<{
+export async function getDatabaseState(connectionId: string): Promise<{
+  connection_id: string
+  connection_name: string
   dbms_type: string
   tables: Record<string, { row_count: number; has_backup: boolean }>
   has_pending_backups: boolean
   backup_tables: string[]
   status: 'clean' | 'modified' | 'backup_exists'
 }> {
-  return apiClient.getDatabaseState(dbmsType)
+  return apiClient.getDatabaseState(connectionId)
 }
 
-export async function createBackup(dbmsType: string, tables?: string[]): Promise<{
+export async function createBackup(connectionId: string, tables?: string[]): Promise<{
   backup_id: string
   dbms_type: string
   tables: string[]
   row_counts: Record<string, number>
   created_at: string
 }> {
-  return apiClient.createBackup(dbmsType, tables)
+  return apiClient.createBackup(connectionId, tables)
 }
 
-export async function restoreBackup(dbmsType: string, backupId?: string): Promise<{
+export async function restoreBackup(connectionId: string, backupId?: string): Promise<{
   success: boolean
   duration_ms: number
   verified: boolean
   errors: string[]
 }> {
-  return apiClient.restoreBackup(dbmsType, backupId)
+  return apiClient.restoreBackup(connectionId, backupId)
 }
 
-export async function cleanupBackups(dbmsType: string): Promise<{
+export async function cleanupBackups(connectionId: string): Promise<{
   deleted_tables: string[]
 }> {
-  return apiClient.cleanupBackups(dbmsType)
+  return apiClient.cleanupBackups(connectionId)
 }
 
-export async function estimateBackup(dbmsType: string, tables: string[]): Promise<{
+export async function estimateBackup(connectionId: string, tables: string[]): Promise<{
   tables: Record<string, { rows: number; size_bytes: number }>
   total_rows: number
   total_size_bytes: number
   estimated_time_sec: number
   warnings: string[]
 }> {
-  return apiClient.estimateBackup(dbmsType, tables)
+  return apiClient.estimateBackup(connectionId, tables)
 }
