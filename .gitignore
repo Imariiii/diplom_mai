@@ -29,3 +29,35 @@ results/
 *.db
 *.sqlite
 description/
+
+
+# Сгенерированные LaTeX-файлы
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.glo
+*.glo-abr
+*.idx
+*.ilg
+*.ind
+*.ist
+*.lof
+*.log
+*.lot
+*.nav
+*.out
+***REMOVED***
+*.ps
+*.run.xml
+*.snm
+*.synctex.gz
+*.toc
+*.xdv
+*.xdy
+
+# Файлы latexmk
+main.fdb_latexmk
+main.fls
