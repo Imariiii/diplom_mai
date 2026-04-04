@@ -1,51 +1,30 @@
 version: '3.8'
 
 services:
-  # ===============================================
-  # База данных для истории тестов (порт 5433)
-  # ===============================================
-  history-db:
-    image: postgres:15-alpine
-    container_name: test_history_db
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: history123
-      POSTGRES_DB: test_history
-    ports:
-      - "5433:5432"  # Внешний порт 5433, чтобы не конфликтовать с pagila (5432)
-    volumes:
-      - history_db_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d test_history"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - loadtest-network
-
-  # ===============================================
-  # Backend API (опционально, для полного развертывания)
-  # ===============================================
-  # backend:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile.backend
-  #   container_name: loadtest_backend
-  #   environment:
-  #     - HISTORY_DATABASE_URL=postgresql://postgres:history123@history-db:5432/test_history
-  #   ports:
-  #     - "8000:8000"
-  #   depends_on:
-  #     history-db:
-  #       condition: service_healthy
-  #   networks:
-  #     - loadtest-network
+    history-db:
+        image: postgres:15-alpine
+        container_name: test_history_db
+        environment:
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: history123
+            POSTGRES_DB: test_history
+        ports:
+        - "5433:5432"
+        volumes:
+        - history_db_data:/var/lib/postgresql/data
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U postgres -d test_history"]
+            interval: 5s
+            timeout: 5s
+            retries: 5
+        restart: unless-stopped
+        networks:
+        - loadtest-network
 
 networks:
-  loadtest-network:
-    driver: bridge
+    loadtest-network:
+        driver: bridge
 
 volumes:
-  history_db_data:
-    driver: local
+    history_db_data:
+        driver: local

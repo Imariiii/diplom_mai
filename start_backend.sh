@@ -21,6 +21,4 @@ fi
 echo "Запуск backend сервера на http://localhost:8000"
 echo "Документация API: http://localhost:8000/docs"
 echo ""
-cd backend
-python3 main.py
-
+python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
