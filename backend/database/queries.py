@@ -2,34 +2,19 @@
 Модуль с тестовыми запросами для Sakila/Pagila
 """
 from typing import List, Dict
-import yaml
-import os
+
+from backend.core.config import settings
 
 
 class QueryManager:
     """Класс для управления тестовыми запросами"""
     
     def __init__(self, config_path: str = None):
-        if config_path is None:
-            # Определяем путь относительно корня проекта (code/)
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(current_dir)  # Поднимаемся на уровень выше из database/
-            config_path = os.path.join(project_root, "config", "database_config.yaml")
-        self.config = self._load_config(config_path)
         self.queries = self._load_queries()
     
-    def _load_config(self, config_path: str) -> dict:
-        """Загрузка конфигурации"""
-        if os.path.exists(config_path):
-            with open(config_path, 'r', encoding='utf-8') as f:
-                return yaml.safe_load(f)
-        else:
-            print(f"Предупреждение: Файл конфигурации не найден: {config_path}")
-        return {}
-    
     def _load_queries(self) -> List[Dict[str, str]]:
-        """Загрузка запросов из конфигурации"""
-        default_queries = self.config.get('test_settings', {}).get('default_queries', [])
+        """Загрузка запросов из централизованных настроек"""
+        default_queries = settings.test.default_queries
         queries = []
         
         for i, query in enumerate(default_queries):
@@ -64,4 +49,3 @@ class QueryManager:
         }
         self.queries.append(new_query)
         return new_query
-

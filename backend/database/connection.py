@@ -5,20 +5,15 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
 from sqlalchemy import text
 from typing import Dict, Optional, List, Any
-import yaml
-import os
 import asyncio
+
+from backend.core.config import settings
 
 
 class DatabaseConnection:
     """Класс для управления подключениями к базам данных"""
     
     def __init__(self, config_path: Optional[str] = None):
-        if config_path is None:
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(current_dir)
-            config_path = os.path.join(project_root, "config", "database_config.yaml")
-        self.config = self._load_config(config_path)
         self.engines: Dict[str, AsyncEngine] = {}
         self._connection_configs: Dict[str, Dict[str, Any]] = {}
         self._connection_repo = None
@@ -70,15 +65,6 @@ class DatabaseConnection:
                 print(f"[DB_CONNECTION] Ошибка загрузки подключений из БД: {e}")
                 self._connections_loaded = True
     
-    def _load_config(self, config_path: str) -> dict:
-        """Загрузка конфигурации из YAML файла"""
-        if os.path.exists(config_path):
-            with open(config_path, 'r', encoding='utf-8') as f:
-                return yaml.safe_load(f)
-        else:
-            print(f"Предупреждение: Файл конфигурации не найден: {config_path}")
-        return {}
-    
     def get_connection_string(self, connection_key: str) -> str:
         """Формирование строки подключения"""
         dbms_type = self.get_dbms_type(connection_key)
@@ -98,19 +84,17 @@ class DatabaseConnection:
                     f"/{conn['database']}"
                 )
         
-        db_config = self.config.get('databases', {}).get(connection_key, {})
-        
         if dbms_type == 'mysql':
             return (
-                f"mysql+aiomysql://{db_config.get('user')}:{db_config.get('password')}"
-                f"@{db_config.get('host')}:{db_config.get('port')}"
-                f"/{db_config.get('database')}"
+                f"mysql+aiomysql://{settings.database.mysql_user}:{settings.database.mysql_password}"
+                f"@{settings.database.mysql_host}:{settings.database.mysql_port}"
+                f"/{settings.database.mysql_database}"
             )
         elif dbms_type == 'postgresql':
             return (
-                f"postgresql+asyncpg://{db_config.get('user')}:{db_config.get('password')}"
-                f"@{db_config.get('host')}:{db_config.get('port')}"
-                f"/{db_config.get('database')}"
+                f"postgresql+asyncpg://{settings.database.postgresql_user}:{settings.database.postgresql_password}"
+                f"@{settings.database.postgresql_host}:{settings.database.postgresql_port}"
+                f"/{settings.database.postgresql_database}"
             )
         else:
             raise ValueError(f"Неподдерживаемый тип БД: {dbms_type}")
@@ -172,8 +156,12 @@ class DatabaseConnection:
         db_name = None
         if db_type in self._connection_configs:
             db_name = self._connection_configs[db_type].get('database')
+        elif db_type == 'postgresql':
+            db_name = settings.database.postgresql_database
+        elif db_type == 'mysql':
+            db_name = settings.database.mysql_database
         else:
-            db_name = self.config.get('databases', {}).get(db_type, {}).get('database')
+            db_name = None
         
         async with engine.connect() as conn:
             if db_type == 'postgresql':

@@ -22,10 +22,10 @@ npm install
 
 2. Настройте переменные окружения:
 ```bash
-cp env.example .env.local
+cp ../env.example ../.env
 ```
 
-Отредактируйте `.env.local` и укажите URL backend API:
+Отредактируйте корневой `.env` и укажите URL backend API:
 ```
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
@@ -73,4 +73,3 @@ Frontend использует REST API backend для:
 - ✅ Визуализация результатов в реальном времени
 - ✅ Детальные отчеты с графиками
 - ✅ Сравнение производительности СУБД
-

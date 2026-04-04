@@ -4,6 +4,8 @@
 import os
 import sys
 
+from backend.core.config import settings
+
 # Пути
 # Для initialize.py: файл находится в backend/initialize.py, поэтому нужно подняться на 2 уровня
 backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -17,44 +19,12 @@ SCENARIOS_ENABLED = False
 
 
 def get_history_db_url():
-    """Получить URL для базы данных истории из конфига"""
+    """Получить URL для базы данных истории из .env"""
     print("[HISTORY_DB] Попытка настройки подключения к БД истории...")
-    
-    env_url = os.getenv('HISTORY_DATABASE_URL')
-    if env_url:
-        print(f"[HISTORY_DB] Используется HISTORY_DATABASE_URL из окружения")
-        return env_url
-    
-    try:
-        import yaml
-        config_path = os.path.join(backend_root, "config", "database_config.yaml")
-        print(f"[HISTORY_DB] Чтение конфига: {config_path}")
-        
-        if os.path.exists(config_path):
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
-            
-            history_config = config.get('databases', {}).get('test_history', {})
-            print(f"[HISTORY_DB] Конфиг test_history найден: {bool(history_config)}")
-            
-            if history_config:
-                host = history_config.get('host', 'localhost')
-                port = history_config.get('port', 5433)
-                user = history_config.get('user', 'postgres')
-                password = history_config.get('password', '')
-                database = history_config.get('database', 'test_history')
-                
-                print(f"[HISTORY_DB] Подключение к: {host}:{port}/{database}")
-                return f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{database}"
-            else:
-                print("[HISTORY_DB] ❌ Секция 'test_history' не найдена в конфиге")
-        else:
-            print(f"[HISTORY_DB] ❌ Конфиг файл не найден: {config_path}")
-    except Exception as e:
-        print(f"[HISTORY_DB] ❌ Ошибка чтения конфига: {e}")
-        import traceback
-        traceback.print_exc()
-    
+    if settings.history_db_url:
+        print("[HISTORY_DB] Используется HISTORY_DATABASE_URL из .env")
+        return settings.history_db_url
+    print("[HISTORY_DB] HISTORY_DATABASE_URL не задан")
     return None
 
 

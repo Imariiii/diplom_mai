@@ -8,6 +8,7 @@ import psutil
 from typing import Dict, List, Optional, Callable, Any
 from datetime import datetime, timezone
 from sqlalchemy import text
+from backend.core.config import settings
 from backend.database.connection import DatabaseConnection
 from backend.database.queries import QueryManager
 from backend.database.state_manager import DatabaseStateManager
@@ -856,8 +857,7 @@ class LoadTester:
             scenario_repo = scenario_repository
         else:
             # Fallback: создаем репозиторий с дефолтным URL
-            import os
-            db_url = os.getenv('HISTORY_DATABASE_URL', 'postgresql+asyncpg://postgres:postgres@localhost:5433/test_history')
+            db_url = settings.history_db_url or 'postgresql+asyncpg://postgres:postgres@localhost:5433/test_history'
             scenario_repo = ScenarioRepository(db_url)
         
         scenario = await scenario_repo.get_scenario_for_execution(scenario_id)
@@ -1207,8 +1207,7 @@ class LoadTester:
             scenario_repo = scenario_repository
         else:
             # Fallback: создаем репозиторий с дефолтным URL
-            import os
-            db_url = os.getenv('HISTORY_DATABASE_URL', 'postgresql+asyncpg://postgres:postgres@localhost:5433/test_history')
+            db_url = settings.history_db_url or 'postgresql+asyncpg://postgres:postgres@localhost:5433/test_history'
             scenario_repo = ScenarioRepository(db_url)
         
         scenario = await scenario_repo.get_scenario_for_execution(scenario_id)
