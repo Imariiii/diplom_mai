@@ -18,18 +18,20 @@ TestScenario = Literal[
 class TestRequest(BaseModel):
     """Запрос на запуск теста"""
     query_id: Optional[str] = None
-    db_types: Optional[List[str]] = ["mysql", "postgresql"]
+    db_types: Optional[List[str]] = None  # ["mysql", "postgresql"] - для обратной совместимости
+    connection_ids: Optional[List[str]] = None  # ID подключений из БД
     iterations: int = 10
-    virtual_users: Optional[int] = 10      # Количество виртуальных пользователей
-    scenario: Optional[str] = "mixed_light" # Сценарий тестирования
-    warmup_time: Optional[int] = 5         # Время прогрева в секундах
-    test_name: Optional[str] = None        # Название теста
+    virtual_users: Optional[int] = 10
+    scenario: Optional[str] = "mixed_light"
+    warmup_time: Optional[int] = 5
+    test_name: Optional[str] = None
 
 
 class AsyncTestRequest(BaseModel):
     """Запрос на асинхронный запуск теста"""
     query_id: Optional[str] = None
-    db_types: Optional[List[str]] = ["mysql", "postgresql"]
+    db_types: Optional[List[str]] = None  # ["mysql", "postgresql"] - для обратной совместимости
+    connection_ids: Optional[List[str]] = None  # ID подключений из БД
     iterations: int = 10
     virtual_users: Optional[int] = 10
     scenario: Optional[str] = "mixed_light"

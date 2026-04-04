@@ -7,8 +7,9 @@ import { Slider } from "@/components/ui/slider"
 import { useAppStore } from "@/lib/store"
 import { apiClient, type Query } from "@/lib/api"
 import { toast } from "sonner"
-import type { TestRun, TestScenario, ScenarioConfig, TestMode, Scenario } from "@/lib/types"
+import type { TestRun, TestScenario, ScenarioConfig, TestMode, Scenario, DatabaseConnection } from "@/lib/types"
 import { DatabaseStatePanel } from "@/components/database-state-panel"
+import { ConnectionManager } from "./config/connection-manager"
 import { ConnectionStatusCard } from "./config/connection-status-card"
 import { DatabaseSelectionCard } from "./config/database-selection-card"
 import { TestModeSelectorCard } from "./config/test-mode-selector-card"
@@ -16,11 +17,6 @@ import { ScenarioSelectorCard } from "./config/scenario-selector-card"
 import { QuerySelectorCard } from "./config/query-selector-card"
 import { SliderConfigCard } from "./config/slider-config-card"
 import { ConfigSummaryCard } from "./config/config-summary-card"
-
-const databases = [
-  { id: "mysql", name: "MySQL (Sakila)", type: "mysql" as const },
-  { id: "postgresql", name: "PostgreSQL (Pagila)", type: "postgresql" as const },
-]
 
 export function ConfigPage() {
   const {
@@ -34,10 +30,8 @@ export function ConfigPage() {
   const [queries, setQueries] = useState<Query[]>([])
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [scenariosLoading, setScenariosLoading] = useState(true)
-  const [healthStatus, setHealthStatus] = useState<{ mysql: boolean; postgresql: boolean }>({
-    mysql: false,
-    postgresql: false,
-  })
+  const [connections, setConnections] = useState<DatabaseConnection[]>([])
+  const [healthStatus, setHealthStatus] = useState<Record<string, boolean>>({})
   const [useCustomSql, setUseCustomSql] = useState(false)
 
   useEffect(() => {
@@ -69,19 +63,16 @@ export function ConfigPage() {
         toast.error("Не удалось загрузить сценарии")
         setScenariosLoading(false)
       })
-
-    apiClient
-      .getHealth()
-      .then((status) => {
-        setHealthStatus({
-          mysql: status.mysql === "connected",
-          postgresql: status.postgresql === "connected",
-        })
-      })
-      .catch((error) => {
-        console.error("Ошибка проверки статуса:", error)
-      })
   }, [])
+
+  const handleConnectionsChange = (newConnections: DatabaseConnection[]) => {
+    setConnections(newConnections)
+    const status: Record<string, boolean> = {}
+    newConnections.forEach((conn) => {
+      status[conn.id] = true
+    })
+    setHealthStatus(status)
+  }
 
   const handleDatabaseToggle = (dbId: string) => {
     const newDatabases = testConfig.databases.includes(dbId)
@@ -132,7 +123,7 @@ export function ConfigPage() {
       }
 
       const asyncResponse = await apiClient.runAsyncTest({
-        db_types: testConfig.databases,
+        connection_ids: testConfig.databases,
         iterations: testConfig.iterations,
         virtual_users: testConfig.virtualUsers,
         scenario: testConfig.testMode === "scenario" ? testConfig.scenario : "custom",
@@ -146,6 +137,20 @@ export function ConfigPage() {
         status: "running",
         startTime: new Date(),
         config: { ...testConfig },
+        connection_names: testConfig.databases.reduce((acc, dbId) => {
+          const conn = connections.find(c => c.id === dbId)
+          if (conn) {
+            acc[dbId] = conn.name
+          }
+          return acc
+        }, {} as Record<string, string>),
+        connection_db_types: testConfig.databases.reduce((acc, dbId) => {
+          const conn = connections.find(c => c.id === dbId)
+          if (conn) {
+            acc[dbId] = conn.dbms_type
+          }
+          return acc
+        }, {} as Record<string, string>),
       }
 
       setCurrentTest(testRun)
@@ -192,9 +197,12 @@ export function ConfigPage() {
         <p className="text-muted-foreground">Настройте параметры нагрузочного тестирования</p>
       </div>
 
-      <ConnectionStatusCard healthStatus={healthStatus} />
+      <ConnectionManager onConnectionsChange={handleConnectionsChange} />
+
+      <ConnectionStatusCard connections={connections} healthStatus={healthStatus} />
 
       <DatabaseSelectionCard
+        connections={connections}
         selectedDatabases={testConfig.databases}
         healthStatus={healthStatus}
         onToggle={handleDatabaseToggle}

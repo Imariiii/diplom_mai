@@ -43,6 +43,13 @@ export interface TestRun {
   endTime?: Date
   config: TestConfig
   results?: TestResult[]
+  summary?: {
+    total_transactions?: number
+    overall_tps?: number
+    total_duration?: number
+  }
+  connection_names?: Record<string, string>
+  connection_db_types?: Record<string, string>
 }
 
 // Метрики базы данных
@@ -101,6 +108,7 @@ export interface DBMSInternalMetrics {
 // Полный результат теста для одной СУБД
 export interface TestResult {
   databaseId: string
+  databaseType: string
   databaseName: string
   metrics: DatabaseMetrics
   systemMetrics?: SystemMetrics
@@ -224,3 +232,70 @@ export interface RestoreSettings {
   backup_table_prefix: string
 }
 
+
+// ==================== Database Connection Management Types ====================
+
+export interface DatabaseConnection {
+  id: string
+  name: string
+  dbms_type: 'mysql' | 'postgresql'
+  host: string
+  port: number
+  user: string
+  database: string
+  group: string | null
+  is_active: boolean
+  extra_params: Record<string, unknown> | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface ConnectionCreateRequest {
+  name: string
+  dbms_type: 'mysql' | 'postgresql'
+  host: string
+  port: number
+  user: string
+  password: string
+  database: string
+  group?: string
+  extra_params?: Record<string, unknown>
+}
+
+export interface ConnectionUpdateRequest {
+  name?: string
+  dbms_type?: string
+  host?: string
+  port?: number
+  user?: string
+  password?: string
+  database?: string
+  group?: string
+  is_active?: boolean
+  extra_params?: Record<string, unknown>
+}
+
+export interface ConnectionTestRequest {
+  host: string
+  port: number
+  user: string
+  password: string
+  database: string
+  dbms_type: 'mysql' | 'postgresql'
+  extra_params?: Record<string, unknown>
+}
+
+export interface ConnectionTestResponse {
+  success: boolean
+  message: string
+  response_time_ms: number | null
+}
+
+export interface ConnectionListResponse {
+  connections: DatabaseConnection[]
+  groups: string[]
+}
+
+export interface ConnectionGroupsResponse {
+  groups: string[]
+}

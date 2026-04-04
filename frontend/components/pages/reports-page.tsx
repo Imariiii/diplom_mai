@@ -63,40 +63,74 @@ export function ReportsPage() {
   }
 
   const comparisonData = latestTest.results.map((result) => ({
-    name: DB_NAMES[result.databaseId],
+    name: result.databaseName,
     "Ср. время отклика": result.metrics.avgResponseTime,
     "Макс. время отклика": result.metrics.maxResponseTime,
     P95: result.metrics.p95ResponseTime,
     P99: result.metrics.p99ResponseTime,
-    color: getDbColor(result.databaseId),
+    color: getDbColor(result.databaseType),
   }))
 
   const throughputData = latestTest.results.map((result) => ({
-    name: DB_NAMES[result.databaseId],
-    throughput: result.metrics.throughput,
-    color: getDbColor(result.databaseId),
+    name: result.databaseName,
+    throughput: result.metrics.throughput ?? result.metrics.tps ?? 0,
+    color: getDbColor(result.databaseType),
   }))
+
+  const clampScore = (value: number) => Math.max(0, Math.min(100, value))
+  const maxThroughput = Math.max(
+    ...latestTest.results.map((result) => result.metrics.throughput ?? result.metrics.tps ?? 0),
+    1
+  )
+  const maxAvgResponse = Math.max(...latestTest.results.map((result) => result.metrics.avgResponseTime), 1)
+  const maxP95Response = Math.max(...latestTest.results.map((result) => result.metrics.p95ResponseTime), 1)
+  const maxP99Response = Math.max(...latestTest.results.map((result) => result.metrics.p99ResponseTime), 1)
 
   const radarData = [
     {
       metric: "Скорость",
-      ...Object.fromEntries(latestTest.results.map((r) => [DB_NAMES[r.databaseId], 100 - r.metrics.avgResponseTime])),
+      ...Object.fromEntries(
+        latestTest.results.map((result) => [
+          result.databaseName,
+          clampScore(100 - (result.metrics.avgResponseTime / maxAvgResponse) * 100),
+        ])
+      ),
     },
     {
       metric: "Пропускная способность",
-      ...Object.fromEntries(latestTest.results.map((r) => [DB_NAMES[r.databaseId], r.metrics.throughput / 15])),
+      ...Object.fromEntries(
+        latestTest.results.map((result) => [
+          result.databaseName,
+          clampScore(((result.metrics.throughput ?? result.metrics.tps ?? 0) / maxThroughput) * 100),
+        ])
+      ),
     },
     {
       metric: "Стабильность",
-      ...Object.fromEntries(latestTest.results.map((r) => [DB_NAMES[r.databaseId], 100 - r.metrics.errorRate * 10])),
+      ...Object.fromEntries(
+        latestTest.results.map((result) => [
+          result.databaseName,
+          clampScore(100 - result.metrics.errorRate * 10),
+        ])
+      ),
     },
     {
-      metric: "P95 Latency",
-      ...Object.fromEntries(latestTest.results.map((r) => [DB_NAMES[r.databaseId], 100 - r.metrics.p95ResponseTime])),
+      metric: "P95",
+      ...Object.fromEntries(
+        latestTest.results.map((result) => [
+          result.databaseName,
+          clampScore(100 - (result.metrics.p95ResponseTime / maxP95Response) * 100),
+        ])
+      ),
     },
     {
-      metric: "P99 Latency",
-      ...Object.fromEntries(latestTest.results.map((r) => [DB_NAMES[r.databaseId], 100 - r.metrics.p99ResponseTime])),
+      metric: "P99",
+      ...Object.fromEntries(
+        latestTest.results.map((result) => [
+          result.databaseName,
+          clampScore(100 - (result.metrics.p99ResponseTime / maxP99Response) * 100),
+        ])
+      ),
     },
   ]
 
@@ -146,7 +180,7 @@ export function ReportsPage() {
             {bestDb && (
               <Badge className="bg-primary/10 text-primary border-primary/20">
                 <Award className="h-3 w-3 mr-1" />
-                Лучший: {DB_NAMES[bestDb.databaseId]}
+                Лучший: {bestDb.databaseName}
               </Badge>
             )}
           </div>
@@ -159,7 +193,8 @@ export function ReportsPage() {
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <span style={{ color: getDbColor(result.databaseId) }}>{DB_NAMES[result.databaseId]}</span>
+                  <span style={{ color: getDbColor(result.databaseType) }}>{result.databaseName}</span>
+                  
                   {bestDb && result.databaseId === bestDb.databaseId && <Award className="h-4 w-4 text-primary" />}
                 </CardTitle>
                 {getPerformanceIcon(result.databaseId)}
@@ -177,7 +212,7 @@ export function ReportsPage() {
                 </div>
                 <div>
                   <p className="text-muted-foreground">Пропускная способность</p>
-                  <p className="font-mono font-semibold">{result.metrics.throughput.toFixed(0)} req/s</p>
+                  <p className="font-mono font-semibold">{(result.metrics.throughput ?? result.metrics.tps ?? 0).toFixed(0)} req/s</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Ошибки</p>
@@ -320,10 +355,10 @@ export function ReportsPage() {
                   {latestTest.results.map((result) => (
                     <Radar
                       key={result.databaseId}
-                      name={DB_NAMES[result.databaseId]}
-                      dataKey={DB_NAMES[result.databaseId]}
-                      stroke={getDbColor(result.databaseId)}
-                      fill={getDbColor(result.databaseId)}
+                      name={result.databaseName}
+                      dataKey={result.databaseName}
+                      stroke={getDbColor(result.databaseType)}
+                      fill={getDbColor(result.databaseType)}
                       fillOpacity={0.2}
                     />
                   ))}
@@ -349,7 +384,7 @@ export function ReportsPage() {
                 .filter((r) => r.metrics.errorRate > 1)
                 .map((r) => (
                   <li key={r.databaseId}>
-                    {DB_NAMES[r.databaseId]}: высокий процент ошибок ({r.metrics.errorRate.toFixed(2)}%)
+                    {r.databaseName}: высокий процент ошибок ({r.metrics.errorRate.toFixed(2)}%)
                   </li>
                 ))}
             </ul>

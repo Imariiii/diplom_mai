@@ -13,8 +13,10 @@ from dataclasses import dataclass, asdict
 class TestMetricsUpdate:
     """Структура данных для обновления метрик теста"""
     test_id: str
+    db_key: str
     db_type: str
-    timestamp: str
+    db_name: str = ""  # Имя подключения для отображения в UI
+    timestamp: str = ""
     
     # Метрики производительности
     response_time: float = 0.0
@@ -221,6 +223,7 @@ class TestStreamingCallback:
     
     async def on_metrics(
         self,
+        db_key: str,
         db_type: str,
         response_time: float,
         tps: float,
@@ -235,7 +238,8 @@ class TestStreamingCallback:
         cache_hit_ratio: float = 0,
         buffer_pool_hit_ratio: float = 0,
         lock_waits: int = 0,
-        deadlocks: int = 0
+        deadlocks: int = 0,
+        db_name: str = ""
     ):
         """Callback вызываемый при получении новых метрик"""
         now = datetime.now(timezone.utc)
@@ -247,7 +251,9 @@ class TestStreamingCallback:
         
         update = TestMetricsUpdate(
             test_id=self.test_id,
+            db_key=db_key,
             db_type=db_type,
+            db_name=db_name or db_type,
             timestamp=now.isoformat(),
             response_time=response_time,
             tps=tps,

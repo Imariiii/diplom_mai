@@ -11,6 +11,7 @@ backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Глобальные переменные для репозиториев
 test_repository = None
 scenario_repository = None
+connection_repository = None
 HISTORY_ENABLED = False
 SCENARIOS_ENABLED = False
 
@@ -59,14 +60,14 @@ def get_history_db_url():
 
 def initialize_repositories():
     """Инициализировать репозитории"""
-    global test_repository, scenario_repository, HISTORY_ENABLED, SCENARIOS_ENABLED
-    
+    global test_repository, scenario_repository, connection_repository, HISTORY_ENABLED, SCENARIOS_ENABLED
+
     print("[HISTORY_DB] === ИНИЦИАЛИЗАЦИЯ БД ИСТОРИИ ===")
     try:
         from backend.database.repository import TestRepository
         HISTORY_DB_URL = get_history_db_url()
         print(f"[HISTORY_DB] URL получен: {HISTORY_DB_URL is not None}")
-        
+
         if HISTORY_DB_URL:
             print(f"[HISTORY_DB] Создание TestRepository...")
             test_repository = TestRepository(HISTORY_DB_URL)
@@ -96,6 +97,20 @@ def initialize_repositories():
         print(f"[SCENARIO_REPO] ❌ Ошибка инициализации: {e}")
         scenario_repository = None
         SCENARIOS_ENABLED = False
+
+    print("[CONNECTION_REPO] Инициализация ConnectionRepository...")
+    try:
+        from backend.database.repository import ConnectionRepository
+        history_db_url = get_history_db_url()
+        if history_db_url:
+            connection_repository = ConnectionRepository(history_db_url)
+            print(f"[CONNECTION_REPO] ✅ ConnectionRepository инициализирован")
+        else:
+            connection_repository = None
+            print(f"[CONNECTION_REPO] ⚠️ ConnectionRepository не инициализирован (нет URL)")
+    except Exception as e:
+        print(f"[CONNECTION_REPO] ❌ Ошибка инициализации: {e}")
+        connection_repository = None
 
 
 # Инициализация при импорте модуля (вызывается явно из main.py)

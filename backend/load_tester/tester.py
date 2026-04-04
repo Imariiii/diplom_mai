@@ -16,8 +16,10 @@ from backend.database.state_manager import DatabaseStateManager
 class LoadTester:
     """Класс для проведения нагрузочного тестирования"""
     
-    def __init__(self):
+    def __init__(self, connection_repo=None):
         self.db_connection = DatabaseConnection()
+        if connection_repo:
+            self.db_connection.set_connection_repository(connection_repo)
         self.query_manager = QueryManager()
         self.state_manager = DatabaseStateManager()
         self.results: List[Dict] = []
@@ -52,7 +54,7 @@ class LoadTester:
     
     async def _emit_metrics(
         self,
-        db_type: str, 
+        db_key: str,
         response_time: float, 
         tps: float,
         successful: int,
@@ -61,14 +63,19 @@ class LoadTester:
         """Отправить метрики через callback"""
         if self._metrics_callback and self._is_streaming:
             try:
+                db_type = self.db_connection.get_dbms_type(db_key)
+                db_name = self.db_connection.get_connection_name(db_key)
+                
                 # Получаем системные метрики
-                system_metrics = await self.get_system_metrics(db_type)
+                system_metrics = await self.get_system_metrics(db_key)
                 
                 # Получаем внутренние метрики СУБД
-                dbms_metrics = await self.get_dbms_metrics(db_type)
+                dbms_metrics = await self.get_dbms_metrics(db_key)
                 
                 await self._metrics_callback.on_metrics(
+                    db_key=db_key,
                     db_type=db_type,
+                    db_name=db_name,
                     response_time=response_time,
                     tps=tps,
                     successful=successful,
@@ -104,14 +111,15 @@ class LoadTester:
         index = min(index, len(sorted_data) - 1)
         return sorted_data[index]
     
-    async def execute_query(self, db_type: str, query: str, query_id: str) -> Dict:
+    async def execute_query(self, db_key: str, query: str, query_id: str) -> Dict:
         """Выполнение одного запроса с измерением времени"""
         start_time = time.perf_counter()
         error = None
         rows_count = 0
+        db_type = self.db_connection.get_dbms_type(db_key)
         
         try:
-            engine = self.db_connection.get_engine(db_type)
+            engine = await self.db_connection.get_engine_async(db_key)
             async with engine.connect() as conn:
                 result = await conn.execute(text(query))
                 rows_count = len(result.fetchall()) if result.returns_rows else 0
@@ -124,6 +132,7 @@ class LoadTester:
         
         return {
             'query_id': query_id,
+            'db_key': db_key,
             'db_type': db_type,
             'execution_time_ms': execution_time,
             'rows_count': rows_count,
@@ -133,7 +142,7 @@ class LoadTester:
     
     async def run_single_test(
         self, 
-        db_type: str, 
+        db_key: str, 
         query_id: str, 
         iterations: int = 10,
         virtual_users: int = 1,
@@ -146,7 +155,7 @@ class LoadTester:
         
         # Подготовка БД (backup если нужно)
         prepare_info = await self.prepare_database_for_test(
-            db_type, queries, auto_restore
+            db_key, queries, auto_restore
         )
         
         results = []
@@ -161,7 +170,7 @@ class LoadTester:
         try:
             # Запуск итераций (симуляция виртуальных пользователей)
             for i in range(iterations):
-                result = await self.execute_query(db_type, query['sql'], query_id)
+                result = await self.execute_query(db_key, query['sql'], query_id)
                 results.append(result)
                 
                 # Накапливаем метрики для потоковой отправки
@@ -180,7 +189,7 @@ class LoadTester:
                         tps = (recent_successful + recent_failed) / (current_time - last_emit_time) if (current_time - last_emit_time) > 0 else 0
                         
                         await self._emit_metrics(
-                            db_type=db_type,
+                            db_key=db_key,
                             response_time=avg_response_time,
                             tps=tps,
                             successful=recent_successful,
@@ -201,18 +210,21 @@ class LoadTester:
         finally:
             # Восстановление БД (даже при ошибке)
             restore_info = await self.restore_database_after_test(
-                db_type, prepare_info, auto_restore
+                db_key, prepare_info, auto_restore
             )
         
         # Статистика
         execution_times = [r['execution_time_ms'] for r in results if r['error'] is None]
         
+        db_type = self.db_connection.get_dbms_type(db_key)
+
         if execution_times:
             successful_count = len(execution_times)
             failed_count = len(results) - len(execution_times)
             
             stats = {
                 'query_id': query_id,
+                'db_key': db_key,
                 'db_type': db_type,
                 'iterations': iterations,
                 'virtual_users': virtual_users,
@@ -256,6 +268,7 @@ class LoadTester:
         else:
             stats = {
                 'query_id': query_id,
+                'db_key': db_key,
                 'db_type': db_type,
                 'iterations': iterations,
                 'virtual_users': virtual_users,
@@ -302,43 +315,43 @@ class LoadTester:
         queries = [query['sql']]
         
         # Подготовка для всех БД
-        for db_type in db_types:
-            print(f"Подготовка {db_type}...")
+        for db_key in db_types:
+            print(f"Подготовка {db_key}...")
             prepare_info = await self.prepare_database_for_test(
-                db_type, queries, auto_restore
+                db_key, queries, auto_restore
             )
-            prepare_infos[db_type] = prepare_info
+            prepare_infos[db_key] = prepare_info
         
         # Запуск тестов
         try:
-            for db_type in db_types:
-                print(f"Тестирование {db_type}...")
+            for db_key in db_types:
+                print(f"Тестирование {db_key}...")
                 stats = await self.run_single_test(
-                    db_type, 
+                    db_key, 
                     query_id, 
                     iterations,
                     virtual_users=virtual_users,
                     scenario=scenario,
                     auto_restore=False  # Restore сделаем вручную после всех тестов
                 )
-                results[db_type] = stats
+                results[db_key] = stats
         finally:
             # Восстановление всех БД
-            for db_type in db_types:
-                if prepare_infos[db_type].get('needs_restore'):
+            for db_key in db_types:
+                if prepare_infos[db_key].get('needs_restore'):
                     await self.restore_database_after_test(
-                        db_type, prepare_infos[db_type], auto_restore
+                        db_key, prepare_infos[db_key], auto_restore
                     )
         
         return {
             'query_id': query_id,
             'comparison': results,
             'restore_info': {
-                db_type: {
+                db_key: {
                     'needed': info.get('needs_restore', False),
                     'affected_tables': info.get('affected_tables', [])
                 }
-                for db_type, info in prepare_infos.items()
+                for db_key, info in prepare_infos.items()
             },
             'timestamp': datetime.now(timezone.utc).isoformat()
         }
@@ -411,7 +424,7 @@ class LoadTester:
         
         return all_results
     
-    async def get_system_metrics(self, db_type: str) -> Dict:
+    async def get_system_metrics(self, db_key: str) -> Dict:
         """Получить системные метрики"""
         try:
             cpu_usage = psutil.cpu_percent(interval=1)
@@ -442,7 +455,7 @@ class LoadTester:
                 'network_out_mbps': 0,
             }
     
-    async def get_dbms_metrics(self, db_type: str) -> Dict:
+    async def get_dbms_metrics(self, db_key: str) -> Dict:
         """Получить внутренние метрики СУБД"""
         metrics = {
             'cache_hit_ratio': 0,
@@ -456,7 +469,8 @@ class LoadTester:
         }
         
         try:
-            engine = self.db_connection.get_engine(db_type)
+            db_type = self.db_connection.get_dbms_type(db_key)
+            engine = await self.db_connection.get_engine_async(db_key)
             
             if db_type == 'postgresql':
                 async with engine.connect() as conn:
@@ -568,13 +582,13 @@ class LoadTester:
                         metrics['total_db_size_mb'] = float(row[0] or 0)
                         
         except Exception as e:
-            print(f"Ошибка получения метрик СУБД {db_type}: {e}")
+            print(f"Ошибка получения метрик СУБД {db_key}: {e}")
         
         return metrics
     
     async def execute_scenario_query(
         self,
-        db_type: str,
+        db_key: str,
         sql_template: str,
         params_config: List[Dict],
         scenario_name: str
@@ -583,6 +597,7 @@ class LoadTester:
         start_time = time.perf_counter()
         error = None
         rows_count = 0
+        db_type = self.db_connection.get_dbms_type(db_key)
 
         # Подстановка параметров
         param_values = {}
@@ -590,7 +605,7 @@ class LoadTester:
             param_name = param_config['param_name']
             param_type = param_config['param_type']
             param_values[param_name] = await self._generate_param_value(
-                db_type, param_type, param_config
+                db_key, param_type, param_config
             )
 
         # Формируем финальный SQL
@@ -601,7 +616,7 @@ class LoadTester:
             final_sql = sql_template
 
         try:
-            engine = self.db_connection.get_engine(db_type)
+            engine = await self.db_connection.get_engine_async(db_key)
             async with engine.connect() as conn:
                 result = await conn.execute(text(final_sql))
                 rows_count = len(result.fetchall()) if result.returns_rows else 0
@@ -614,6 +629,7 @@ class LoadTester:
 
         return {
             'scenario': scenario_name,
+            'db_key': db_key,
             'db_type': db_type,
             'sql': final_sql[:200] + '...' if len(final_sql) > 200 else final_sql,
             'execution_time_ms': execution_time,
@@ -624,7 +640,7 @@ class LoadTester:
 
     async def _generate_param_value(
         self,
-        db_type: str,
+        db_key: str,
         param_type: str,
         param_config: Dict
     ) -> Any:
@@ -640,7 +656,7 @@ class LoadTester:
         elif param_type == 'random_from_table':
             table = param_config.get('table_ref', '')
             column = param_config.get('column_ref', '')
-            return await self._get_random_value_from_table(db_type, table, column)
+            return await self._get_random_value_from_table(db_key, table, column)
 
         elif param_type == 'sequential_int':
             # Для sequential используем текущее время как seed
@@ -668,13 +684,14 @@ class LoadTester:
 
     async def _get_random_value_from_table(
         self,
-        db_type: str,
+        db_key: str,
         table: str,
         column: str
     ) -> Any:
         """Получение случайного значения из таблицы"""
         try:
-            engine = self.db_connection.get_engine(db_type)
+            db_type = self.db_connection.get_dbms_type(db_key)
+            engine = await self.db_connection.get_engine_async(db_key)
             async with engine.connect() as conn:
                 result = await conn.execute(text(f"""
                     SELECT {column} FROM {table}
@@ -688,7 +705,7 @@ class LoadTester:
 
     async def run_scenario_test(
         self,
-        db_type: str,
+        db_key: str,
         scenario: Dict,
         iterations: int = 10,
         virtual_users: int = 1,
@@ -701,7 +718,8 @@ class LoadTester:
         if not queries:
             return {
                 'scenario': scenario.get('name', 'unknown'),
-                'db_type': db_type,
+                'db_key': db_key,
+                'db_type': self.db_connection.get_dbms_type(db_key),
                 'error': 'No queries in scenario',
                 'successful': 0,
                 'failed': 0
@@ -712,7 +730,7 @@ class LoadTester:
         
         # Подготовка БД
         prepare_info = await self.prepare_database_for_test(
-            db_type, sql_queries, auto_restore
+            db_key, sql_queries, auto_restore
         )
 
         results = []
@@ -736,7 +754,7 @@ class LoadTester:
                 query = random.choice(weighted_queries)
 
                 result = await self.execute_scenario_query(
-                    db_type,
+                    db_key,
                     query['sql_template'],
                     query.get('params', []),
                     scenario.get('name', 'unknown')
@@ -757,7 +775,7 @@ class LoadTester:
                         tps = (recent_successful + recent_failed) / (current_time - last_emit_time)
 
                         await self._emit_metrics(
-                            db_type=db_type,
+                            db_key=db_key,
                             response_time=avg_response_time,
                             tps=tps,
                             successful=recent_successful,
@@ -777,7 +795,7 @@ class LoadTester:
         finally:
             # Восстановление БД
             restore_info = await self.restore_database_after_test(
-                db_type, prepare_info, auto_restore
+                db_key, prepare_info, auto_restore
             )
 
         # Статистика
@@ -785,9 +803,12 @@ class LoadTester:
         successful_count = len(execution_times)
         failed_count = len(results) - len(execution_times)
 
+        db_type = self.db_connection.get_dbms_type(db_key)
+
         stats = {
             'scenario': scenario.get('name', 'unknown'),
             'scenario_type': scenario.get('scenario_type', 'unknown'),
+            'db_key': db_key,
             'db_type': db_type,
             'iterations': iterations,
             'virtual_users': virtual_users,
@@ -796,8 +817,11 @@ class LoadTester:
             'avg_time_ms': statistics.mean(execution_times) if execution_times else 0,
             'min_time_ms': min(execution_times) if execution_times else 0,
             'max_time_ms': max(execution_times) if execution_times else 0,
+            'p50_time_ms': self.calculate_percentile(execution_times, 50) if execution_times else 0,
             'p95_time_ms': self.calculate_percentile(execution_times, 95) if execution_times else 0,
+            'p99_time_ms': self.calculate_percentile(execution_times, 99) if execution_times else 0,
             'tps': successful_count / total_test_time if total_test_time > 0 else 0,
+            'throughput': successful_count / total_test_time if total_test_time > 0 else 0,
             'error_rate': (failed_count / iterations) * 100 if iterations > 0 else 0,
             'restore_info': {
                 'needed': prepare_info.get('needs_restore', False),
@@ -856,10 +880,10 @@ class LoadTester:
             queries = scenario.get('queries', [])
             if queries:
                 warmup_query = queries[0]
-                for db_type in db_types:
+                for db_key in db_types:
                     for _ in range(min(5, iterations // 10)):
                         await self.execute_scenario_query(
-                            db_type,
+                            db_key,
                             warmup_query['sql_template'],
                             warmup_query.get('params', []),
                             scenario['name']
@@ -868,19 +892,19 @@ class LoadTester:
             await asyncio.sleep(warmup_time)
 
         # Запуск тестов для каждой БД
-        for idx, db_type in enumerate(db_types):
-            print(f"Тестирование {db_type} со сценарием {scenario['name']}...")
+        for idx, db_key in enumerate(db_types):
+            print(f"Тестирование {db_key} со сценарием {scenario['name']}...")
 
             if self._metrics_callback:
                 self._metrics_callback.set_current_query(idx + 1)
 
             await self._emit_status(
                 "running",
-                f"Тестирование {db_type}: {scenario['name']} ({idx + 1}/{len(db_types)})"
+                f"Тестирование {self.db_connection.get_connection_name(db_key)}: {scenario['name']} ({idx + 1}/{len(db_types)})"
             )
 
             stats = await self.run_scenario_test(
-                db_type,
+                db_key,
                 scenario,
                 iterations=iterations,
                 virtual_users=virtual_users,
@@ -888,7 +912,8 @@ class LoadTester:
             )
 
             all_results.append({
-                'db_type': db_type,
+                'db_key': db_key,
+                'db_type': stats.get('db_type'),
                 'scenario': scenario['name'],
                 'stats': stats
             })
@@ -909,7 +934,7 @@ class LoadTester:
 
     async def execute_scenario_query(
         self,
-        db_type: str,
+        db_key: str,
         sql_template: str,
         params_config: List[Dict],
         scenario_name: str
@@ -921,6 +946,7 @@ class LoadTester:
         start_time = time.perf_counter()
         error = None
         rows_count = 0
+        db_type = self.db_connection.get_dbms_type(db_key)
 
         # Подстановка параметров
         param_values = {}
@@ -928,7 +954,7 @@ class LoadTester:
             param_name = param_config['param_name']
             param_type = param_config['param_type']
             param_values[param_name] = await self._generate_param_value(
-                db_type, param_type, param_config
+                db_key, param_type, param_config
             )
 
         # Формируем финальный SQL
@@ -939,7 +965,7 @@ class LoadTester:
             final_sql = sql_template
 
         try:
-            engine = self.db_connection.get_engine(db_type)
+            engine = await self.db_connection.get_engine_async(db_key)
             async with engine.connect() as conn:
                 result = await conn.execute(text(final_sql))
                 rows_count = len(result.fetchall()) if result.returns_rows else 0
@@ -952,6 +978,7 @@ class LoadTester:
 
         return {
             'scenario': scenario_name,
+            'db_key': db_key,
             'db_type': db_type,
             'sql': final_sql[:200] + '...' if len(final_sql) > 200 else final_sql,
             'execution_time_ms': execution_time,
@@ -962,7 +989,7 @@ class LoadTester:
 
     async def _generate_param_value(
         self,
-        db_type: str,
+        db_key: str,
         param_type: str,
         param_config: Dict
     ) -> Any:
@@ -979,7 +1006,7 @@ class LoadTester:
         elif param_type == 'random_from_table':
             table = param_config.get('table_ref', '')
             column = param_config.get('column_ref', '')
-            return await self._get_random_value_from_table(db_type, table, column)
+            return await self._get_random_value_from_table(db_key, table, column)
 
         elif param_type == 'sequential_int':
             # Для sequential используем текущее время как seed
@@ -1006,13 +1033,14 @@ class LoadTester:
 
     async def _get_random_value_from_table(
         self,
-        db_type: str,
+        db_key: str,
         table: str,
         column: str
     ) -> Any:
         """Получение случайного значения из таблицы"""
         try:
-            engine = self.db_connection.get_engine(db_type)
+            db_type = self.db_connection.get_dbms_type(db_key)
+            engine = await self.db_connection.get_engine_async(db_key)
             async with engine.connect() as conn:
                 # PostgreSQL использует RANDOM(), MySQL использует RAND()
                 order_func = "RANDOM()" if db_type == "postgresql" else "RAND()"
@@ -1028,7 +1056,7 @@ class LoadTester:
 
     async def run_scenario_test(
         self,
-        db_type: str,
+        db_key: str,
         scenario: Dict,
         iterations: int = 10,
         virtual_users: int = 1,
@@ -1041,7 +1069,8 @@ class LoadTester:
         if not queries:
             return {
                 'scenario': scenario.get('name', 'unknown'),
-                'db_type': db_type,
+                'db_key': db_key,
+                'db_type': self.db_connection.get_dbms_type(db_key),
                 'error': 'No queries in scenario',
                 'successful': 0,
                 'failed': 0
@@ -1052,7 +1081,7 @@ class LoadTester:
         
         # Подготовка БД
         prepare_info = await self.prepare_database_for_test(
-            db_type, sql_queries, auto_restore
+            db_key, sql_queries, auto_restore
         )
 
         results = []
@@ -1076,7 +1105,7 @@ class LoadTester:
                 query = random.choice(weighted_queries)
 
                 result = await self.execute_scenario_query(
-                    db_type,
+                    db_key,
                     query['sql_template'],
                     query.get('params', []),
                     scenario.get('name', 'unknown')
@@ -1097,7 +1126,7 @@ class LoadTester:
                         tps = (recent_successful + recent_failed) / (current_time - last_emit_time)
 
                         await self._emit_metrics(
-                            db_type=db_type,
+                            db_key=db_key,
                             response_time=avg_response_time,
                             tps=tps,
                             successful=recent_successful,
@@ -1117,7 +1146,7 @@ class LoadTester:
         finally:
             # Восстановление БД
             restore_info = await self.restore_database_after_test(
-                db_type, prepare_info, auto_restore
+                db_key, prepare_info, auto_restore
             )
 
         # Статистика
@@ -1125,9 +1154,12 @@ class LoadTester:
         successful_count = len(execution_times)
         failed_count = len(results) - len(execution_times)
 
+        db_type = self.db_connection.get_dbms_type(db_key)
+
         stats = {
             'scenario': scenario.get('name', 'unknown'),
             'scenario_type': scenario.get('scenario_type', 'unknown'),
+            'db_key': db_key,
             'db_type': db_type,
             'iterations': iterations,
             'virtual_users': virtual_users,
@@ -1136,8 +1168,11 @@ class LoadTester:
             'avg_time_ms': statistics.mean(execution_times) if execution_times else 0,
             'min_time_ms': min(execution_times) if execution_times else 0,
             'max_time_ms': max(execution_times) if execution_times else 0,
+            'p50_time_ms': self.calculate_percentile(execution_times, 50) if execution_times else 0,
             'p95_time_ms': self.calculate_percentile(execution_times, 95) if execution_times else 0,
+            'p99_time_ms': self.calculate_percentile(execution_times, 99) if execution_times else 0,
             'tps': successful_count / total_test_time if total_test_time > 0 else 0,
+            'throughput': successful_count / total_test_time if total_test_time > 0 else 0,
             'error_rate': (failed_count / iterations) * 100 if iterations > 0 else 0,
             'restore_info': {
                 'needed': prepare_info.get('needs_restore', False),
@@ -1196,10 +1231,10 @@ class LoadTester:
             queries = scenario.get('queries', [])
             if queries:
                 warmup_query = queries[0]
-                for db_type in db_types:
+                for db_key in db_types:
                     for _ in range(min(5, iterations // 10)):
                         await self.execute_scenario_query(
-                            db_type,
+                            db_key,
                             warmup_query['sql_template'],
                             warmup_query.get('params', []),
                             scenario['name']
@@ -1208,19 +1243,19 @@ class LoadTester:
             await asyncio.sleep(warmup_time)
 
         # Запуск тестов для каждой БД
-        for idx, db_type in enumerate(db_types):
-            print(f"Тестирование {db_type} со сценарием {scenario['name']}...")
+        for idx, db_key in enumerate(db_types):
+            print(f"Тестирование {db_key} со сценарием {scenario['name']}...")
 
             if self._metrics_callback:
                 self._metrics_callback.set_current_query(idx + 1)
 
             await self._emit_status(
                 "running",
-                f"Тестирование {db_type}: {scenario['name']} ({idx + 1}/{len(db_types)})"
+                f"Тестирование {self.db_connection.get_connection_name(db_key)}: {scenario['name']} ({idx + 1}/{len(db_types)})"
             )
 
             stats = await self.run_scenario_test(
-                db_type,
+                db_key,
                 scenario,
                 iterations=iterations,
                 virtual_users=virtual_users,
@@ -1228,7 +1263,8 @@ class LoadTester:
             )
 
             all_results.append({
-                'db_type': db_type,
+                'db_key': db_key,
+                'db_type': stats.get('db_type'),
                 'scenario': scenario['name'],
                 'stats': stats
             })
@@ -1255,7 +1291,7 @@ class LoadTester:
     
     async def prepare_database_for_test(
         self, 
-        db_type: str, 
+        db_key: str, 
         queries: List[str],
         auto_restore: bool = True
     ) -> Dict:
@@ -1263,7 +1299,7 @@ class LoadTester:
         Подготовка БД к тесту: анализ запросов и создание backup если нужно
         
         Args:
-            db_type: Тип СУБД
+            db_key: Ключ подключения
             queries: Список SQL запросов
             auto_restore: Включить автовосстановление после теста
             
@@ -1283,13 +1319,14 @@ class LoadTester:
         
         # Отправляем статус
         await self._emit_backup_status("backup_started", {
-            "dbms_type": db_type,
+            "dbms_type": self.db_connection.get_dbms_type(db_key),
             "tables": list(affected_tables),
             "auto_restore": auto_restore
         })
         
         try:
-            engine = self.db_connection.get_engine(db_type)
+            db_type = self.db_connection.get_dbms_type(db_key)
+            engine = await self.db_connection.get_engine_async(db_key)
             prepare_result = await self.state_manager.prepare_for_test(
                 engine, db_type, queries
             )
@@ -1310,14 +1347,14 @@ class LoadTester:
             
         except Exception as e:
             await self._emit_backup_status("backup_failed", {
-                "dbms_type": db_type,
+                "dbms_type": self.db_connection.get_dbms_type(db_key),
                 "error": str(e)
             })
             raise
     
     async def restore_database_after_test(
         self,
-        db_type: str,
+        db_key: str,
         prepare_result: Dict,
         auto_restore: bool = True
     ) -> Dict:
@@ -1325,7 +1362,7 @@ class LoadTester:
         Восстановление БД после теста
         
         Args:
-            db_type: Тип СУБД
+            db_key: Ключ подключения
             prepare_result: Результат подготовки (от prepare_database_for_test)
             auto_restore: Выполнить восстановление
             
@@ -1339,12 +1376,13 @@ class LoadTester:
             }
         
         await self._emit_backup_status("restore_started", {
-            "dbms_type": db_type,
+            "dbms_type": self.db_connection.get_dbms_type(db_key),
             "tables": prepare_result.get("affected_tables", [])
         })
         
         try:
-            engine = self.db_connection.get_engine(db_type)
+            db_type = self.db_connection.get_dbms_type(db_key)
+            engine = await self.db_connection.get_engine_async(db_key)
             restore_result = await self.state_manager.restore_after_test(
                 engine, db_type, prepare_result["prepare_result"]
             )
@@ -1366,7 +1404,7 @@ class LoadTester:
             
         except Exception as e:
             await self._emit_backup_status("restore_failed", {
-                "dbms_type": db_type,
+                "dbms_type": self.db_connection.get_dbms_type(db_key),
                 "error": str(e)
             })
             return {

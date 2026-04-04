@@ -24,3 +24,4 @@ sqlalchemy[asyncio]==2.0.23
 # UUID support
 uuid6==2024.1.12
 
+cryptography

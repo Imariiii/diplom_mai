@@ -221,8 +221,8 @@ export function HistoryPage() {
                     {selectedTest.results.map((result) => (
                       <TableRow key={result.id}>
                         <TableCell>
-                          <span style={{ color: getDbColor(result.db_type) }} className="font-medium">
-                            {DB_NAMES[result.db_type] || result.db_type}
+                          <span style={{ color: getDbColor((result.metrics as any)?.dbms_type || result.db_type) }} className="font-medium">
+                            {(result.metrics as any)?.db_name || DB_NAMES[(result.metrics as any)?.dbms_type || result.db_type] || result.db_type}
                           </span>
                         </TableCell>
                         <TableCell className="font-mono text-xs">{result.query_id || "-"}</TableCell>
@@ -274,11 +274,11 @@ export function HistoryPage() {
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
                         data={selectedTest.results.map(r => ({
-                          name: DB_NAMES[r.db_type] || r.db_type,
+                          name: (r.metrics as any)?.db_name || DB_NAMES[(r.metrics as any)?.dbms_type || r.db_type] || r.db_type,
                           avg: r.metrics?.avg_time_ms ?? 0,
                           p95: r.metrics?.p95_time_ms ?? 0,
                           p99: r.metrics?.p99_time_ms ?? 0,
-                          color: getDbColor(r.db_type),
+                          color: getDbColor((r.metrics as any)?.dbms_type || r.db_type),
                         }))}
                       >
                         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
@@ -316,9 +316,9 @@ export function HistoryPage() {
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
                         data={selectedTest.results.map(r => ({
-                          name: DB_NAMES[r.db_type] || r.db_type,
+                          name: (r.metrics as any)?.db_name || DB_NAMES[(r.metrics as any)?.dbms_type || r.db_type] || r.db_type,
                           tps: r.metrics?.tps ?? 0,
-                          color: getDbColor(r.db_type),
+                          color: getDbColor((r.metrics as any)?.dbms_type || r.db_type),
                         }))}
                       >
                         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />

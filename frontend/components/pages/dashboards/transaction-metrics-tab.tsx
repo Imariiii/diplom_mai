@@ -29,14 +29,18 @@ interface TestResult {
 interface TransactionMetricsTabProps {
   databases: string[]
   results: TestResult[] | undefined
+  getDbType?: (dbKey: string) => string
+  getDbDisplayName?: (dbKey: string) => string
 }
 
-export function TransactionMetricsTab({ databases, results }: TransactionMetricsTabProps) {
+export function TransactionMetricsTab({ databases, results, getDbType, getDbDisplayName }: TransactionMetricsTabProps) {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {databases.map((dbId) => {
+          const dbType = getDbType ? getDbType(dbId) : dbId
           const result = results?.find(r => r.databaseId === dbId)
+          const displayName = getDbDisplayName ? getDbDisplayName(dbId) : (DB_NAMES[dbType] || dbType)
           const txMetrics = result?.transactionMetrics
           const total = txMetrics?.totalTransactions || 0
           const successful = txMetrics?.successfulTransactions || 0
@@ -47,8 +51,8 @@ export function TransactionMetricsTab({ databases, results }: TransactionMetrics
             <Card key={dbId} className="bg-card border-border">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-foreground">
-                  <Database className="h-5 w-5" style={{ color: getDbColor(dbId) }} />
-                  {DB_NAMES[dbId]}
+                  <Database className="h-5 w-5" style={{ color: getDbColor(dbType) }} />
+                  {displayName}
                 </CardTitle>
                 <CardDescription>Статистика транзакций</CardDescription>
               </CardHeader>
@@ -97,11 +101,15 @@ export function TransactionMetricsTab({ databases, results }: TransactionMetrics
             <div className="h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
-                  data={results.map(r => ({
-                    name: DB_NAMES[r.databaseId] || r.databaseId,
-                    successful: r.transactionMetrics?.successfulTransactions || 0,
-                    failed: r.transactionMetrics?.failedTransactions || 0,
-                  }))}
+                  data={results.map(r => {
+                    const dbType = getDbType ? getDbType(r.databaseId) : r.databaseId
+                    const displayName = getDbDisplayName ? getDbDisplayName(r.databaseId) : (DB_NAMES[dbType] || r.databaseId)
+                    return {
+                      name: displayName,
+                      successful: r.transactionMetrics?.successfulTransactions || 0,
+                      failed: r.transactionMetrics?.failedTransactions || 0,
+                    }
+                  })}
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis

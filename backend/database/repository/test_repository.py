@@ -15,6 +15,16 @@ from backend.database.repository.base import BaseRepository, get_local_now
 class TestRepository(BaseRepository):
     """Репозиторий для работы с тестами"""
 
+    def _result_group_key(self, result: Dict[str, Any]) -> str:
+        """Получить устойчивый ключ результата для сравнений"""
+        metrics = result.get('metrics', {}) or {}
+        return (
+            metrics.get('connection_key')
+            or metrics.get('db_name')
+            or result.get('db_type')
+            or 'unknown'
+        )
+
     async def init_db(self):
         """Создать все таблицы"""
         async with self.engine.begin() as conn:
@@ -266,8 +276,8 @@ class TestRepository(BaseRepository):
             'delta': {}
         }
 
-        results_1 = {r['db_type']: r for r in run1.get('results', [])}
-        results_2 = {r['db_type']: r for r in run2.get('results', [])}
+        results_1 = {self._result_group_key(r): r for r in run1.get('results', [])}
+        results_2 = {self._result_group_key(r): r for r in run2.get('results', [])}
 
         for db_type in set(results_1.keys()) | set(results_2.keys()):
             r1 = results_1.get(db_type, {}).get('metrics', {})

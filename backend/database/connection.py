@@ -1,11 +1,13 @@
 """
 Модуль для подключения к различным СУБД
+Рефакторинг: динамическое управление подключениями через ConnectionRepository
 """
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
 from sqlalchemy import text
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Any
 import yaml
 import os
+import asyncio
 
 
 class DatabaseConnection:
@@ -13,12 +15,60 @@ class DatabaseConnection:
     
     def __init__(self, config_path: Optional[str] = None):
         if config_path is None:
-            # Определяем путь относительно корня проекта (code/)
             current_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(current_dir)  # Поднимаемся на уровень выше из database/
+            project_root = os.path.dirname(current_dir)
             config_path = os.path.join(project_root, "config", "database_config.yaml")
         self.config = self._load_config(config_path)
         self.engines: Dict[str, AsyncEngine] = {}
+        self._connection_configs: Dict[str, Dict[str, Any]] = {}
+        self._connection_repo = None
+        self._connections_loaded = False
+        self._loading_lock: Optional[asyncio.Lock] = None
+
+    def get_dbms_type(self, connection_key: str) -> str:
+        """Получить тип СУБД для ключа подключения"""
+        if connection_key in self._connection_configs:
+            return self._connection_configs[connection_key].get('dbms_type', connection_key)
+        return connection_key
+
+    def get_connection_name(self, connection_key: str) -> str:
+        """Получить отображаемое имя подключения"""
+        if connection_key in self._connection_configs:
+            return self._connection_configs[connection_key].get('name', connection_key)
+        return connection_key
+    
+    def set_connection_repository(self, repo):
+        """Установить ConnectionRepository для динамического управления подключениями"""
+        self._connection_repo = repo
+    
+    async def _ensure_connections_loaded(self):
+        """Ленивая загрузка подключений из БД при первом async-вызове"""
+        if self._connections_loaded:
+            return
+        
+        if self._loading_lock is None:
+            self._loading_lock = asyncio.Lock()
+        
+        async with self._loading_lock:
+            if self._connections_loaded:
+                return
+            
+            if not self._connection_repo:
+                print("[DB_CONNECTION] ConnectionRepository не установлен, используем YAML конфиг")
+                self._connections_loaded = True
+                return
+            
+            try:
+                connections = await self._connection_repo.get_active_connections()
+                for conn_config in connections:
+                    decrypted = await self._connection_repo.get_decrypted_connection(str(conn_config.id))
+                    if decrypted:
+                        self._connection_configs[str(conn_config.id)] = decrypted
+                        print(f"[DB_CONNECTION] Загружено подключение: {conn_config.name} ({conn_config.dbms_type})")
+                self._connections_loaded = True
+            except Exception as e:
+                print(f"[DB_CONNECTION] Ошибка загрузки подключений из БД: {e}")
+                self._connections_loaded = True
     
     def _load_config(self, config_path: str) -> dict:
         """Загрузка конфигурации из YAML файла"""
@@ -29,40 +79,63 @@ class DatabaseConnection:
             print(f"Предупреждение: Файл конфигурации не найден: {config_path}")
         return {}
     
-    def get_connection_string(self, db_type: str) -> str:
+    def get_connection_string(self, connection_key: str) -> str:
         """Формирование строки подключения"""
-        db_config = self.config.get('databases', {}).get(db_type, {})
+        dbms_type = self.get_dbms_type(connection_key)
+
+        if connection_key in self._connection_configs:
+            conn = self._connection_configs[connection_key]
+            if dbms_type == 'mysql':
+                return (
+                    f"mysql+aiomysql://{conn['user']}:{conn['password']}"
+                    f"@{conn['host']}:{conn['port']}"
+                    f"/{conn['database']}"
+                )
+            elif dbms_type == 'postgresql':
+                return (
+                    f"postgresql+asyncpg://{conn['user']}:{conn['password']}"
+                    f"@{conn['host']}:{conn['port']}"
+                    f"/{conn['database']}"
+                )
         
-        if db_type == 'mysql':
+        db_config = self.config.get('databases', {}).get(connection_key, {})
+        
+        if dbms_type == 'mysql':
             return (
                 f"mysql+aiomysql://{db_config.get('user')}:{db_config.get('password')}"
                 f"@{db_config.get('host')}:{db_config.get('port')}"
                 f"/{db_config.get('database')}"
             )
-        elif db_type == 'postgresql':
+        elif dbms_type == 'postgresql':
             return (
                 f"postgresql+asyncpg://{db_config.get('user')}:{db_config.get('password')}"
                 f"@{db_config.get('host')}:{db_config.get('port')}"
                 f"/{db_config.get('database')}"
             )
         else:
-            raise ValueError(f"Неподдерживаемый тип БД: {db_type}")
+            raise ValueError(f"Неподдерживаемый тип БД: {dbms_type}")
     
-    def get_engine(self, db_type: str) -> AsyncEngine:
-        """Получение или создание async engine для подключения"""
-        if db_type not in self.engines:
-            connection_string = self.get_connection_string(db_type)
-            self.engines[db_type] = create_async_engine(
+    def get_engine(self, connection_key: str) -> AsyncEngine:
+        """Получение или создание async engine для подключения (синхронный)"""
+        if connection_key not in self.engines:
+            connection_string = self.get_connection_string(connection_key)
+            self.engines[connection_key] = create_async_engine(
                 connection_string,
                 pool_size=5,
                 max_overflow=10,
                 echo=False
             )
-        return self.engines[db_type]
+        return self.engines[connection_key]
+    
+    async def get_engine_async(self, connection_key: str) -> AsyncEngine:
+        """Получение engine с предварительной загрузкой подключений из БД"""
+        await self._ensure_connections_loaded()
+        return self.get_engine(connection_key)
     
     async def test_connection(self, db_type: str) -> bool:
         """Проверка подключения к БД"""
         try:
+            await self._ensure_connections_loaded()
             engine = self.get_engine(db_type)
             async with engine.connect() as conn:
                 await conn.execute(text("SELECT 1"))
@@ -96,9 +169,14 @@ class DatabaseConnection:
         """
         terminated = 0
         
+        db_name = None
+        if db_type in self._connection_configs:
+            db_name = self._connection_configs[db_type].get('database')
+        else:
+            db_name = self.config.get('databases', {}).get(db_type, {}).get('database')
+        
         async with engine.connect() as conn:
             if db_type == 'postgresql':
-                # PostgreSQL: используем pg_terminate_backend
                 sql = """
                     SELECT pg_terminate_backend(pid)
                     FROM pg_stat_activity
@@ -111,8 +189,6 @@ class DatabaseConnection:
                 await conn.commit()
                 
             elif db_type == 'mysql':
-                # MySQL: используем KILL
-                # Получаем список процессов
                 result = await conn.execute(text("SHOW PROCESSLIST"))
                 rows = result.fetchall()
                 
@@ -121,9 +197,8 @@ class DatabaseConnection:
                     process_db = row[3] if len(row) > 3 else None
                     process_command = row[4] if len(row) > 4 else None
                     
-                    # Не убиваем собственное соединение и системные процессы
                     if (process_command != 'Sleep' and 
-                        process_db == self.config.get('databases', {}).get(db_type, {}).get('database')):
+                        process_db == db_name):
                         try:
                             await conn.execute(text(f"KILL {process_id}"))
                             terminated += 1

@@ -4,5 +4,6 @@ Repository package для работы с историей тестов и сц�
 from backend.database.repository.base import BaseRepository
 from backend.database.repository.test_repository import TestRepository
 from backend.database.repository.scenario_repository import ScenarioRepository
+from backend.database.repository.connection_repository import ConnectionRepository
 
-__all__ = ["BaseRepository", "TestRepository", "ScenarioRepository"]
+__all__ = ["BaseRepository", "TestRepository", "ScenarioRepository", "ConnectionRepository"]

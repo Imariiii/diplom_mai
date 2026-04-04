@@ -7,9 +7,22 @@ import { TimeSeriesChart } from "./shared/time-series-chart"
 interface SystemMetricsTabProps {
   databases: string[]
   chartData: Record<string, unknown>[]
+  getDbType?: (dbKey: string) => string
+  getDbDisplayName?: (dbKey: string) => string
 }
 
-export function SystemMetricsTab({ databases, chartData }: SystemMetricsTabProps) {
+export function SystemMetricsTab({ databases, chartData, getDbType, getDbDisplayName }: SystemMetricsTabProps) {
+  const resolveDbColor = (dbId: string) => {
+    if (getDbType) {
+      return getDbColor(getDbType(dbId))
+    }
+    return getDbColor(dbId)
+  }
+
+  const customDbNames = getDbDisplayName
+    ? Object.fromEntries(databases.map((db) => [db, getDbDisplayName(db)]))
+    : undefined
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -19,10 +32,12 @@ export function SystemMetricsTab({ databases, chartData }: SystemMetricsTabProps
           data={chartData}
           databases={databases}
           dbNames={DB_NAMES}
-          getDbColor={getDbColor}
+          getDbColor={resolveDbColor}
           metricKey="cpu"
           chartType="line"
           yDomain={[0, 100]}
+          customDbNames={customDbNames}
+          getDbType={getDbType}
         />
         <TimeSeriesChart
           title="Использование RAM (%)"
@@ -30,10 +45,12 @@ export function SystemMetricsTab({ databases, chartData }: SystemMetricsTabProps
           data={chartData}
           databases={databases}
           dbNames={DB_NAMES}
-          getDbColor={getDbColor}
+          getDbColor={resolveDbColor}
           metricKey="memory"
           chartType="line"
           yDomain={[0, 100]}
+          customDbNames={customDbNames}
+          getDbType={getDbType}
         />
         <TimeSeriesChart
           title="Disk I/O (ops/sec)"
@@ -41,9 +58,11 @@ export function SystemMetricsTab({ databases, chartData }: SystemMetricsTabProps
           data={chartData}
           databases={databases}
           dbNames={DB_NAMES}
-          getDbColor={getDbColor}
+          getDbColor={resolveDbColor}
           metricKey="diskIO"
           chartType="area"
+          customDbNames={customDbNames}
+          getDbType={getDbType}
         />
         <TimeSeriesChart
           title="Пропускная способность (req/s)"
@@ -51,9 +70,11 @@ export function SystemMetricsTab({ databases, chartData }: SystemMetricsTabProps
           data={chartData}
           databases={databases}
           dbNames={DB_NAMES}
-          getDbColor={getDbColor}
+          getDbColor={resolveDbColor}
           metricKey="throughput"
           chartType="area"
+          customDbNames={customDbNames}
+          getDbType={getDbType}
         />
       </div>
     </div>

@@ -25,6 +25,8 @@ interface TimeSeriesChartProps {
   metricKey: string
   chartType?: "line" | "area"
   yDomain?: [number, number]
+  customDbNames?: Record<string, string>
+  getDbType?: (dbKey: string) => string
 }
 
 export function TimeSeriesChart({
@@ -37,9 +39,22 @@ export function TimeSeriesChart({
   metricKey,
   chartType = "line",
   yDomain,
+  customDbNames,
+  getDbType,
 }: TimeSeriesChartProps) {
   const ChartComponent = chartType === "area" ? AreaChart : LineChart
   const SeriesComponent = chartType === "area" ? Area : Line
+
+  const getDisplayName = (dbId: string) => {
+    return customDbNames?.[dbId] || dbNames[dbId] || dbId
+  }
+
+  const resolveDbColor = (dbId: string) => {
+    if (getDbType) {
+      return getDbColor(getDbType(dbId))
+    }
+    return getDbColor(dbId)
+  }
 
   return (
     <Card className="bg-card border-border">
@@ -82,9 +97,9 @@ export function TimeSeriesChart({
                   key={dbId}
                   type="monotone"
                   dataKey={`${dbId}_${metricKey}`}
-                  name={dbNames[dbId]}
-                  stroke={getDbColor(dbId)}
-                  fill={chartType === "area" ? getDbColor(dbId) : undefined}
+                  name={getDisplayName(dbId)}
+                  stroke={resolveDbColor(dbId)}
+                  fill={chartType === "area" ? resolveDbColor(dbId) : undefined}
                   fillOpacity={chartType === "area" ? 0.2 : undefined}
                   strokeWidth={chartType === "line" ? 2 : undefined}
                   dot={chartType === "line" ? false : undefined}

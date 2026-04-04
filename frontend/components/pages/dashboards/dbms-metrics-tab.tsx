@@ -29,9 +29,11 @@ interface DbmsMetricsTabProps {
   databases: string[]
   realtimeData: Record<string, RealtimeDataPoint[]>
   getResultForDb: (dbId: string) => TestResult | undefined
+  getDbType?: (dbKey: string) => string
+  getDbDisplayName?: (dbKey: string) => string
 }
 
-export function DbmsMetricsTab({ databases, realtimeData, getResultForDb }: DbmsMetricsTabProps) {
+export function DbmsMetricsTab({ databases, realtimeData, getResultForDb, getDbType, getDbDisplayName }: DbmsMetricsTabProps) {
   const getRealtimeDbmsMetric = (dbId: string, metric: string, defaultValue: string = "—") => {
     const points = realtimeData[dbId]
     if (!points || points.length === 0) return defaultValue
@@ -45,13 +47,15 @@ export function DbmsMetricsTab({ databases, realtimeData, getResultForDb }: Dbms
         {databases.map((dbId) => {
           const result = getResultForDb(dbId)
           const dbmsMetrics = result?.dbmsMetrics
+          const dbType = getDbType ? getDbType(dbId) : dbId
+          const displayName = getDbDisplayName ? getDbDisplayName(dbId) : (DB_NAMES[dbType] || dbType)
 
           return (
             <Card key={dbId} className="bg-card border-border">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-foreground">
-                  <Database className="h-5 w-5" style={{ color: getDbColor(dbId) }} />
-                  {DB_NAMES[dbId]} — Внутренние метрики
+                  <Database className="h-5 w-5" style={{ color: getDbColor(dbType) }} />
+                  {displayName} — Внутренние метрики
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">

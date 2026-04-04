@@ -204,6 +204,62 @@ class TimeSeries(Base):
         }
 
 
+class DatabaseConnectionConfig(Base):
+    """Модель для хранения конфигурации подключений к тестируемым БД"""
+    __tablename__ = 'db_connection_configs'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), nullable=False, unique=True)
+    dbms_type = Column(String(50), nullable=False)  # mysql, postgresql
+    group = Column(String(100), nullable=True, default='default')  # Группа подключений (production, staging, local)
+    host = Column(String(255), nullable=False)
+    port = Column(Integer, nullable=False)
+    user = Column(String(100), nullable=False)
+    password_encrypted = Column(Text, nullable=False)
+    database = Column(String(100), nullable=False)
+    is_active = Column(String(1), nullable=False, default='t')  # 't' - активно, 'f' - неактивно
+    extra_params = Column(JSON, nullable=True, default=dict)  # Дополнительные параметры (ssl, timeout и т.д.)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    # Indexes
+    __table_args__ = (
+        Index('idx_db_conn_configs_dbms_type', 'dbms_type'),
+        Index('idx_db_conn_configs_group', 'group'),
+        Index('idx_db_conn_configs_active', 'is_active'),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'id': str(self.id),
+            'name': self.name,
+            'dbms_type': self.dbms_type,
+            'group': self.group,
+            'host': self.host,
+            'port': self.port,
+            'user': self.user,
+            'database': self.database,
+            'is_active': self.is_active == 't',
+            'extra_params': self.extra_params,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    def to_connection_dict(self, decrypted_password: str) -> Dict[str, Any]:
+        """Словарь для построения строки подключения (с расшифрованным паролем)"""
+        return {
+            'id': str(self.id),
+            'name': self.name,
+            'dbms_type': self.dbms_type,
+            'host': self.host,
+            'port': self.port,
+            'user': self.user,
+            'password': decrypted_password,
+            'database': self.database,
+            'extra_params': self.extra_params or {},
+        }
+
+
 class TestScenario(Base):
     """Модель для хранения сценариев тестирования"""
     __tablename__ = 'test_scenarios'

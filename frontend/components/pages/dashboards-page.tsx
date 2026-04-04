@@ -17,7 +17,7 @@ import { TransactionMetricsTab } from "./dashboards/transaction-metrics-tab"
 import { DbmsMetricsTab } from "./dashboards/dbms-metrics-tab"
 
 export function DashboardsPage() {
-  const { currentTest, realtimeData, testConfig, setCurrentTest, addTestToHistory, clearRealtimeData } = useAppStore()
+  const { currentTest, realtimeData, testConfig, setCurrentTest, addTestToHistory, clearRealtimeData, connectionNames, setConnectionNames, connectionDbTypes, setConnectionDbTypes } = useAppStore()
   const [statusMessage, setStatusMessage] = useState<string>("")
 
   const {
@@ -41,6 +41,12 @@ export function DashboardsPage() {
 
           if (data.status === "completed") {
             apiClient.getAsyncTestResults(currentTest.id).then((response) => {
+              if (response.connection_names) {
+                setConnectionNames(response.connection_names)
+              }
+              if (response.connection_db_types) {
+                setConnectionDbTypes(response.connection_db_types)
+              }
               if (response.results) {
                 const aggregateByDb: Record<string, {
                   avgTimes: number[]
@@ -61,15 +67,15 @@ export function DashboardsPage() {
                   const entries = Object.entries(comparison)
 
                   if (entries.length > 0) {
-                    entries.forEach(([dbType, stats]: [string, any]) => {
-                      if (!aggregateByDb[dbType]) {
-                        aggregateByDb[dbType] = {
+                    entries.forEach(([dbKey, stats]: [string, any]) => {
+                      if (!aggregateByDb[dbKey]) {
+                        aggregateByDb[dbKey] = {
                           avgTimes: [], p50Times: [], p95Times: [], p99Times: [],
                           minTimes: [], maxTimes: [], tpsValues: [], throughputValues: [],
                           activeConnections: [], successful: 0, failed: 0,
                         }
                       }
-                      const bucket = aggregateByDb[dbType]
+                      const bucket = aggregateByDb[dbKey]
                       if (typeof stats.avg_time_ms === "number") bucket.avgTimes.push(stats.avg_time_ms)
                       if (typeof stats.p50_time_ms === "number") bucket.p50Times.push(stats.p50_time_ms)
                       if (typeof stats.p95_time_ms === "number") bucket.p95Times.push(stats.p95_time_ms)
@@ -82,17 +88,17 @@ export function DashboardsPage() {
                       bucket.successful += stats.successful || 0
                       bucket.failed += stats.failed || 0
                     })
-                  } else if (result.db_type && result.stats) {
-                    const dbType = result.db_type
+                  } else if (result.db_key && result.stats) {
+                    const dbKey = result.db_key
                     const stats = result.stats
-                    if (!aggregateByDb[dbType]) {
-                      aggregateByDb[dbType] = {
+                    if (!aggregateByDb[dbKey]) {
+                      aggregateByDb[dbKey] = {
                         avgTimes: [], p50Times: [], p95Times: [], p99Times: [],
                         minTimes: [], maxTimes: [], tpsValues: [], throughputValues: [],
                         activeConnections: [], successful: 0, failed: 0,
                       }
                     }
-                    const bucket = aggregateByDb[dbType]
+                    const bucket = aggregateByDb[dbKey]
                     if (typeof stats.avg_time_ms === "number") bucket.avgTimes.push(stats.avg_time_ms)
                     if (typeof stats.p50_time_ms === "number") bucket.p50Times.push(stats.p50_time_ms)
                     if (typeof stats.p95_time_ms === "number") bucket.p95Times.push(stats.p95_time_ms)
@@ -110,13 +116,16 @@ export function DashboardsPage() {
                 const average = (values: number[]) =>
                   values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0
 
-                const formattedResults = Object.entries(aggregateByDb).map(([dbType, bucket]) => {
+                const formattedResults = Object.entries(aggregateByDb).map(([dbKey, bucket]) => {
                   const totalTransactions = bucket.successful + bucket.failed
-                  const dbmsMetricsData = response.dbms_metrics?.[dbType]
+                  const dbmsMetricsData = response.dbms_metrics?.[dbKey]
+                  const connName = response.connection_names?.[dbKey]
+                  const dbType = response.connection_db_types?.[dbKey] || dbKey
 
                   return {
-                    databaseId: dbType,
-                    databaseName: DB_NAMES[dbType] || dbType,
+                    databaseId: dbKey,
+                    databaseType: dbType,
+                    databaseName: connName || DB_NAMES[dbType] || dbType,
                     metrics: {
                       avgResponseTime: average(bucket.avgTimes),
                       p50ResponseTime: average(bucket.p50Times),
@@ -147,7 +156,7 @@ export function DashboardsPage() {
                       failedTransactions: bucket.failed,
                       rollbacks: 0,
                     },
-                    systemMetrics: response.system_metrics?.[dbType],
+                    systemMetrics: response.system_metrics?.[dbKey],
                     timeSeriesData: [],
                   }
                 })
@@ -156,11 +165,15 @@ export function DashboardsPage() {
                   ...updatedTest,
                   summary: response.summary,
                   results: formattedResults,
+                  connection_names: response.connection_names,
+                  connection_db_types: response.connection_db_types,
                 })
                 addTestToHistory({
                   ...updatedTest,
                   summary: response.summary,
                   results: formattedResults,
+                  connection_names: response.connection_names,
+                  connection_db_types: response.connection_db_types,
                 })
                 toast.success("Тестирование завершено!")
               }
@@ -189,6 +202,10 @@ export function DashboardsPage() {
       }
     }
   }, [currentTest?.id])
+
+  const getDbDisplayName = (dbId: string) => {
+    return currentTest?.connection_names?.[dbId] || connectionNames[dbId] || DB_NAMES[dbId] || dbId
+  }
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
@@ -223,6 +240,36 @@ export function DashboardsPage() {
   const getResultForDb = (dbId: string) => {
     return currentTest?.results?.find(r => r.databaseId === dbId)
   }
+
+  const getDbType = (dbKey: string): string => {
+    const result = currentTest?.results?.find((item) => item.databaseId === dbKey)
+    if (result?.databaseType) {
+      return result.databaseType
+    }
+
+    if (connectionDbTypes[dbKey]) {
+      return connectionDbTypes[dbKey]
+    }
+
+    if (currentTest?.connection_db_types?.[dbKey]) {
+      return currentTest.connection_db_types[dbKey]
+    }
+
+    return dbKey
+  }
+
+  // Функция для поиска результата по ключу из realtimeData
+  const findResultByDbKey = (dbKey: string) => {
+    return currentTest?.results?.find(r => r.databaseId === dbKey)
+  }
+
+  const chartDatabases = Object.keys(realtimeData).length > 0
+    ? Object.keys(realtimeData)
+    : (currentTest?.results?.map((result) =>
+        currentTest.connection_names?.[result.databaseId]
+          || connectionNames[result.databaseId]
+          || result.databaseId
+      ) || [])
 
   if (!currentTest && Object.keys(realtimeData).length === 0) {
     return <EmptyStateCard />
@@ -263,33 +310,41 @@ export function DashboardsPage() {
 
         <TabsContent value="database">
           <DatabaseMetricsTab
-            databases={testConfig.databases}
+            databases={chartDatabases}
             chartData={chartData}
-            getResultForDb={getResultForDb}
+            getResultForDb={findResultByDbKey}
             getLatestMetric={getLatestMetric}
+            getDbDisplayName={getDbDisplayName}
+            getDbType={getDbType}
             virtualUsers={testConfig.virtualUsers}
           />
         </TabsContent>
 
         <TabsContent value="system">
           <SystemMetricsTab
-            databases={testConfig.databases}
+            databases={chartDatabases}
             chartData={chartData}
+            getDbType={getDbType}
+            getDbDisplayName={getDbDisplayName}
           />
         </TabsContent>
 
         <TabsContent value="transactions">
           <TransactionMetricsTab
-            databases={testConfig.databases}
+            databases={chartDatabases}
             results={currentTest?.results}
+            getDbType={getDbType}
+            getDbDisplayName={getDbDisplayName}
           />
         </TabsContent>
 
         <TabsContent value="dbms">
           <DbmsMetricsTab
-            databases={testConfig.databases}
+            databases={chartDatabases}
             realtimeData={realtimeData}
-            getResultForDb={getResultForDb}
+            getResultForDb={findResultByDbKey}
+            getDbType={getDbType}
+            getDbDisplayName={getDbDisplayName}
           />
         </TabsContent>
       </Tabs>

@@ -21,6 +21,13 @@ interface AppState {
   realtimeData: Record<string, TimeSeriesPoint[]>
   addRealtimeData: (databaseId: string, point: TimeSeriesPoint) => void
   clearRealtimeData: () => void
+
+  connectionNames: Record<string, string>
+  setConnectionNames: (names: Record<string, string>) => void
+
+  connectionDbTypes: Record<string, string>
+  setConnectionDbTypes: (types: Record<string, string>) => void
+  updateConnectionDbType: (key: string, dbType: string) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -58,4 +65,13 @@ export const useAppStore = create<AppState>((set) => ({
       },
     })),
   clearRealtimeData: () => set({ realtimeData: {} }),
+
+  connectionNames: {},
+  setConnectionNames: (names) => set((state) => ({ connectionNames: { ...state.connectionNames, ...names } })),
+
+  connectionDbTypes: {},
+  setConnectionDbTypes: (types) => set((state) => ({ connectionDbTypes: { ...state.connectionDbTypes, ...types } })),
+  updateConnectionDbType: (key, dbType) => set((state) => ({
+    connectionDbTypes: { ...state.connectionDbTypes, [key]: dbType }
+  })),
 }))

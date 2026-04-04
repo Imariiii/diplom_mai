@@ -9,7 +9,9 @@ interface MetricsMessage {
   type: "metrics"
   data: {
     test_id: string
+    db_key: string
     db_type: string
+    db_name?: string
     timestamp: string
     response_time: number
     tps: number
@@ -94,7 +96,7 @@ export function useTestWebSocket({
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [remainingSeconds, setRemainingSeconds] = useState(0)
   
-  const { addRealtimeData, setCurrentTest, currentTest } = useAppStore()
+  const { addRealtimeData, setCurrentTest, currentTest, updateConnectionDbType } = useAppStore()
 
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
@@ -130,7 +132,13 @@ export function useTestWebSocket({
           }
           
           // Добавляем в store для отображения на графиках
-          addRealtimeData(metricsData.db_type, point)
+          // Используем db_name если есть, иначе db_type
+          const dbKey = metricsData.db_key || metricsData.db_name || metricsData.db_type
+          addRealtimeData(dbKey, point)
+          
+          if (metricsData.db_key && metricsData.db_type) {
+            updateConnectionDbType(metricsData.db_key, metricsData.db_type)
+          }
           
           // Вызываем внешний callback
           onMetrics?.(metricsData)

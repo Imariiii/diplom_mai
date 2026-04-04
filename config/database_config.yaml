@@ -1,22 +1,13 @@
 # Конфигурация подключений к базам данных
+#
+# ВНИМАНИЕ: Подключения к тестируемым БД (mysql, postgresql) теперь управляются
+# динамически через UI/API и хранятся в БД истории (test_history).
+# Этот файл содержит только конфигурацию служебной БД для истории тестов.
+#
+# Для миграции существующих подключений из YAML в БД выполните:
+#   python -m backend.scripts.migrate_yaml_to_db
 
 databases:
-  mysql:
-    host: localhost
-    port: 3306
-    user: sakila
-    password: "sakila"
-    database: sakila
-    driver: mysql
-    
-  postgresql:
-    host: localhost
-    port: 5432
-    user: postgres
-    password: "123456"
-    database: pagila
-    driver: postgresql
-
   # Отдельная БД для хранения истории тестов
   test_history:
     host: localhost
@@ -26,7 +17,7 @@ databases:
     database: test_history
     driver: postgresql
 
-# Настройки тестирования
+# Настройки тестирования (используются как fallback по умолчанию)
 test_settings:
   default_users: 10
   default_spawn_rate: 2
@@ -36,4 +27,3 @@ test_settings:
     - "SELECT * FROM film WHERE length > 120"
     - "SELECT COUNT(*) FROM rental"
     - "SELECT customer_id, COUNT(*) FROM rental GROUP BY customer_id"
-

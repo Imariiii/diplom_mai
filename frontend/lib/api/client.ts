@@ -2,6 +2,16 @@
  * Базовый API клиент
  */
 
+import type {
+  DatabaseConnection,
+  ConnectionCreateRequest,
+  ConnectionUpdateRequest,
+  ConnectionTestRequest,
+  ConnectionTestResponse,
+  ConnectionListResponse,
+  ConnectionGroupsResponse,
+} from '@/lib/types'
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 export interface HealthStatus {
@@ -231,6 +241,54 @@ class ApiClient {
     return this.request('/api/settings/restore', {
       method: 'PUT',
       body: JSON.stringify(settings),
+    })
+  }
+
+  // ==================== Управление подключениями ====================
+
+  async getConnections(group?: string): Promise<ConnectionListResponse> {
+    const params = group ? `?group=${encodeURIComponent(group)}` : ''
+    return this.request<ConnectionListResponse>(`/api/connections${params}`)
+  }
+
+  async getConnectionGroups(): Promise<ConnectionGroupsResponse> {
+    return this.request<ConnectionGroupsResponse>('/api/connections/groups')
+  }
+
+  async getConnection(id: string): Promise<DatabaseConnection> {
+    return this.request<DatabaseConnection>(`/api/connections/${id}`)
+  }
+
+  async createConnection(data: ConnectionCreateRequest): Promise<DatabaseConnection> {
+    return this.request<DatabaseConnection>('/api/connections', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async updateConnection(id: string, data: ConnectionUpdateRequest): Promise<DatabaseConnection> {
+    return this.request<DatabaseConnection>(`/api/connections/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async deleteConnection(id: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/api/connections/${id}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async testConnection(data: ConnectionTestRequest): Promise<ConnectionTestResponse> {
+    return this.request<ConnectionTestResponse>('/api/connections/test', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async testSavedConnection(id: string): Promise<ConnectionTestResponse> {
+    return this.request<ConnectionTestResponse>(`/api/connections/${id}/test`, {
+      method: 'POST',
     })
   }
 }
