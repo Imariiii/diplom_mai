@@ -4,8 +4,8 @@ import { create } from "zustand"
 import type { TestConfig, TestRun, TimeSeriesPoint } from "./types"
 
 interface AppState {
-  currentPage: "home" | "config" | "scenarios" | "dashboards" | "reports" | "history"
-  setCurrentPage: (page: "home" | "config" | "scenarios" | "dashboards" | "reports" | "history") => void
+  currentPage: "home" | "config" | "scenarios" | "dashboards" | "reports" | "history" | "comparison"
+  setCurrentPage: (page: "home" | "config" | "scenarios" | "dashboards" | "reports" | "history" | "comparison") => void
   sidebarOpen: boolean
   setSidebarOpen: (open: boolean) => void
 
@@ -28,6 +28,11 @@ interface AppState {
   connectionDbTypes: Record<string, string>
   setConnectionDbTypes: (types: Record<string, string>) => void
   updateConnectionDbType: (key: string, dbType: string) => void
+
+  comparisonTestIds: string[]
+  comparisonBaselineId: string | null
+  setComparisonSelection: (testIds: string[], baselineId?: string | null) => void
+  clearComparisonSelection: () => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -74,4 +79,15 @@ export const useAppStore = create<AppState>((set) => ({
   updateConnectionDbType: (key, dbType) => set((state) => ({
     connectionDbTypes: { ...state.connectionDbTypes, [key]: dbType }
   })),
+
+  comparisonTestIds: [],
+  comparisonBaselineId: null,
+  setComparisonSelection: (testIds, baselineId = null) => set({
+    comparisonTestIds: testIds,
+    comparisonBaselineId: baselineId ?? testIds[0] ?? null,
+  }),
+  clearComparisonSelection: () => set({
+    comparisonTestIds: [],
+    comparisonBaselineId: null,
+  }),
 }))

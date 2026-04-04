@@ -33,6 +33,22 @@ export type {
   HistoryComparison,
 } from './test'
 
+export {
+  analyzeComparison,
+} from './comparison'
+export type {
+  ComparisonRequest,
+  ComparisonResult,
+  ComparisonTestInfo,
+  DescriptiveStats,
+  MetricStatsBundle,
+  PairwiseComparison,
+  BarChartPoint,
+  BoxPlotPoint,
+  ThroughputSeriesPoint,
+  ComparisonChartsData,
+} from './comparison'
+
 // Экспорт функций сценариев
 export {
   getScenarios,

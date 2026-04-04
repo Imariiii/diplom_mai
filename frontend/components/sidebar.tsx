@@ -12,6 +12,7 @@ const navItems = [
   { id: "dashboards", label: "Дашборды", icon: BarChart3 },
   { id: "reports", label: "Отчёты", icon: FileText },
   { id: "history", label: "История тестов", icon: History },
+  { id: "comparison", label: "Сравнение тестов", icon: BarChart3 },
 ] as const
 
 export function Sidebar() {

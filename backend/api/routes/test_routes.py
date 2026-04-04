@@ -1,7 +1,7 @@
 """
 API роуты для выполнения тестов
 """
-from fastapi import APIRouter, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, BackgroundTasks, HTTPException, WebSocket, WebSocketDisconnect
 from typing import Dict, List
 import uuid
 import asyncio
@@ -11,6 +11,14 @@ from backend.load_tester.tester import LoadTester
 from backend.websocket_manager import manager, TestStreamingCallback
 
 router = APIRouter(prefix="/test", tags=["test"])
+
+
+def _extract_raw_samples(stats: Dict) -> List[Dict]:
+    """Извлечь raw sample-метрики из статистики теста"""
+    raw_samples = stats.get("raw_samples", []) or []
+    if "raw_samples" in stats:
+        del stats["raw_samples"]
+    return raw_samples
 
 
 def get_active_tests():
@@ -86,7 +94,11 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
     start_ts = datetime.now(timezone.utc)
     start_time = time.perf_counter()
     
-    streaming_callback = TestStreamingCallback(test_id, manager)
+    streaming_callback = TestStreamingCallback(
+        test_id,
+        manager,
+        repository=test_repository if HISTORY_ENABLED and test_repository else None,
+    )
     
     test_tester = LoadTester(connection_repo=connection_repository)
     test_tester.set_streaming_callback(streaming_callback)
@@ -211,6 +223,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                 for result in results:
                     if 'comparison' in result:
                         for db_key, stats in result.get('comparison', {}).items():
+                            raw_samples = _extract_raw_samples(stats)
                             stats['connection_key'] = db_key
                             stats['db_name'] = connection_names.get(db_key, db_key)
                             await test_repository.add_test_result(
@@ -221,9 +234,14 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                                 system_metrics=system_metrics.get(db_key),
                                 dbms_metrics=dbms_metrics.get(db_key)
                             )
+                            await test_repository.add_metric_sample_batch(
+                                test_run_id=test_id,
+                                samples=raw_samples
+                            )
                     elif 'stats' in result and 'db_key' in result:
                         db_key = result['db_key']
                         stats = result['stats']
+                        raw_samples = _extract_raw_samples(stats)
                         stats['connection_key'] = db_key
                         stats['db_name'] = connection_names.get(db_key, db_key)
                         scenario_name = result.get('scenario', 'unknown')
@@ -234,6 +252,10 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                             query_id=f"scenario:{scenario_name}",
                             system_metrics=system_metrics.get(db_key),
                             dbms_metrics=dbms_metrics.get(db_key)
+                        )
+                        await test_repository.add_metric_sample_batch(
+                            test_run_id=test_id,
+                            samples=raw_samples
                         )
             except Exception as e:
                 print(f"[HISTORY_DB] ❌ Ошибка сохранения в БД истории: {e}")

@@ -49,6 +49,7 @@ class TestRun(Base):
     # Relationships
     results = relationship("TestResult", back_populates="test_run", cascade="all, delete-orphan")
     time_series = relationship("TimeSeries", back_populates="test_run", cascade="all, delete-orphan")
+    metric_samples = relationship("MetricSample", back_populates="test_run", cascade="all, delete-orphan")
     
     # Restore-related fields
     has_write_operations = Column(String(1), nullable=False, default='f')  # 't' - есть write-операции
@@ -201,6 +202,53 @@ class TimeSeries(Base):
             'disk_iops': self.disk_iops,
             'network_in': self.network_in,
             'network_out': self.network_out,
+        }
+
+
+class MetricSample(Base):
+    """Модель для хранения raw/semiraw метрик теста"""
+    __tablename__ = 'metric_samples'
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    test_run_id = Column(UUID(as_uuid=True), ForeignKey('test_runs.id', ondelete='CASCADE'), nullable=False)
+    db_type = Column(String(50), nullable=False)
+    connection_key = Column(String(255), nullable=True)
+    query_id = Column(String(100), nullable=True)
+    sample_type = Column(String(50), nullable=False)  # request_latency | throughput_window
+    timestamp = Column(DateTime(timezone=True), nullable=False)
+    latency_ms = Column(Float, nullable=True)
+    throughput = Column(Float, nullable=True)
+    tps = Column(Float, nullable=True)
+    is_error = Column(String(1), nullable=False, default='f')
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    test_run = relationship("TestRun", back_populates="metric_samples")
+
+    __table_args__ = (
+        Index('idx_metric_samples_test_run_id', 'test_run_id'),
+        Index('idx_metric_samples_db_type', 'db_type'),
+        Index('idx_metric_samples_query_id', 'query_id'),
+        Index('idx_metric_samples_timestamp', 'timestamp'),
+        Index('idx_metric_samples_composite', 'test_run_id', 'db_type', 'timestamp'),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'id': self.id,
+            'test_run_id': str(self.test_run_id),
+            'db_type': self.db_type,
+            'connection_key': self.connection_key,
+            'query_id': self.query_id,
+            'sample_type': self.sample_type,
+            'timestamp': self.timestamp.isoformat() if self.timestamp else None,
+            'latency_ms': self.latency_ms,
+            'throughput': self.throughput,
+            'tps': self.tps,
+            'is_error': self.is_error == 't',
+            'error_message': self.error_message,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 
 

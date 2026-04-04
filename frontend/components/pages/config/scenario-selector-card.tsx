@@ -3,12 +3,12 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Layers } from "lucide-react"
-import type { TestScenario, Scenario } from "@/lib/types"
+import type { Scenario } from "@/lib/types"
 
 interface ScenarioSelectorCardProps {
   scenarios: Scenario[]
-  selectedScenarioId: TestScenario | undefined
-  onScenarioChange: (id: TestScenario) => void
+  selectedScenarioId: string | undefined
+  onScenarioChange: (id: string) => void
 }
 
 export function ScenarioSelectorCard({ scenarios, selectedScenarioId, onScenarioChange }: ScenarioSelectorCardProps) {
@@ -26,7 +26,7 @@ export function ScenarioSelectorCard({ scenarios, selectedScenarioId, onScenario
       <CardContent className="space-y-4">
         <Select
           value={selectedScenarioId}
-          onValueChange={(value: TestScenario) => onScenarioChange(value)}
+          onValueChange={(value) => onScenarioChange(value)}
         >
           <SelectTrigger>
             <SelectValue placeholder="Выберите сценарий" />

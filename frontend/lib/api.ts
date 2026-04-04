@@ -18,6 +18,7 @@ import type {
 
 // Реэкспорт из новой модульной структуры для обратной совместимости
 export { apiClient } from "./api/client"
+export type { HealthStatus, Query } from "./api/client"
 
 // Типы - реэкспорт из database
 // (функции возвращают Promise с inline типами, отдельные типы не требуются)
@@ -35,6 +36,24 @@ export type {
   HistoryComparison,
 } from "./api/test"
 
+export type {
+  ComparisonRequest,
+  ComparisonType,
+  ComparisonResult,
+  ComparisonTestInfo,
+  AnalysisReport,
+  AnalysisReportConfig,
+  AnalysisSection,
+  DescriptiveStats,
+  MetricStatsBundle,
+  NormalizedMetrics,
+  PairwiseComparison,
+  BarChartPoint,
+  BoxPlotPoint,
+  ThroughputSeriesPoint,
+  ComparisonChartsData,
+} from "./api/comparison"
+
 // Функции - реэкспорт из модулей
 export {
   runAsyncTest,
@@ -45,6 +64,10 @@ export {
   compareHistoryTests,
   deleteHistoryTest,
 } from "./api/test"
+
+export {
+  analyzeComparison,
+} from "./api/comparison"
 
 export {
   getScenarios,

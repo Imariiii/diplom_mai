@@ -111,6 +111,46 @@ class LoadTester:
         index = int(len(sorted_data) * percentile / 100)
         index = min(index, len(sorted_data) - 1)
         return sorted_data[index]
+
+    def build_metric_samples(
+        self,
+        results: List[Dict[str, Any]],
+        db_key: str,
+        query_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Преобразовать raw результаты выполнения в sample-метрики для БД истории"""
+        db_type = self.db_connection.get_dbms_type(db_key)
+        samples = []
+
+        for result in results:
+            timestamp_raw = result.get('timestamp')
+            timestamp = None
+
+            if isinstance(timestamp_raw, datetime):
+                timestamp = timestamp_raw
+            elif isinstance(timestamp_raw, str):
+                try:
+                    timestamp = datetime.fromisoformat(timestamp_raw)
+                except ValueError:
+                    timestamp = datetime.now(timezone.utc)
+
+            if timestamp is None:
+                timestamp = datetime.now(timezone.utc)
+
+            samples.append({
+                'db_type': db_type,
+                'connection_key': db_key,
+                'query_id': query_id or result.get('query_id') or result.get('scenario'),
+                'sample_type': 'request_latency',
+                'timestamp': timestamp,
+                'latency_ms': result.get('execution_time_ms'),
+                'throughput': None,
+                'tps': None,
+                'is_error': result.get('error') is not None,
+                'error_message': result.get('error'),
+            })
+
+        return samples
     
     async def execute_query(self, db_key: str, query: str, query_id: str) -> Dict:
         """Выполнение одного запроса с измерением времени"""
@@ -293,6 +333,7 @@ class LoadTester:
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
         
+        stats['raw_samples'] = self.build_metric_samples(results, db_key, query_id=query_id)
         return stats
     
     async def run_comparison_test(
@@ -835,6 +876,11 @@ class LoadTester:
             'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
+        stats['raw_samples'] = self.build_metric_samples(
+            results,
+            db_key,
+            query_id=f"scenario:{scenario.get('name', 'unknown')}"
+        )
         return stats
 
     async def run_full_scenario_test_suite(
@@ -1185,6 +1231,11 @@ class LoadTester:
             'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
+        stats['raw_samples'] = self.build_metric_samples(
+            results,
+            db_key,
+            query_id=f"scenario:{scenario.get('name', 'unknown')}"
+        )
         return stats
 
     async def run_full_scenario_test_suite(

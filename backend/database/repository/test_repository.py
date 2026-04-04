@@ -8,7 +8,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy import select, func, desc
 from sqlalchemy.orm import joinedload
 
-from backend.database.models import Base, TestRun, TestResult, TimeSeries
+from backend.database.models import Base, MetricSample, TestRun, TestResult, TimeSeries
 from backend.database.repository.base import BaseRepository, get_local_now
 
 
@@ -255,6 +255,75 @@ class TestRepository(BaseRepository):
             result = await session.execute(query)
             points = result.scalars().all()
             return [p.to_dict() for p in points]
+
+    # ==================== MetricSample CRUD ====================
+
+    async def add_metric_sample_batch(
+        self,
+        test_run_id: str,
+        samples: List[Dict[str, Any]]
+    ) -> int:
+        """Добавить несколько raw/semiraw sample-метрик"""
+        if not samples:
+            return 0
+
+        async with self.SessionLocal() as session:
+            for sample_data in samples:
+                sample = MetricSample(
+                    test_run_id=uuid.UUID(test_run_id),
+                    db_type=sample_data.get('db_type'),
+                    connection_key=sample_data.get('connection_key'),
+                    query_id=sample_data.get('query_id'),
+                    sample_type=sample_data.get('sample_type', 'request_latency'),
+                    timestamp=sample_data.get('timestamp'),
+                    latency_ms=sample_data.get('latency_ms'),
+                    throughput=sample_data.get('throughput'),
+                    tps=sample_data.get('tps'),
+                    is_error='t' if sample_data.get('is_error') else 'f',
+                    error_message=sample_data.get('error_message'),
+                )
+                session.add(sample)
+
+            await session.commit()
+            return len(samples)
+
+    async def get_metric_samples(
+        self,
+        test_run_id: str,
+        db_type: Optional[str] = None,
+        sample_type: Optional[str] = None,
+        limit: int = 10000
+    ) -> List[Dict[str, Any]]:
+        """Получить raw/semiraw sample-метрики теста"""
+        async with self.SessionLocal() as session:
+            query = select(MetricSample).where(
+                MetricSample.test_run_id == uuid.UUID(test_run_id)
+            ).order_by(MetricSample.timestamp)
+
+            if db_type:
+                query = query.where(MetricSample.db_type == db_type)
+            if sample_type:
+                query = query.where(MetricSample.sample_type == sample_type)
+
+            query = query.limit(limit)
+            result = await session.execute(query)
+            samples = result.scalars().all()
+            return [sample.to_dict() for sample in samples]
+
+    async def get_test_metrics_raw(
+        self,
+        test_run_id: str,
+        db_type: Optional[str] = None,
+        sample_type: Optional[str] = None,
+        limit: int = 10000
+    ) -> List[Dict[str, Any]]:
+        """Получить raw метрики теста для сравнительного анализа"""
+        return await self.get_metric_samples(
+            test_run_id,
+            db_type=db_type,
+            sample_type=sample_type,
+            limit=limit,
+        )
 
     # ==================== Comparison ====================
 

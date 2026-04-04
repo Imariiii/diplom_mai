@@ -195,15 +195,31 @@ class TestStreamingCallback:
     Callback для потоковой отправки метрик из LoadTester в WebSocket
     """
     
-    def __init__(self, test_id: str, connection_manager: ConnectionManager):
+    def __init__(self, test_id: str, connection_manager: ConnectionManager, repository=None):
         self.test_id = test_id
         self.manager = connection_manager
+        self.repository = repository
         self.start_time = time.perf_counter()
         self.total_queries = 1  # Общее количество запросов для теста
         self.current_query = 0  # Текущий обрабатываемый запрос
         self.metrics_buffer: List[TestMetricsUpdate] = []
+        self.metric_samples_buffer: List[Dict[str, Any]] = []
         self.buffer_size = 10
         self._lock = asyncio.Lock()
+
+    async def _flush_metric_samples(self):
+        """Сбросить буфер throughput samples в БД истории"""
+        if not self.repository or not self.metric_samples_buffer:
+            return
+
+        try:
+            await self.repository.add_metric_sample_batch(
+                test_run_id=self.test_id,
+                samples=self.metric_samples_buffer,
+            )
+            self.metric_samples_buffer = []
+        except Exception as e:
+            print(f"[WS] Ошибка сохранения throughput samples: {e}")
     
     def set_total_queries(self, total: int):
         """Установить общее количество запросов для расчёта прогресса"""
@@ -276,6 +292,42 @@ class TestStreamingCallback:
         )
         
         await self.manager.send_metrics_update(update)
+
+        if self.repository:
+            try:
+                await self.repository.add_time_series_point(
+                    test_run_id=self.test_id,
+                    db_type=db_type,
+                    timestamp=now,
+                    response_time=response_time,
+                    tps=tps,
+                    throughput=tps,
+                    active_connections=successful + failed,
+                    error_count=failed,
+                    cpu_usage=cpu_usage,
+                    memory_usage=memory_usage,
+                    memory_usage_mb=memory_usage_mb,
+                    disk_iops=disk_iops,
+                    network_in=network_in,
+                    network_out=network_out,
+                )
+
+                self.metric_samples_buffer.append({
+                    'db_type': db_type,
+                    'connection_key': db_key,
+                    'query_id': None,
+                    'sample_type': 'throughput_window',
+                    'timestamp': now,
+                    'latency_ms': response_time,
+                    'throughput': tps,
+                    'tps': tps,
+                    'is_error': failed > 0,
+                    'error_message': None,
+                })
+                if len(self.metric_samples_buffer) >= self.buffer_size:
+                    await self._flush_metric_samples()
+            except Exception as e:
+                print(f"[WS] Ошибка сохранения time_series: {e}")
     
     async def on_status_change(self, status: str, message: str = None):
         """Callback при изменении статуса теста"""
@@ -305,6 +357,7 @@ class TestStreamingCallback:
     async def on_test_complete(self, summary: Dict[str, Any] = None):
         """Вызывается при завершении теста"""
         self.current_query = self.total_queries
+        await self._flush_metric_samples()
         message = "Тестирование завершено"
         if summary:
             actual_duration = time.perf_counter() - self.start_time
@@ -313,4 +366,5 @@ class TestStreamingCallback:
     
     async def on_test_error(self, error: str):
         """Вызывается при ошибке теста"""
+        await self._flush_metric_samples()
         await self.on_status_change("failed", f"Ошибка: {error}")

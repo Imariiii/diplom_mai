@@ -42,9 +42,6 @@ export function TimeSeriesChart({
   customDbNames,
   getDbType,
 }: TimeSeriesChartProps) {
-  const ChartComponent = chartType === "area" ? AreaChart : LineChart
-  const SeriesComponent = chartType === "area" ? Area : Line
-
   const getDisplayName = (dbId: string) => {
     return customDbNames?.[dbId] || dbNames[dbId] || dbId
   }
@@ -67,45 +64,83 @@ export function TimeSeriesChart({
       <CardContent>
         <div className="h-[300px]">
           <ResponsiveContainer width="100%" height="100%">
-            <ChartComponent data={data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-              <XAxis
-                dataKey="time"
-                stroke={CHART_COLORS.axis}
-                fontSize={12}
-                tick={{ fill: CHART_COLORS.text }}
-              />
-              <YAxis
-                stroke={CHART_COLORS.axis}
-                fontSize={12}
-                domain={yDomain}
-                tick={{ fill: CHART_COLORS.text }}
-              />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "hsl(var(--card))",
-                  border: "1px solid hsl(var(--border))",
-                  borderRadius: "8px",
-                  color: CHART_COLORS.text,
-                }}
-                labelStyle={{ color: CHART_COLORS.text }}
-                itemStyle={{ color: CHART_COLORS.text }}
-              />
-              <Legend wrapperStyle={{ color: CHART_COLORS.text }} />
-              {databases.map((dbId) => (
-                <SeriesComponent
-                  key={dbId}
-                  type="monotone"
-                  dataKey={`${dbId}_${metricKey}`}
-                  name={getDisplayName(dbId)}
-                  stroke={resolveDbColor(dbId)}
-                  fill={chartType === "area" ? resolveDbColor(dbId) : undefined}
-                  fillOpacity={chartType === "area" ? 0.2 : undefined}
-                  strokeWidth={chartType === "line" ? 2 : undefined}
-                  dot={chartType === "line" ? false : undefined}
+            {chartType === "area" ? (
+              <AreaChart data={data}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis
+                  dataKey="time"
+                  stroke={CHART_COLORS.axis}
+                  fontSize={12}
+                  tick={{ fill: CHART_COLORS.text }}
                 />
-              ))}
-            </ChartComponent>
+                <YAxis
+                  stroke={CHART_COLORS.axis}
+                  fontSize={12}
+                  domain={yDomain}
+                  tick={{ fill: CHART_COLORS.text }}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "hsl(var(--card))",
+                    border: "1px solid hsl(var(--border))",
+                    borderRadius: "8px",
+                    color: CHART_COLORS.text,
+                  }}
+                  labelStyle={{ color: CHART_COLORS.text }}
+                  itemStyle={{ color: CHART_COLORS.text }}
+                />
+                <Legend wrapperStyle={{ color: CHART_COLORS.text }} />
+                {databases.map((dbId) => (
+                  <Area
+                    key={dbId}
+                    type="monotone"
+                    dataKey={`${dbId}_${metricKey}`}
+                    name={getDisplayName(dbId)}
+                    stroke={resolveDbColor(dbId)}
+                    fill={resolveDbColor(dbId)}
+                    fillOpacity={0.2}
+                  />
+                ))}
+              </AreaChart>
+            ) : (
+              <LineChart data={data}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis
+                  dataKey="time"
+                  stroke={CHART_COLORS.axis}
+                  fontSize={12}
+                  tick={{ fill: CHART_COLORS.text }}
+                />
+                <YAxis
+                  stroke={CHART_COLORS.axis}
+                  fontSize={12}
+                  domain={yDomain}
+                  tick={{ fill: CHART_COLORS.text }}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "hsl(var(--card))",
+                    border: "1px solid hsl(var(--border))",
+                    borderRadius: "8px",
+                    color: CHART_COLORS.text,
+                  }}
+                  labelStyle={{ color: CHART_COLORS.text }}
+                  itemStyle={{ color: CHART_COLORS.text }}
+                />
+                <Legend wrapperStyle={{ color: CHART_COLORS.text }} />
+                {databases.map((dbId) => (
+                  <Line
+                    key={dbId}
+                    type="monotone"
+                    dataKey={`${dbId}_${metricKey}`}
+                    name={getDisplayName(dbId)}
+                    stroke={resolveDbColor(dbId)}
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                ))}
+              </LineChart>
+            )}
           </ResponsiveContainer>
         </div>
       </CardContent>

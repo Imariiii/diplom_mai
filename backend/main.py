@@ -23,7 +23,7 @@ from backend.websocket_manager import manager, TestStreamingCallback
 from backend.database.state_manager import DatabaseStateManager
 
 # Импорт роутов из api модуля
-from backend.api.routes import test_routes, scenario_routes, database_state_routes, history_routes, settings_routes, connection_routes
+from backend.api.routes import test_routes, scenario_routes, database_state_routes, history_routes, settings_routes, connection_routes, comparison_routes
 
 # Используем централизованную инициализацию
 from backend import initialize
@@ -149,6 +149,9 @@ app.include_router(settings_routes.router)
 
 # Роуты управления подключениями
 app.include_router(connection_routes.router)
+
+# Роуты сравнительного анализа
+app.include_router(comparison_routes.router)
 
 
 if __name__ == "__main__":

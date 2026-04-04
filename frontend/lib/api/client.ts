@@ -115,6 +115,13 @@ class ApiClient {
     return this.request(`/history/tests/${testId}`, { method: 'DELETE' })
   }
 
+  async analyzeComparison(request: { test_ids: string[]; baseline_id?: string }): Promise<any> {
+    return this.request('/api/comparison/analyze', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    })
+  }
+
   // ==================== Сценарии тестирования ====================
 
   async getScenarios(): Promise<{ scenarios: any[] }> {

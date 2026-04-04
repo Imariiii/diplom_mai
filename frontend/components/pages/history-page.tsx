@@ -1,13 +1,16 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { History, RefreshCw, Trash2, Eye, ChevronLeft, ChevronRight, Clock, CheckCircle, XCircle, Loader2, AlertCircle, Database, Calendar, BarChart2 } from "lucide-react"
+import { History, RefreshCw, Trash2, Eye, ChevronLeft, ChevronRight, Clock, CheckCircle, XCircle, Loader2, AlertCircle, GitCompare } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { apiClient, type HistoryTestRun, type HistoryTestResult } from "@/lib/api"
+import { useAppStore } from "@/lib/store"
 import { DB_NAMES, getDbColor, CHART_COLORS, METRIC_COLORS } from "@/lib/chart-colors"
 import {
   BarChart,
@@ -31,6 +34,7 @@ const STATUS_CONFIG = {
 }
 
 export function HistoryPage() {
+  const { setCurrentPage, setComparisonSelection } = useAppStore()
   const [tests, setTests] = useState<HistoryTestRun[]>([])
   const [selectedTest, setSelectedTest] = useState<(HistoryTestRun & { results: HistoryTestResult[] }) | null>(null)
   const [loading, setLoading] = useState(true)
@@ -38,6 +42,7 @@ export function HistoryPage() {
   const [historyEnabled, setHistoryEnabled] = useState(true)
   const [page, setPage] = useState(0)
   const [total, setTotal] = useState(0)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const pageSize = 20
 
   const fetchTests = async () => {
@@ -75,6 +80,7 @@ export function HistoryPage() {
     try {
       await apiClient.deleteHistoryTest(testId)
       setTests(tests.filter(t => t.id !== testId))
+      setSelectedIds((current) => current.filter((id) => id !== testId))
       if (selectedTest?.id === testId) {
         setSelectedTest(null)
       }
@@ -99,6 +105,33 @@ export function HistoryPage() {
   }
 
   const totalPages = Math.ceil(total / pageSize)
+  const comparableTests = tests.filter((test) => test.status === "completed")
+  const selectionWarning = selectedIds.length > 5
+    ? "Можно выбрать не более 5 тестов"
+    : selectedIds.length > 0 && selectedIds.length < 2
+      ? "Для сравнения выберите минимум 2 завершённых теста"
+      : null
+
+  const toggleSelection = (testId: string, checked: boolean) => {
+    setSelectedIds((current) => {
+      if (checked) {
+        if (current.length >= 5) {
+          return current
+        }
+        return current.includes(testId) ? current : [...current, testId]
+      }
+      return current.filter((id) => id !== testId)
+    })
+  }
+
+  const goToComparison = () => {
+    if (selectedIds.length < 2 || selectedIds.length > 5) {
+      return
+    }
+
+    setComparisonSelection(selectedIds, selectedIds[0])
+    setCurrentPage("comparison")
+  }
 
   if (loading) {
     return (
@@ -385,11 +418,48 @@ export function HistoryPage() {
           <h1 className="text-2xl font-bold">История тестов</h1>
           <p className="text-muted-foreground">Просмотр результатов всех запущенных тестов</p>
         </div>
-        <Button onClick={fetchTests} variant="outline">
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Обновить
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            onClick={goToComparison}
+            disabled={selectedIds.length < 2 || selectedIds.length > 5}
+          >
+            <GitCompare className="h-4 w-4 mr-2" />
+            Сравнить выбранные
+          </Button>
+          <Button onClick={fetchTests} variant="outline">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Обновить
+          </Button>
+        </div>
       </div>
+
+      <Card className="bg-card border-border">
+        <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="font-medium">Выбрано для сравнения: {selectedIds.length}</p>
+            <p className="text-sm text-muted-foreground">
+              Доступно завершённых тестов: {comparableTests.length}. Можно выбрать от 2 до 5.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setSelectedIds([])}
+              disabled={selectedIds.length === 0}
+            >
+              Сбросить выбор
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {selectionWarning && (
+        <Alert className="border-amber-500/30 bg-amber-500/5">
+          <AlertCircle className="h-4 w-4 text-amber-500" />
+          <AlertTitle>Выбор тестов</AlertTitle>
+          <AlertDescription>{selectionWarning}</AlertDescription>
+        </Alert>
+      )}
 
       <Card className="bg-card border-border">
         <CardContent className="p-0">
@@ -403,6 +473,7 @@ export function HistoryPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-12">Выбор</TableHead>
                   <TableHead>Название</TableHead>
                   <TableHead>Статус</TableHead>
                   <TableHead>Начало</TableHead>
@@ -415,8 +486,19 @@ export function HistoryPage() {
               <TableBody>
                 {tests.map((test) => {
                   const StatusIcon = STATUS_CONFIG[test.status].icon
+                  const isCompleted = test.status === "completed"
+                  const isChecked = selectedIds.includes(test.id)
+                  const selectionDisabled = !isCompleted || (!isChecked && selectedIds.length >= 5)
                   return (
                     <TableRow key={test.id}>
+                      <TableCell>
+                        <Checkbox
+                          checked={isChecked}
+                          disabled={selectionDisabled}
+                          onCheckedChange={(checked) => toggleSelection(test.id, checked === true)}
+                          aria-label={`Выбрать тест ${test.name}`}
+                        />
+                      </TableCell>
                       <TableCell className="font-medium">{test.name}</TableCell>
                       <TableCell>
                         <Badge className={STATUS_CONFIG[test.status].color}>
