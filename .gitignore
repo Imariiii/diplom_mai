@@ -29,5 +29,3 @@ results/
 *.db
 *.sqlite
 description/
-pagila/
-sakila/

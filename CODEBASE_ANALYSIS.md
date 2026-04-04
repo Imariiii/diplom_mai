@@ -61,7 +61,7 @@ cd frontend && pnpm install && pnpm dev  # http://localhost:3000
 
 ## 2. АРХИТЕКТУРА И КЛЮЧЕВЫЕ РЕШЕНИЯ
 
-### 2.1 Backend Architecture
+### 2.1 Backend Architecture (REFACTORED April 4, 2026 ✅)
 
 **Фреймворк:** FastAPI 0.104.1 + Uvicorn  
 **Async/await:** ✅ Полная поддержка асинхронности  
@@ -105,15 +105,35 @@ cd frontend && pnpm install && pnpm dev  # http://localhost:3000
 | `SqlBackupStrategy` | [backup_strategies/sql_strategy.py](backend/database/backup_strategies/sql_strategy.py) | Selective SQL backup |
 | `NativeDumpStrategy` | [backup_strategies/native_strategy.py](backend/database/backup_strategies/native_strategy.py) | pg_dump/mysqldump |
 
-### 2.2 Frontend Architecture
+### 2.2 Frontend Architecture (REFACTORED April 4, 2026 ✅)
 
 **Фреймворк:** Next.js 16.0.10 + React 19.2.0  
 **Язык:** TypeScript 5.0  
 **UI-компоненты:** Radix UI (40+ компонентов)  
-**Стилизация:** Tailwind CSS 4.1.9  
 **Графики:** Recharts 2.15.4  
-**State management:** Zustand 5.0.9  
-**Формы:** React Hook Form 7.60.0 + Zod 3.25.76
+**State management:** Zustand 5.0.9
+
+**Pages Refactoring Status:**
+
+| Страница | Было → Стало | Статус |
+|----------|-------------|--------|
+| config-page | 641 → 289L + 7 sub | ✅ Refactored |
+| dashboards-page | 1,071 → 298L + 8 sub | ✅ Refactored |
+| scenarios-page | 923 → 456L + 5 sub | ✅ Refactored |
+| history-page | 492 lines | ✅ |
+| reports-page | 361 lines | ✅ |
+| home-page | 169 lines | ✅ |
+
+**API Client (6 modules ✅):**
+
+| Модуль | Строк | Назначение |
+|--------|-------|----------|
+| client.ts | ~237 | API client setup |
+| test.ts | ~169 | Test endpoints |
+| scenario.ts | ~94 | Scenario CRUD |
+| database.ts | ~51 | DB state |
+| settings.ts | ~31 | Settings |
+| index.ts | ~67 | Re-exports |
 
 ```
 ┌──────────────────────────────────────────────────┐
@@ -142,13 +162,13 @@ cd frontend && pnpm install && pnpm dev  # http://localhost:3000
                                     panel      │
 ```
 
-**Key Pages:**
-- **home-page**: Главная (статус подключений)
-- **config-page**: Конфигурация тестов (выбор БД, запросов, параметров)
-- **scenarios-page**: Управление сценариями
-- **dashboards-page**: Real-time графики (RPS, latency, CPU)
-- **reports-page**: Сохраненные отчеты результатов
-- **history-page**: История тестирований
+**Pages Details:**
+- **home-page** (169 lines): Главная (статус подключений)
+- **config-page** (289 lines + 7 компонентов): Конфигурация тестов
+- **scenarios-page** (456 lines + 5 компонентов): Управление сценариями
+- **dashboards-page** (298 lines + 8 компонентов): Real-time графики
+- **reports-page** (361 lines): Сохраненные отчеты результатов
+- **history-page** (492 lines): История тестирований
 - **database-state-panel**: Статус состояния БД
 
 ### 2.3 Двойная поддержка СУБД
@@ -210,12 +230,14 @@ mysqldump --tables film customer > dump.sql  # MySQL
 
 ## 3. ПРОЕКТНЫЕ КОНВЕНЦИИ И СТАНДАРТЫ
 
-### 3.1 Python Код
+## 3. ПРОЕКТНЫЕ КОНВЕНЦИИ И СТАНДАРТЫ
+
+### 3.1 Python Код (REFACTORED April 4, 2026 ✅)
 
 **Стиль:** PEP 8 + Google docstring format
 
 ```python
-# Соглас с projeto: асинхронность везде где возможно
+# Асинхронность везде где возможно
 async def run_test(self, ...):
     """Docstring с описанием функции"""
     pass
@@ -225,7 +247,7 @@ def get_engine(self, db_type: str) -> Engine:
     pass
 ```
 
-**Структура модулей:**
+**Структура модулей (Refactored April 4, 2026 ✅):**
 ```
 backend/
 ├── main.py                          # FastAPI app + endpoints
@@ -256,58 +278,65 @@ backend/
     └── test_backup_restore.py      # Тестирование restore
 ```
 
-### 3.2 TypeScript/React Код
+### 3.2 TypeScript/React Код (REFACTORED April 4, 2026 ✅)
 
 **Стиль:** Functional components + Hooks
 
 ```typescript
-// Файл: frontend/components/home-page.tsx
-export default function HomePage() {
-  const [status, setStatus] = useState(...);
-  const [data, setData] = useStore(...);
+// Функциональный компонент с hooks
+export function HomePage() {
+  const [status, setStatus] = useState<ConnectionStatus>();
+  const { currentTest } = useAppStore();
   
   return (
-    <div>
+    <div className="p-6">
       {/* Radix UI компоненты */}
     </div>
   );
 }
 ```
 
-**Структура compонентов:**
+**Структура компонентов (Refactored April 4, 2026 ✅):**
 ```
 frontend/
-├── app/                         # Next.js app directory (App Router)
-│   ├── page.tsx                # Root page (/home-page)
-│   ├── layout.tsx              # Root layout
+├── app/                         # Next.js app directory
+│   ├── page.tsx                # Root page (redirects)
+│   ├── layout.tsx              # Root layout + theme
 │   └── globals.css
 ├── components/
 │   ├── pages/
-│   │   ├── home-page.tsx       # Главная
-│   │   ├── config-page.tsx     # Конфигурация тестов
-│   │   ├── scenarios-page.tsx  # Управление сценариями
-│   │   ├── dashboards-page.tsx # Real-time метрики
-│   │   ├── reports-page.tsx    # Отчеты
-│   │   └── history-page.tsx    # История
-│   ├── ui/                     # Radix UI + Tailwind компоненты
-│   │   ├── button.tsx
-│   │   ├── card.tsx
-│   │   ├── dialog.tsx
-│   │   └── ... (40+ компонентов)
+│   │   ├── home-page.tsx (169 lines) ✅
+│   │   ├── config-page.tsx (289 lines) ✅
+│   │   │   └── config/ [7 sub-components]
+│   │   ├── scenarios-page.tsx (456 lines) ✅
+│   │   │   └── scenarios/ [5 sub-components]
+│   │   ├── dashboards-page.tsx (298 lines) ✅
+│   │   │   └── dashboards/ [8 sub-components]
+│   │   ├── reports-page.tsx (361 lines) ✅
+│   │   └── history-page.tsx (492 lines) ✅
+│   ├── ui/                     # Radix UI + Tailwind (40+ компонентов)
+│   │   ├── button.tsx, card.tsx, dialog.tsx, etc.
 │   ├── header.tsx              # Top navigation
 │   ├── sidebar.tsx             # Left sidebar menu
 │   ├── database-state-panel.tsx
 │   └── theme-provider.tsx      # Dark/Light mode
 ├── hooks/
-│   ├── use-test-websocket.ts   # WebSocket для metrics
+│   ├── use-test-websocket.ts   # WebSocket для real-time metrics
 │   ├── use-mobile.ts           # Responsive detection
 │   └── use-toast.ts            # Toast notifications
 ├── lib/
-│   ├── api.ts                  # Fetch wrappers для backend
-│   ├── types.ts                # TypeScript interfaces
+│   ├── api/                    # ✅ REFACTORED: 6 modules
+│   │   ├── client.ts (~237 lines)
+│   │   ├── test.ts (~169 lines)
+│   │   ├── scenario.ts (~94 lines)
+│   │   ├── database.ts (~51 lines)
+│   │   ├── settings.ts (~31 lines)
+│   │   └── index.ts (~67 lines)
+│   ├── types.ts                # TypeScript types
 │   ├── store.ts                # Zustand store
-│   ├── chart-colors.ts         # Цветовая схема
-│   └── utils.ts                # Утилиты
+│   ├── chart-colors.ts         # Color palette
+│   └── utils.ts                # Utilities
+├── public/
 └── styles/
     └── globals.css             # Tailwind directives
 ```
