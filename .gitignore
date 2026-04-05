@@ -29,7 +29,7 @@ results/
 *.db
 *.sqlite
 description/
-
+report/
 
 # Сгенерированные LaTeX-файлы
 *.aux
@@ -40,6 +40,10 @@ description/
 *.fls
 *.glo
 *.glo-abr
+*.glg
+*.glg-abr
+*.gls
+*.gls-abr
 *.idx
 *.ilg
 *.ind
