@@ -1,0 +1,54 @@
+\documentclass[bachelor, fontsize=14]{diploma}
+
+\student{Иванов Иван Иванович}
+\group{М8О-407Б-19}
+\theme{Разработка системы для сравнительного нагрузочного тестирования и визуального анализа производительности реляционных баз данных}
+
+\supervisor{Орлов Марсель Максимович}
+\firstConsultant{Алешина Анна Константиновна}
+\reviewer{Свиридов Михаил Артемьевич}
+
+\faculty{№ 8 <<Компьютерные науки и прикладная математика>>}
+\department{806}
+\speciality{01.03.02 <<Прикладная математика и информатика>>}
+\profile{Информатика}
+
+\departmentFullName{№ 806}
+\headOfDepartment{Крылов Сергей Сергеевич}
+
+% Дата. Оставляем пустое место для дня
+\date{\uline{\hspace{24pt}} мая \the\year\ года}
+
+\input{contents/glossary}
+\input{contents/terms}
+
+\addbibresource{main.bib}
+
+\begin{document}
+    \maketitle
+
+    % \includepdf[pages=-]{extra/task} % Задание
+    \setcounter{page}{2} % Устанавливает счётчик страниц
+
+    \include{contents/0-abstract} % Реферат
+
+    \tableofcontents % Содержание 
+    \termsanddefenitions % Термины и определения
+    \listofabbreviations % Перечень сокращений и обозначений
+ 
+    \include{contents/1-introduction} % Введение
+
+    \include{contents/2-01-chapter1} % Глава 1. Аналитическая часть
+    \include{contents/2-02-chapter2} % Глава 2. Проектирование системы
+    \include{contents/2-03-chapter3} % Глава 3. Программная реализация
+    \include{contents/2-04-chapter4} % Глава 4. Тестирование и анализ результатов
+    
+    \include{contents/3-conclusion} % Заключение
+
+    \printbibliography % Список литературы
+
+    \appendix % Приложения
+    \include{contents/4-appendix-a}
+    \include{contents/4-appendix-c}
+    \include{contents/4-appendix-d}
+\end{document}

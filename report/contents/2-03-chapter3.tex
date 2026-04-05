@@ -1,0 +1,677 @@
+\section{ПРОГРАММНАЯ РЕАЛИЗАЦИЯ}
+
+В данной главе описывается процесс программной реализации разрабатываемой системы сравнительного нагрузочного тестирования СУБД. Обосновывается выбор технологического стека, рассматривается реализация серверной и клиентской частей, а также вопросы контейнеризации и развёртывания.
+
+\subsection{Выбор и обоснование технологического стека}
+
+Выбор технологического стека определялся требованиями к производительности, поддерживаемости и удобству разработки. Для серверной части был выбран язык Python версии 3.9 и выше в сочетании с фреймворком FastAPI. Python обеспечивает высокую скорость разработки благодаря развитой экосистеме библиотек для работы с базами данных, статистического анализа и визуализации. FastAPI предоставляет современный асинхронный веб-фреймворк с автоматической генерацией документации API через OpenAPI, встроенной валидацией данных через Pydantic и высокой производительностью, сопоставимой с фреймворками на Node.js.
+
+Для асинхронного выполнения запросов к СУБД выбраны драйверы asyncpg для PostgreSQL и aiomysql для MySQL. Оба драйвера обеспечивают неблокирующий ввод-вывод, что позволяет эффективно обрабатывать множество параллельных соединений в рамках одного потока операционной системы. В качестве ORM-слоя используется SQLAlchemy версии 2.0 с поддержкой асинхронных сессий, что обеспечивает типобезопасную работу с базой данных истории и абстрагирует SQL-запросы от бизнес-логики.
+
+Для клиентской части выбран фреймворк Next.js версии 16 на базе React 19 с использованием TypeScript. Next.js обеспечивает серверный рендеринг, оптимизацию маршрутизации и встроенную поддержку API-прокси. TypeScript гарантирует типобезопасность на всех уровнях клиентского приложения, снижая количество ошибок времени выполнения. Для управления состоянием приложения выбрана библиотека Zustand, отличающаяся минимальным объёмом кода и отсутствием необходимости в оборачивании приложения в провайдеры. Для визуализации данных используется библиотека Recharts, предоставляющая декларативный API для построения графиков на базе SVG. Стилизация реализована через Tailwind CSS версии 4 с использованием компонентной библиотеки Radix UI.
+
+Для развёртывания базы данных истории используется Docker с образом PostgreSQL 15 Alpine, что обеспечивает воспроизводимость окружения и упрощает развёртывание на различных платформах. Тестовые СУБД (MySQL и PostgreSQL) также развёртываются в Docker-контейнерах с использованием образов с предустановленными схемами Sakila и Pagila.
+
+\subsection{Реализация серверной части}
+
+Серверная часть системы реализована в виде модульного приложения FastAPI. Точка входа находится в файле \texttt{main.py}, где инициализируется экземпляр приложения, настраивается CORS-мидлвэр для разрешения кросс-доменных запросов от фронтенда, регистрируются маршруты и создаётся WebSocket-эндпоинт.
+
+Инициализация компонентов системы выполняется через модуль \texttt{initialize.py}, который создаёт экземпляры репозиториев (\texttt{TestRepository}, \texttt{ScenarioRepository}, \texttt{ConnectionRepository}) и передаёт их зависимым компонентам. Такой подход реализует паттерн внедрения зависимостей (dependency injection) и обеспечивает централизованное управление жизненным циклом компонентов.
+
+\subsubsection*{Модуль генерации нагрузки}
+
+Модуль генерации нагрузки реализован в классе \texttt{LoadTester} файла \texttt{load\_tester/tester.py} объёмом более 1400 строк. Класс содержит методы для выполнения отдельных запросов, запуска одиночного теста, сравнительного теста для нескольких СУБД и полного набора тестов по всем запросам с прогревом. Каждый метод следует единой структуре: подготовка базы данных, выполнение нагрузки, сбор метрик, восстановление состояния, верификация. Блок \texttt{try/finally} гарантирует выполнение восстановления даже при возникновении ошибок в ходе тестирования.
+
+Базовый метод \texttt{execute\_query} выполняет отдельный SQL-запрос к указанной базе данных, замеряя время отклика через \texttt{time.perf\_counter()}. Ниже приведён фрагмент реализации:
+
+\begin{figure}
+    \begin{minipage}{\linewidth}
+\begin{lstlisting}[language=Python]
+async def execute_query(self, db_key, query, query_id):
+    """Выполнение одного запроса с измерением времени"""
+    start_time = time.perf_counter()
+    error = None
+    rows_count = 0
+    db_type = self.db_connection.get_dbms_type(db_key)
+    
+    try:
+        engine = await self.db_connection.get_engine_async(db_key)
+        async with engine.connect() as conn:
+            result = await conn.execute(text(query))
+            rows_count = len(result.fetchall()) if result.returns_rows else 0
+            await conn.commit()
+    except Exception as e:
+        error = str(e)
+    
+    end_time = time.perf_counter()
+    execution_time = (end_time - start_time) * 1000
+    
+    return {
+        'query_id': query_id,
+        'execution_time_ms': execution_time,
+        'rows_count': rows_count,
+        'error': error,
+        'timestamp': datetime.now(timezone.utc).isoformat()
+    }
+\end{lstlisting}
+    \end{minipage}
+    \caption{Реализация метода executeQuery класса LoadTester}
+    \label{lst:execute_query}
+\end{figure}
+
+Ключевые особенности реализации: использование \texttt{time.perf\_counter()} обеспечивает высокую точность замеров (до микросекунд); асинхронное подключение через SQLAlchemy engine позволяет выполнять запросы без блокировки потока; результат включает не только время выполнения, но и количество обработанных строк и текст ошибки при её возникновении.
+
+Метод \texttt{run\_full\_test\_suite} реализует запуск полного набора тестов по всем запросам для указанных СУБД. Ниже приведён фрагмент, демонстрирующий организацию цикла тестирования:
+
+\begin{figure}
+    \begin{minipage}{\linewidth}
+\begin{lstlisting}[language=Python]
+async def run_full_test_suite(
+    self,
+    db_types: List[str] = None,
+    iterations: int = 10,
+    duration: int = 60,
+    virtual_users: int = 10,
+    scenario: str = "mixed_light",
+    warmup_time: int = 5
+) -> List[Dict]:
+    """Запуск полного набора тестов"""
+    if db_types is None:
+        db_types = ['mysql', 'postgresql']
+    
+    queries = self.query_manager.get_all_queries()
+    all_results = []
+    total_queries = len(queries)
+    
+    if self._metrics_callback:
+        self._metrics_callback.set_total_queries(total_queries)
+        await self._metrics_callback.on_test_start()
+    
+    # Прогрев (если указан)
+    if warmup_time > 0:
+        print(f"Прогрев системы ({warmup_time} сек)...")
+        await self._emit_status("running",
+            f"Прогрев системы ({warmup_time} сек)...")
+        warmup_query = queries[0] if queries else None
+        if warmup_query:
+            for db_type in db_types:
+                for _ in range(min(5, iterations)):
+                    await self.execute_query(
+                        db_type, warmup_query['sql'],
+                        warmup_query['id'])
+                    await asyncio.sleep(0.1)
+        await asyncio.sleep(warmup_time)
+    
+    for idx, query in enumerate(queries):
+        comparison = await self.run_comparison_test(
+            query['id'], db_types, iterations,
+            virtual_users=virtual_users, scenario=scenario)
+        all_results.append(comparison)
+    
+    return all_results
+\end{lstlisting}
+    \end{minipage}
+    \caption{Метод runFullTestSuite класса LoadTester}
+    \label{lst:run_full_test_suite}
+\end{figure}
+
+Метод реализует фазу прогрева, в которой каждый запрос выполняется минимальное количество раз для заполнения кэшей СУБД, после чего следует основной цикл тестирования. Для каждого запроса вызывается метод \texttt{run\_comparison\_test}, который последовательно тестирует все указанные СУБД. Прогресс выполнения передаётся через callback-механизм для отображения в пользовательском интерфейсе.
+
+Метод \texttt{run\_single\_test} реализует цикл выполнения итераций с потоковой отправкой метрик. На каждой итерации выполняется запрос, результаты накапливаются в буфере, и при достижении интервала в одну секунду (\texttt{\_streaming\_interval = 1.0}) вычисляются агрегированные метрики (среднее время отклика, TPS, количество успешных и ошибочных запросов) и передаются через callback-механизм для трансляции в WebSocket и сохранения в базу данных истории.
+
+Для сбора системных метрик используется метод \texttt{get\_system\_metrics}, который через библиотеку \texttt{psutil} получает загрузку центрального процессора, использование оперативной памяти (в мегабайтах и процентах), интенсивность дискового ввода-вывода (IOPS) и сетевой трафик. Метод \texttt{get\_dbms\_metrics} получает внутренние метрики СУБД через системные представления: \texttt{pg\_stat\_database} для PostgreSQL и \texttt{INFORMATION\_SCHEMA} для MySQL, включая коэффициент попаданий в кэш, количество ожиданий блокировок и взаимных блокировок.
+
+\subsubsection*{Callback-механизм потоковой передачи данных}
+
+Для передачи метрик из модуля генерации нагрузки в WebSocket и базу данных истории реализован паттерн Observer. Класс \texttt{TestStreamingCallback} файла \texttt{websocket\_manager.py} выступает в роли наблюдателя: он получает метрики от \texttt{LoadTester} и транслирует их подписчикам. Ниже приведён фрагмент метода \texttt{on\_metrics}:
+
+\begin{figure}
+    \begin{minipage}{\linewidth}
+\begin{lstlisting}[language=Python]
+async def on_metrics(
+    self,
+    db_key: str,
+    db_type: str,
+    response_time: float,
+    tps: float,
+    successful: int,
+    failed: int,
+    cpu_usage: float = 0,
+    memory_usage: float = 0,
+    cache_hit_ratio: float = 0,
+    ...
+):
+    """Callback вызываемый при получении новых метрик"""
+    now = datetime.now(timezone.utc)
+    elapsed = time.perf_counter() - self.start_time
+    progress = self._calculate_progress()
+    
+    update = TestMetricsUpdate(
+        test_id=self.test_id,
+        db_key=db_key,
+        db_type=db_type,
+        timestamp=now.isoformat(),
+        response_time=response_time,
+        tps=tps,
+        cpu_usage=cpu_usage,
+        memory_usage_mb=memory_usage_mb,
+        cache_hit_ratio=cache_hit_ratio,
+        progress=progress,
+        elapsed_seconds=int(elapsed),
+    )
+    
+    await self.manager.send_metrics_update(update)
+    
+    if self.repository:
+        await self.repository.add_time_series_point(
+            test_run_id=self.test_id,
+            db_type=db_type,
+            timestamp=now,
+            response_time=response_time,
+            tps=tps, ...)
+\end{lstlisting}
+    \end{minipage}
+    \caption{Метод onMetrics класса TestStreamingCallback}
+    \label{lst:on_metrics}
+\end{figure}
+
+Метод формирует объект \texttt{TestMetricsUpdate}, содержащий все метрики производительности, системные показатели и прогресс выполнения. Данные передаются через \texttt{ConnectionManager} для рассылки всем WebSocket-подписчикам теста и одновременно сохраняются в базе данных истории как точка временного ряда. Для оптимизации записи сырых выборок метрик (\texttt{MetricSample}) используется буферизация: накопление происходит до достижения размера буфера в 10 записей, после чего выполняется пакетная вставка.
+
+\subsubsection*{Управление WebSocket-соединениями}
+
+Управление WebSocket-соединениями реализовано в классе \texttt{ConnectionManager} файла \texttt{websocket\_manager.py}. Класс хранит активные соединения в словаре \texttt{active\_connections}, ключом которого является идентификатор теста, а значением — список WebSocket-объектов. Метод \texttt{connect} принимает новое соединение и добавляет его в список, метод \texttt{disconnect} удаляет соединение и очищает пустые списки. Метод \texttt{broadcast\_to\_test} рассылает JSON-сообщение всем подписчикам конкретного теста.
+
+Класс \texttt{TestStreamingCallback} связывает \texttt{LoadTester} с \texttt{ConnectionManager}: при получении метрик от \texttt{LoadTester} callback отправляет их через WebSocket и сохраняет в базе данных истории. Для оптимизации производительности записи метрик \texttt{MetricSample} буферизуются: накопление происходит до достижения размера буфера в 10 записей, после чего выполняется пакетная вставка. Это снижает нагрузку на базу данных истории при высокой интенсивности тестирования.
+
+\subsubsection*{Управление состоянием базы данных}
+
+Оркестратор управления состоянием баз данных реализован в классе \texttt{DatabaseStateManager} файла \texttt{database/state\_manager.py} объёмом более 400 строк. Класс управляет жизненным циклом: анализ запросов, создание резервной копии, выполнение теста, восстановление данных, верификация целостности.
+
+Метод \texttt{prepare\_for\_test} выполняет подготовку базы данных к тестированию. Ниже приведён фрагмент реализации:
+
+\begin{figure}
+    \begin{minipage}{\linewidth}
+\begin{lstlisting}[language=Python]
+async def prepare_for_test(self, engine, dbms_type,
+                           queries) -> PrepareResult:
+    """Подготовка к тесту: анализ, оценка, создание backup"""
+    # Проверяем, нужен ли backup
+    if not self.needs_restore(queries):
+        return PrepareResult(
+            needs_backup=False,
+            affected_tables=set(),
+            size_estimate=None
+        )
+    
+    # Получаем затронутые таблицы
+    affected_tables = self.get_affected_tables(queries)
+    
+    # Получаем ВСЕ таблицы базы для полного backup
+    all_tables = await self._get_all_tables(engine, dbms_type)
+    
+    # Оцениваем размер для всех таблиц
+    size_estimate = await self._strategy.estimate_size(
+        engine, all_tables)
+    
+    # Создаём backup для ВСЕХ таблиц
+    backup_info = await self._strategy.create_backup(
+        engine, all_tables)
+    
+    # Сохраняем фингерпринт до теста
+    pre_fingerprint = await self._verifier.capture_fingerprint(
+        engine, all_tables)
+    
+    return PrepareResult(
+        needs_backup=True,
+        affected_tables=affected_tables,
+        size_estimate=size_estimate,
+        backup_info=backup_info,
+        pre_test_fingerprint=pre_fingerprint,
+    )
+\end{lstlisting}
+    \end{minipage}
+    \caption{Метод prepareForTest класса DatabaseStateManager}
+    \label{lst:prepare_for_test}
+\end{figure}
+
+Метод анализирует SQL-запросы через \texttt{QueryAnalyzer} на наличие write-операций (INSERT, UPDATE, DELETE). Если write-операции обнаружены, создаётся резервная копия всех таблиц базы данных через стратегию \texttt{SqlBackupStrategy}. Перед выполнением теста фиксируется «отпечаток» состояния базы данных (количество строк в каждой таблице) для последующей верификации.
+
+Метод \texttt{restore\_after\_test} выполняет восстановление базы данных после тестирования:
+
+\begin{figure}
+    \begin{minipage}{\linewidth}
+\begin{lstlisting}[language=Python]
+async def restore_after_test(self, engine, dbms_type,
+                             prepare_result) -> RestoreResult:
+    """Восстановление данных после теста"""
+    if not prepare_result.needs_backup:
+        return RestoreResult(
+            success=True, duration_ms=0, verified=True)
+    
+    start_time = time.time()
+    errors: List[str] = []
+    
+    async with self._get_lock(dbms_type):
+        try:
+            # Выполняем restore
+            await self._strategy.restore_backup(
+                engine, prepare_result.backup_info)
+            
+            # Верификация
+            if self.config.get("verify_after_restore", True):
+                post_fingerprint = await self._verifier.capture_fingerprint(
+                    engine, prepare_result.affected_tables)
+                verify_result = await self._verifier.verify(
+                    prepare_result.pre_test_fingerprint,
+                    post_fingerprint)
+            
+            # Очищаем backup после restore
+            await self._strategy.cleanup(
+                engine, prepare_result.backup_info)
+            
+            return RestoreResult(
+                success=verified,
+                duration_ms=duration_ms,
+                verified=verified,
+                errors=errors)
+        except Exception as e:
+            return RestoreResult(
+                success=False, errors=[str(e)])
+\end{lstlisting}
+    \end{minipage}
+    \caption{Метод restoreAfterTest класса DatabaseStateManager}
+    \label{lst:restore_after_test}
+\end{figure}
+
+Восстановление выполняется под блокировкой, специфичной для типа СУБД, что обеспечивает корректную работу при параллельном тестировании. После восстановления выполняется верификация: сравнение «отпечатка» после теста с «отпечатком» до теста. Если количество строк во всех таблицах совпадает, восстановление считается успешным. Резервные таблицы удаляются после успешного восстановления.
+
+Стратегия резервного копирования \texttt{SqlBackupStrategy} реализует создание копий через SQL-операторы \texttt{CREATE TABLE ... AS SELECT} с префиксом \texttt{\_loadtest\_backup\_}. Восстановление выполняется через \texttt{DELETE} из оригинальных таблиц и \texttt{INSERT} из резервных копий. Такой подход обеспечивает кроссплатформенную совместимость (MySQL и PostgreSQL) без зависимости от утилит \texttt{mysqldump} и \texttt{pg\_dump}.
+
+\subsubsection*{Модуль сравнительного анализа}
+
+Модуль сравнительного анализа реализован в классе \texttt{ComparisonService} файла \texttt{comparison/service.py}. Основной метод \texttt{analyze} принимает список идентификаторов тестов и идентификатор базового теста, загружает данные из репозитория, определяет тип сравнения и выполняет попарное сопоставление метрик.
+
+\begin{figure}
+    \begin{minipage}{\linewidth}
+\begin{lstlisting}[language=Python]
+async def analyze(self, test_ids, baseline_id=None,
+                  report_config=None):
+    """Выполнить сравнительный анализ по выбранным тестам"""
+    unique_test_ids = self._normalize_test_ids(test_ids)
+    baseline_uuid = self._resolve_baseline_id(
+        unique_test_ids, baseline_id)
+    
+    tests = await self._load_tests(unique_test_ids)
+    self._validate_tests_for_comparison(tests)
+    comparison_type = self._detect_comparison_type(tests)
+    
+    warnings = []
+    warnings.extend(
+        self._collect_comparability_warnings(tests))
+    
+    descriptive_stats = {}
+    raw_samples = {}
+    charts_data = ComparisonChartsData()
+    
+    for test_data in tests:
+        test_id = test_data["id"]
+        db_keys = self._get_test_db_keys(test_data)
+        for db_key in db_keys:
+            samples_info = await self._collect_metric_samples(
+                str(test_id), db_key, test_data)
+            metrics_bundle = self._build_metric_bundle(
+                samples_info, warnings,
+                test_data["name"], db_key)
+            descriptive_stats[str(test_id)][db_key] = metrics_bundle
+\end{lstlisting}
+    \end{minipage}
+    \caption{Начало метода analyze класса ComparisonService}
+    \label{lst:comparison_analyze}
+\end{figure}
+
+Метод \texttt{\_detect\_comparison\_type} автоматически определяет тип сравнения на основе сигнатур нагрузки: \texttt{CROSS\_DATABASE} (одинаковая нагрузка, разные СУБД), \texttt{SCALABILITY} (одна СУБД, разное число потоков), \texttt{TEMPORAL} (одинаковая конфигурация, разное время выполнения) или \texttt{MIXED} (смешанный сценарий). Для каждого типа сравнения формируются соответствующие предупреждения о сопоставимости результатов.
+
+Сбор сырых выборок метрик реализован с механизмом fallback: при наличии записей \texttt{MetricSample} используются они, при их отсутствии — данные из \texttt{TimeSeries}, и только в крайнем случае — агрегированные метрики из \texttt{TestResult} с соответствующим предупреждением. Это обеспечивает работоспособность сравнения даже для тестов, выполненных до добавления модуля сбора сырых метрик.
+
+\subsubsection*{Реализация статистических функций}
+
+Модуль \texttt{comparison/statistics.py} содержит математический аппарат для статистического сравнения выборок. Функция \texttt{calculate\_descriptive\_stats} вычисляет описательную статистику через \texttt{numpy}: количество, среднее, медиану, стандартное отклонение, минимум, максимум, процентили p50, p95, p99. Функция \texttt{check\_normality} проверяет нормальность распределения через критерий Шапиро-Уилка (\texttt{scipy.stats.shapiro}) с ограничением выборки в 5000 элементов.
+
+Функция \texttt{compare\_two\_samples} выполняет попарное сравнение двух выборок: при нормальном распределении применяется критерий Уэлча (\texttt{scipy.stats.ttest\_ind} с \texttt{equal\_var=False}), при ненормальном — критерий Манна-Уитни (\texttt{scipy.stats.mannwhitneyu} с \texttt{alternative="two-sided"}). Минимальный размер выборки для статистического теста установлен в 10 элементов, уровень значимости — 0,05. Результат включает процентное отклонение, использованный тест, статистику, p-значение и текстовую интерпретацию.
+
+\subsubsection*{Реализация REST API}
+
+REST API системы разделено на семь модулей маршрутов, каждый из которых отвечает за свою область функциональности. Основные эндпоинты представлены в таблице~\ref{tab:api_endpoints}.
+
+\begin{table}
+    \centering
+    \caption{Основные эндпоинты REST API}
+    \label{tab:api_endpoints}
+    \begin{tabularx}{\textwidth}{l l X}
+        \hline
+        Модуль & Метод и путь & Назначение \\
+        \hline
+        test & POST /test/async & Асинхронный запуск теста \\
+        test & GET /test/async/\{id\} & Получение статуса теста \\
+        test & GET /test/async/\{id\}/results & Получение результатов \\
+        history & GET /history/tests & Список тестов с пагинацией \\
+        history & GET /history/tests/\{id\} & Детали конкретного теста \\
+        history & DELETE /history/tests/\{id\} & Удаление теста \\
+        scenario & GET /scenarios & Список сценариев \\
+        scenario & POST /scenarios & Создание сценария \\
+        scenario & PUT /scenarios/\{id\} & Обновление сценария \\
+        scenario & DELETE /scenarios/\{id\} & Удаление сценария \\
+        scenario & POST /scenarios/\{id\}/clone & Клонирование сценария \\
+        connection & GET /api/connections & Список подключений \\
+        connection & POST /api/connections & Создание подключения \\
+        connection & POST /api/connections/test & Тестирование подключения \\
+        database\_state & GET /.../\{id\}/state & Состояние базы данных \\
+        database\_state & POST /.../\{id\}/backup & Создание резервной копии \\
+        database\_state & POST /.../\{id\}/restore & Восстановление из копии \\
+        comparison & POST /api/comparison/analyze & Сравнительный анализ \\
+        settings & GET /api/settings/restore & Настройки восстановления \\
+        settings & PUT /api/settings/restore & Обновление настроек \\
+        \hline
+    \end{tabularx}
+\end{table}
+
+Модуль \texttt{test\_routes.py} определяет эндпоинты для запуска тестов. Эндпоинт \texttt{POST /test/async} принимает запрос с параметрами нагрузки (тип СУБД, число виртуальных пользователей, число итераций, время прогрева, идентификатор сценария), генерирует UUID для теста, создаёт запись в базе данных истории со статусом \texttt{pending} и запускает тест в фоне через механизм \texttt{BackgroundTasks} FastAPI. Клиент немедленно получает ответ с \texttt{test\_id} и \texttt{websocket\_url} для подписки на обновления. Ниже приведён фрагмент реализации:
+
+\begin{figure}
+    \begin{minipage}{\linewidth}
+\begin{lstlisting}[language=Python]
+@router.post("/async")
+async def run_async_test(
+    request: AsyncTestRequest,
+    background_tasks: BackgroundTasks
+):
+    """Асинхронный запуск теста с WebSocket обновлениями"""
+    test_id = str(uuid.uuid4())
+    test_name = request.test_name or f"Тест {test_id}"
+    
+    active_tests[test_id] = {
+        "id": test_id,
+        "name": test_name,
+        "status": "pending",
+        "config": request.model_dump(),
+    }
+    
+    if HISTORY_ENABLED and test_repository:
+        await test_repository.create_test_run(
+            name=test_name,
+            config=request.model_dump(),
+            status='pending',
+            test_run_id=test_id
+        )
+    
+    background_tasks.add_task(
+        run_test_with_streaming, test_id, request)
+    
+    return {
+        "test_id": test_id,
+        "websocket_url": f"/ws/test/{test_id}",
+        "message": "Тест запущен."
+    }
+\end{lstlisting}
+    \end{minipage}
+    \caption{Эндпоинт POST /test/async}
+    \label{lst:async_test_endpoint}
+\end{figure}
+
+Фоновая задача \texttt{run\_test\_with\_streaming} создаёт экземпляр \texttt{LoadTester}, устанавливает callback для потоковой передачи метрик, определяет тип запуска (по UUID сценария или по встроенному сценарию) и выполняет тест. По завершении результаты собираются, сохраняются в базе данных, а статус обновляется на \texttt{completed} или \texttt{failed}.
+
+Модуль \texttt{scenario\_routes.py} обеспечивает полный CRUD для сценариев тестирования. Модуль \texttt{connection\_routes.py} управляет конфигурациями подключений к СУБД: создание, чтение, обновление, удаление, тестирование подключения. Пароли шифруются алгоритмом AES-256 перед сохранением в базе данных. Модуль \texttt{database\_state\_routes.py} предоставляет эндпоинты для ручного управления резервными копиями: создание, восстановление, очистка и оценка размера. Модуль \texttt{history\_routes.py} обеспечивает доступ к истории тестов с пагинацией и фильтрацией по статусу. Модуль \texttt{comparison\_routes.py} реализует эндпоинт \texttt{POST /comparison/analyze} для запуска сравнительного анализа. Модуль \texttt{settings\_routes.py} управляет настройками восстановления базы данных.
+
+\subsubsection*{Обработка ошибок}
+
+Обработка ошибок в серверной части реализована на нескольких уровнях. На уровне API маршрутов все исключения перехватываются и преобразуются в HTTP-статусы: \texttt{ValueError} — в 400 Bad Request, неожиданные исключения — в 500 Internal Server Error. На уровне бизнес-логики (\texttt{LoadTester}, \texttt{DatabaseStateManager}) ошибки логируются с указанием контекста (тип СУБД, идентификатор запроса) и, где возможно, обрабатываются без прерывания выполнения теста. Блок \texttt{try/finally} в методах тестирования гарантирует выполнение восстановления базы данных даже при критических ошибках.
+
+При возникновении ошибки выполнения SQL-запроса метод \texttt{execute\_query} не прерывает цикл итераций, а сохраняет текст ошибки в результате и продолжает выполнение следующих запросов. Это позволяет получить полную картину производительности, включая частоту ошибок, которая сама по себе является важной метрикой.
+
+\subsubsection*{Слой доступа к данным (Repository Pattern)}
+
+Слой доступа к данным реализован через паттерн Repository. Базовый класс \texttt{BaseRepository} обеспечивает асинхронное подключение к базе данных истории через SQLAlchemy. Наследники — \texttt{TestRepository}, \texttt{ScenarioRepository}, \texttt{ConnectionRepository} — реализуют специфичные операции для своих сущностей.
+
+Метод \texttt{TestRepository.save\_metric\_samples} выполняет асинхронное сохранение сырых выборок метрик:
+
+\begin{figure}
+    \begin{minipage}{\linewidth}
+\begin{lstlisting}[language=Python]
+async def add_metric_sample_batch(
+    self, test_run_id: str, samples: List[Dict]
+):
+    """Пакетное сохранение сырых метрик"""
+    if not samples:
+        return
+    
+    async with self.get_session() as session:
+        records = [
+            MetricSample(
+                test_run_id=test_run_id,
+                db_type=s['db_type'],
+                connection_key=s['connection_key'],
+                query_id=s.get('query_id'),
+                sample_type=s.get('sample_type'),
+                timestamp=s['timestamp'],
+                latency_ms=s.get('latency_ms'),
+                throughput=s.get('throughput'),
+                is_error=s.get('is_error', False),
+                error_message=s.get('error_message'),
+            )
+            for s in samples
+        ]
+        session.add_all(records)
+        await session.commit()
+\end{lstlisting}
+    \end{minipage}
+    \caption{Метод addMetricSampleBatch класса TestRepository}
+    \label{lst:save_metric_samples}
+\end{figure}
+
+Пакетная вставка снижает количество обращений к базе данных при высокой интенсивности тестирования. Каждая запись содержит тип выборки (\texttt{request\_latency} для отдельных запросов, \texttt{throughput\_window} для агрегированных окон), что позволяет гибко выбирать granularity данных при сравнительном анализе.
+
+\subsubsection*{Управление подключениями к СУБД}
+
+Класс \texttt{DatabaseConnection} файла \texttt{database/connection.py} объёмом более 230 строк управляет подключениями к тестируемым СУБД. Подключения хранятся в репозитории базы данных истории и загружаются лениво при первом асинхронном вызове.
+
+Реализация ленивой инициализации \texttt{AsyncEngine}:
+
+\begin{figure}
+    \begin{minipage}{\linewidth}
+\begin{lstlisting}[language=Python]
+async def get_engine_async(self, connection_key):
+    """Получение engine с загрузкой подключений из БД"""
+    await self.ensure_connection_config(connection_key)
+    return self.get_engine(connection_key)
+
+def get_engine(self, connection_key) -> AsyncEngine:
+    """Получение или создание async engine"""
+    connection_key = self._resolve_connection_key(connection_key)
+    if connection_key not in self.engines:
+        connection_string = self.get_connection_string(
+            connection_key)
+        self.engines[connection_key] = create_async_engine(
+            connection_string,
+            pool_size=5,
+            max_overflow=10,
+            echo=False
+        )
+    return self.engines[connection_key]
+\end{lstlisting}
+    \end{minipage}
+    \caption{Ленивая инициализация AsyncEngine}
+    \label{lst:lazy_engine}
+\end{figure}
+
+Метод \texttt{\_resolve\_connection\_key} обеспечивает поддержку shorthand-ключей: если передан ключ \texttt{mysql} или \texttt{postgresql} и существует ровно одно активное подключение данного типа, оно используется автоматически. При наличии нескольких подключений одного типа требуется явное указание \texttt{connection\_id}. Кэширование конфигураций подключений в памяти (\texttt{\_connection\_configs}) исключает повторные обращения к базе данных при каждом запросе.
+
+Для шифрования паролей подключений используется модуль \texttt{core/crypto.py}, реализующий симметричное шифрование AES-256. Пароль шифруется перед сохранением в базе данных и расшифровывается при установлении подключения к тестируемой СУБД. Ключ шифрования задаётся через переменную окружения \texttt{ENCRYPTION\_KEY}.
+
+Конфигурация системы реализована через класс \texttt{Settings} на базе \texttt{pydantic-settings}. Все параметры (URL базы данных истории, настройки восстановления, пути к директориям, параметры API) загружаются из переменных окружения и файла \texttt{.env}, что соответствует принципам Twelve-Factor App.
+
+\subsection{Реализация клиентской части}
+
+Клиентская часть системы реализована как одностраничное приложение на базе Next.js 16 с клиентской маршрутизацией. Главная страница (\texttt{app/page.tsx}) определяет компонент-маршрутизатор, который условно отображает один из семи компонентов-страниц в зависимости от значения \texttt{currentPage} в Zustand store. Такой подход обеспечивает плавные переходы между страницами без перезагрузки браузера.
+
+\subsubsection*{Архитектура компонентов}
+
+Клиентское приложение включает следующие основные компоненты-страницы:
+
+\begin{enumerate}[label=\arabic*)]
+    \item \texttt{HomePage} — главная страница с описанием системы и кнопками быстрого перехода к конфигурации теста или истории тестов;
+    \item \texttt{ConfigPage} — форма конфигурации теста: выбор СУБД, сценария, числа виртуальных пользователей, итераций и времени прогрева;
+    \item \texttt{DashboardsPage} — дашборд реального времени с графиками времени отклика, пропускной способности, загрузки CPU и использования RAM;
+    \item \texttt{HistoryPage} — таблица выполненных тестов с фильтрацией по дате, типу СУБД и статусу, возможностью выбора тестов для сравнения;
+    \item \texttt{ComparisonPage} — страница сравнительного анализа с таблицей метрик, результатами статистических тестов и графиками;
+    \item \texttt{ScenariosPage} — управление сценариями тестирования: просмотр, создание, редактирование, клонирование;
+    \item \texttt{ReportsPage} — формирование и экспорт отчётов.
+\end{enumerate}
+
+Общие компоненты интерфейса включают \texttt{Header} (верхняя панель с логотипом и навигацией), \texttt{Sidebar} (боковое меню с переключением страниц), \texttt{DatabaseStatePanel} (панель состояния подключённых баз данных) и \texttt{ThemeProvider} (управление тёмной и светлой темами). UI-компоненты построены на базе библиотеки Radix UI и включают кнопки, поля ввода, таблицы, диалоговые окна, вкладки, уведомления и прогресс-бары.
+
+\subsubsection*{Управление состоянием (Zustand)}
+
+Состояние приложения хранится в едином store, реализованном через библиотеку Zustand. Файл \texttt{lib/store.ts} объёмом около 100 строк определяет интерфейс \texttt{AppState} и создаёт store через \texttt{create<AppState>}. Store включает следующие группы данных: навигация (текущая страница, состояние боковой панели), конфигурация теста (режим, сценарий, число виртуальных пользователей, итерации, время прогрева), текущий тест, история тестов, данные реального времени (временные ряды для каждой СУБД), имена и типы подключений, параметры сравнительного анализа.
+
+Метод \texttt{addRealtimeData} обеспечивает добавление точек временного ряда с ограничением буфера:
+
+\begin{figure}
+    \begin{minipage}{\linewidth}
+\begin{lstlisting}[language=C++]
+addRealtimeData: (databaseId, point) =>
+  set((state) => ({
+    realtimeData: {
+      ...state.realtimeData,
+      [databaseId]: [
+        ...(state.realtimeData[databaseId] || []),
+        point
+      ].slice(-100),
+    },
+  })),
+\end{lstlisting}
+    \end{minipage}
+    \caption{Метод addRealtimeData Zustand store}
+    \label{lst:add_realtime_data}
+\end{figure}
+
+Метод \texttt{.slice(-100)} ограничивает массив последними 100 точками для каждой базы данных, что предотвращает чрезмерное потребление памяти при длительных тестах и обеспечивает плавную отрисовку графиков. Все обновления состояния выполняются через диспетчеры (\texttt{setTestConfig}, \texttt{addRealtimeData}, \texttt{setCurrentPage} и др.), что обеспечивает предсказуемость изменений и упрощает отладку.
+
+\subsubsection*{Реализация WebSocket-хука}
+
+Хук \texttt{useTestWebSocket} файла \texttt{hooks/use-test-websocket.ts} объёмом около 290 строк обеспечивает двустороннюю связь с сервером для получения метрик в реальном времени. При монтировании компонента с валидным \texttt{testId} автоматически устанавливается WebSocket-соединение по адресу \texttt{/ws/test/\{testId\}}. Каждые 30 секунд отправляется ping-сообщение для предотвращения разрыва соединения из-за таймаута.
+
+Обработка входящих сообщений реализована через \texttt{handleMessage}:
+
+\begin{figure}
+    \begin{minipage}{\linewidth}
+\begin{lstlisting}[language=C++]]
+ws.onmessage = handleMessage
+
+const handleMessage = useCallback((event) => {
+  const message = JSON.parse(event.data)
+  
+  switch (message.type) {
+    case "metrics":
+      const point: TimeSeriesPoint = {
+        timestamp: new Date(metricsData.timestamp).getTime(),
+        responseTime: metricsData.response_time,
+        tps: metricsData.tps,
+        cpuUsage: metricsData.cpu_usage,
+        memoryUsageMB: metricsData.memory_usage_mb,
+        cacheHitRatio: metricsData.cache_hit_ratio,
+      }
+      addRealtimeData(dbKey, point)
+      onMetrics?.(metricsData)
+      break
+    case "status":
+      setStatus(statusData.status)
+      setProgress(statusData.progress)
+      onStatus?.(statusData)
+      break
+  }
+}, [addRealtimeData, onMetrics, onStatus])
+\end{lstlisting}
+    \end{minipage}
+    \caption{Обработка WebSocket-сообщений в хуке useTestWebSocket}
+    \label{lst:websocket_handler}
+\end{figure}
+
+При разрыве соединения во время выполнения теста производится автоматическое переподключение с интервалом 3 секунды (настраивается через параметр \texttt{reconnectInterval}). Переподключение выполняется только при статусе \texttt{running}, что предотвращает бесконечные попытки подключения после завершения теста. При получении сообщения типа \texttt{metrics} данные преобразуются в \texttt{TimeSeriesPoint} и добавляются в store через \texttt{addRealtimeData}, что вызывает реактивное обновление компонентов дашборда.
+
+\subsubsection*{Модульный API-клиент}
+
+API-клиент реализован как класс \texttt{ApiClient} файла \texttt{lib/api/client.ts} объёмом около 300 строк. Базовый URL определяется переменной окружения \texttt{NEXT\_PUBLIC\_API\_URL}. Метод \texttt{request<T>} централизует обработку ошибок: при получении HTTP-статуса, отличного от 2xx, из ответа извлекается сообщение об ошибке и выбрасывается исключение \texttt{Error}. Все методы клиента типизированы через дженерики TypeScript, что обеспечивает проверку корректности данных на этапе компиляции.
+
+Класс включает доменные методы для каждой группы эндпоинтов: \texttt{runAsyncTest} для запуска тестов, \texttt{getHistoryTests} для получения истории с пагинацией, \texttt{getScenarios} для управления сценариями, \texttt{getConnections} для управления подключениями, \texttt{analyzeComparison} для запуска сравнительного анализа. Ниже приведён пример метода запуска теста:
+
+\begin{figure}
+    \begin{minipage}{\linewidth}
+\begin{lstlisting}[language=C++]
+async runAsyncTest(request: any): Promise<any> {
+  return this.request('/test/async', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  })
+}
+\end{lstlisting}
+    \end{minipage}
+    \caption{Метод runAsyncTest API-клиента}
+    \label{lst:api_run_test}
+\end{figure}
+
+Экземпляр \texttt{apiClient} экспортируется как singleton, что обеспечивает единый базовый URL и централизованную обработку ошибок для всех компонентов приложения.
+
+\subsubsection*{Визуализация данных}
+
+Визуализация метрик реализована через библиотеку Recharts. На странице дашборда отображаются графики времени отклика, пропускной способности, загрузки CPU и использования RAM в реальном времени. Каждый график обновляется при поступлении новых данных через WebSocket. На странице истории результаты тестов отображаются в виде таблицы с агрегированными метриками и ссылками на детальные графики. На странице сравнительного анализа отображаются таблица метрик с процентными отклонениями от базового теста, результаты статистических тестов с p-значениями и интерпретациями, а также графики сравнения.
+
+Стилизация интерфейса выполнена через Tailwind CSS v4 с использованием дизайн-токенов (CSS custom properties) для цветов, отступов и размеров шрифтов. Поддерживается тёмная тема, активируемая по умолчанию. Компоненты интерфейса построены на базе библиотеки Radix UI, обеспечивающей доступность (accessibility) и корректную работу с клавиатурой. Уведомления пользователю отображаются через библиотеку Sonner в виде всплывающих сообщений (toast notifications).
+
+\subsection{Контейнеризация и развёртывание}
+
+Развёртывание системы организовано через Docker и Docker Compose. Файл \texttt{docker-compose.yml} определяет сервисы, необходимые для работы системы.
+
+\begin{table}
+    \centering
+    \caption{Сервисы Docker Compose}
+    \label{tab:docker_services}
+    \begin{tabularx}{\textwidth}{l l X l}
+        \hline
+        Сервис & Образ & Назначение & Порт \\
+        \hline
+        history-db & postgres:15-alpine & База данных истории тестов & 5433:5432 \\
+        \hline
+    \end{tabularx}
+\end{table}
+
+Сервис \texttt{history-db} развёртывается на базе образа \texttt{postgres:15-alpine}. Сервис настроен с именованным томом \texttt{history\_db\_data} для персистентности данных, healthcheck через \texttt{pg\_isready} с интервалом 5 секунд и политикой перезапуска \texttt{unless-stopped}. Порт 5433 проброшен на порт 5432 внутри контейнера для избежания конфликтов с другими экземплярами PostgreSQL. Сервис подключён к пользовательской Docker-сети \texttt{loadtest-network} типа bridge.
+
+Тестовые СУБД развёртываются отдельно через собственные Docker Compose-файлы. MySQL с схемой Sakila развёртывается через контейнер \texttt{sakila} с использованием официального образа MySQL. PostgreSQL с схемой Pagila развёртывается через контейнер \texttt{pagila} с использованием кастомного образа, включающего скрипты инициализации схемы Pagila. Оба контейнера подключаются к той же Docker-сети \texttt{loadtest-network}, что обеспечивает сетевое взаимодействие между компонентами системы.
+
+\subsubsection*{Инициализация и миграции}
+
+Инициализация базы данных истории выполняется через скрипт \texttt{init\_history\_db.py}, создающий все необходимые таблицы согласно моделям SQLAlchemy. Инициализация встроенных сценариев выполняется через скрипт \texttt{init\_scenarios.py}, добавляющий предопределённые сценарии тестирования (\texttt{read\_only}, \texttt{write\_only}, \texttt{mixed\_light}, \texttt{mixed\_heavy}, \texttt{oltp}, \texttt{olap}) с соответствующими SQL-запросами и параметрами.
+
+Для миграций схемы базы данных истории используются скрипты в директории \texttt{backend/scripts/migration/}. Скрипт \texttt{add\_metric\_samples.py} добавляет таблицу \texttt{metric\_samples} для хранения сырых выборок метрик, необходимых для статистического сравнения. Скрипт \texttt{add\_restore\_columns.py} добавляет колонки для управления восстановлением базы данных в таблицу \texttt{test\_runs}. Миграции выполняются вручную перед обновлением системы и не используют автоматический инструмент миграций (Alembic), так как схема базы данных истории изменяется относительно редко.
+
+Конфигурация системы задаётся через файл \texttt{.env}, содержащий переменные окружения: \texttt{HISTORY\_DATABASE\_URL} для подключения к базе данных истории, \texttt{ENCRYPTION\_KEY} для шифрования паролей подключений, \texttt{API\_HOST} и \texttt{API\_PORT} для настройки API-сервера, \texttt{NEXT\_PUBLIC\_WS\_URL} и \texttt{NEXT\_PUBLIC\_API\_URL} для настройки фронтенда. Файл \texttt{.env} не включается в систему контроля версий; вместо него поставляется шаблон \texttt{env.example} с примерами значений.
+
+Процесс первого запуска системы включает следующие шаги: клонирование репозитория, копирование \texttt{env.example} в \texttt{.env} с настройкой параметров, запуск \texttt{docker compose up -d} для развёртывания базы данных истории, выполнение скрипта \texttt{init\_history\_db.py} для создания таблиц, выполнение \texttt{init\_scenarios.py} для загрузки встроенных сценариев, запуск бэкенда через \texttt{uvicorn backend.main:app --reload} и фронтенда через \texttt{npm run dev}.
+
+\subsection{Выводы по главе 3}
+
+В ходе программной реализации системы решены следующие задачи:
+
+\begin{enumerate}[label=\arabic*)]
+    \item Обоснован выбор технологического стека: Python/FastAPI для серверной части, Next.js/TypeScript для клиентской части, PostgreSQL для хранения истории, asyncpg и aiomysql для асинхронного доступа к тестируемым СУБД;
+    \item Реализован модуль генерации нагрузки (\texttt{LoadTester}) объёмом более 1400 строк с асинхронным выполнением запросов, потоковой отправкой метрик через callback-паттерн, сбором системных и внутренних метрик СУБД, фазой прогрева и механизмом восстановления базы данных;
+    \item Реализован callback-механизм (\texttt{TestStreamingCallback}) для трансляции метрик в WebSocket и сохранения в базе данных истории с буферизацией пакетной вставки;
+    \item Реализован оркестратор управления состоянием базы данных (\texttt{DatabaseStateManager}) с анализом SQL-запросов, созданием резервных копий через \texttt{SqlBackupStrategy}, восстановлением и верификацией целостности по количеству строк;
+    \item Реализован модуль сравнительного анализа (\texttt{ComparisonService}) с автоматическим определением типа сравнения, сбором сырых выборок метрик с fallback-механизмом и применением статистических критериев (Шапиро-Уилка, Уэлча, Манна-Уитни);
+    \item Реализован REST API с семью группами эндпоинтов для управления тестами, сценариями, подключениями, историей и настройками; асинхронный запуск тестов через \texttt{BackgroundTasks} с немедленным возвратом \texttt{test\_id};
+    \item Реализован слой доступа к данным через паттерн Repository с пакетной вставкой сырых метрик и шифрованием паролей подключений алгоритмом AES-256;
+    \item Реализована клиентская часть: Zustand store для управления состоянием, API-клиент с типизированными методами, WebSocket-хук с автоматическим переподключением, семь страниц интерфейса с визуализацией через Recharts;
+    \item Реализована контейнеризация: Docker Compose для базы данных истории, отдельные контейнеры для тестовых СУБД (Sakila/MySQL, Pagila/PostgreSQL), скрипты инициализации и миграций.
+\end{enumerate}
+
+Результаты реализации представляют собой полностью функциональную систему, готовую к проведению нагрузочного тестирования и сравнительного анализа производительности СУБД. Тестирование системы и анализ результатов рассматриваются в следующей главе.
