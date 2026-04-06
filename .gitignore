@@ -29,7 +29,6 @@ results/
 *.db
 *.sqlite
 description/
-report/
 
 # Сгенерированные LaTeX-файлы
 *.aux
