@@ -43,6 +43,8 @@ description/
 *.glg-abr
 *.gls
 *.gls-abr
+*.glg
+*.glg-abr
 *.idx
 *.ilg
 *.ind
