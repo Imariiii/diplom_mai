@@ -32,16 +32,24 @@ from backend import initialize
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Запуск миграций БД при старте приложения."""
+    """Запуск миграций Alembic при старте приложения."""
     from backend.core.config import settings as app_settings
     db_url = app_settings.history_db_url
     if db_url:
-        from backend.migrations.runner import run_migrations
-        print("[STARTUP] Запуск миграций базы данных...")
+        print("[STARTUP] Запуск миграций Alembic...")
         try:
-            run_migrations(db_url)
+            from alembic.config import Config as AlembicConfig
+            from alembic import command as alembic_command
+
+            alembic_cfg = AlembicConfig()
+            alembic_cfg.set_main_option("script_location", os.path.join(os.path.dirname(__file__), "migrations"))
+            alembic_cfg.set_main_option("sqlalchemy.url", db_url.replace("+asyncpg", "+psycopg2"))
+            alembic_command.upgrade(alembic_cfg, "head")
+            print("[STARTUP] Миграции Alembic применены")
         except Exception as e:
             print(f"[STARTUP] ⚠ Миграции завершились с ошибкой: {e}")
+            import traceback
+            traceback.print_exc()
     else:
         print("[STARTUP] HISTORY_DATABASE_URL не задан, миграции пропущены")
     yield

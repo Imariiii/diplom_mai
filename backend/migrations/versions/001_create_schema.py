@@ -1,21 +1,23 @@
+"""Создание всех таблиц схемы
+
+Revision ID: 001
+Revises: None
 """
-Миграция 001: Создание всех таблиц схемы
+from typing import Sequence, Union
 
-Таблицы:
-  - test_runs          — история тестовых прогонов
-  - test_results       — результаты по каждой СУБД
-  - time_series        — временные ряды метрик
-  - metric_samples     — raw/semiraw sample-метрики
-  - db_connection_configs — конфигурации подключений к тестируемым БД
-  - test_scenarios     — сценарии тестирования
-  - scenario_queries   — SQL-запросы в сценариях
-  - scenario_params    — параметры SQL-запросов
-"""
-from sqlalchemy import text
+from alembic import op
+import sqlalchemy as sa
+
+revision: str = "001"
+down_revision: Union[str, None] = None
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
 
 
-def upgrade(conn) -> None:
-    conn.execute(text("""
+def upgrade() -> None:
+    conn = op.get_bind()
+
+    conn.execute(sa.text("""
         CREATE TABLE IF NOT EXISTS test_runs (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             name VARCHAR(255) NOT NULL,
@@ -35,7 +37,7 @@ def upgrade(conn) -> None:
         )
     """))
 
-    conn.execute(text("""
+    conn.execute(sa.text("""
         CREATE TABLE IF NOT EXISTS test_results (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             test_run_id UUID NOT NULL REFERENCES test_runs(id) ON DELETE CASCADE,
@@ -47,15 +49,10 @@ def upgrade(conn) -> None:
             created_at TIMESTAMPTZ DEFAULT now()
         )
     """))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_test_results_test_run_id ON test_results(test_run_id)"))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_test_results_db_type ON test_results(db_type)"))
 
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_test_results_test_run_id ON test_results(test_run_id)
-    """))
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_test_results_db_type ON test_results(db_type)
-    """))
-
-    conn.execute(text("""
+    conn.execute(sa.text("""
         CREATE TABLE IF NOT EXISTS time_series (
             id BIGSERIAL PRIMARY KEY,
             test_run_id UUID NOT NULL REFERENCES test_runs(id) ON DELETE CASCADE,
@@ -74,21 +71,12 @@ def upgrade(conn) -> None:
             network_out FLOAT
         )
     """))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_time_series_test_run_id ON time_series(test_run_id)"))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_time_series_db_type ON time_series(db_type)"))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_time_series_timestamp ON time_series(timestamp)"))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_time_series_composite ON time_series(test_run_id, db_type, timestamp)"))
 
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_time_series_test_run_id ON time_series(test_run_id)
-    """))
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_time_series_db_type ON time_series(db_type)
-    """))
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_time_series_timestamp ON time_series(timestamp)
-    """))
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_time_series_composite ON time_series(test_run_id, db_type, timestamp)
-    """))
-
-    conn.execute(text("""
+    conn.execute(sa.text("""
         CREATE TABLE IF NOT EXISTS metric_samples (
             id BIGSERIAL PRIMARY KEY,
             test_run_id UUID NOT NULL REFERENCES test_runs(id) ON DELETE CASCADE,
@@ -105,24 +93,13 @@ def upgrade(conn) -> None:
             created_at TIMESTAMPTZ DEFAULT now()
         )
     """))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_metric_samples_test_run_id ON metric_samples(test_run_id)"))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_metric_samples_db_type ON metric_samples(db_type)"))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_metric_samples_query_id ON metric_samples(query_id)"))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_metric_samples_timestamp ON metric_samples(timestamp)"))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_metric_samples_composite ON metric_samples(test_run_id, db_type, timestamp)"))
 
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_metric_samples_test_run_id ON metric_samples(test_run_id)
-    """))
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_metric_samples_db_type ON metric_samples(db_type)
-    """))
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_metric_samples_query_id ON metric_samples(query_id)
-    """))
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_metric_samples_timestamp ON metric_samples(timestamp)
-    """))
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_metric_samples_composite ON metric_samples(test_run_id, db_type, timestamp)
-    """))
-
-    conn.execute(text("""
+    conn.execute(sa.text("""
         CREATE TABLE IF NOT EXISTS db_connection_configs (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             name VARCHAR(255) NOT NULL UNIQUE,
@@ -139,18 +116,11 @@ def upgrade(conn) -> None:
             updated_at TIMESTAMPTZ DEFAULT now()
         )
     """))
+    conn.execute(sa.text('CREATE INDEX IF NOT EXISTS idx_db_conn_configs_dbms_type ON db_connection_configs(dbms_type)'))
+    conn.execute(sa.text('CREATE INDEX IF NOT EXISTS idx_db_conn_configs_group ON db_connection_configs("group")'))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_db_conn_configs_active ON db_connection_configs(is_active)"))
 
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_db_conn_configs_dbms_type ON db_connection_configs(dbms_type)
-    """))
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_db_conn_configs_group ON db_connection_configs("group")
-    """))
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_db_conn_configs_active ON db_connection_configs(is_active)
-    """))
-
-    conn.execute(text("""
+    conn.execute(sa.text("""
         CREATE TABLE IF NOT EXISTS test_scenarios (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             name VARCHAR(255) NOT NULL UNIQUE,
@@ -162,15 +132,10 @@ def upgrade(conn) -> None:
             updated_at TIMESTAMPTZ DEFAULT now()
         )
     """))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_test_scenarios_type ON test_scenarios(scenario_type)"))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_test_scenarios_builtin ON test_scenarios(is_builtin)"))
 
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_test_scenarios_type ON test_scenarios(scenario_type)
-    """))
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_test_scenarios_builtin ON test_scenarios(is_builtin)
-    """))
-
-    conn.execute(text("""
+    conn.execute(sa.text("""
         CREATE TABLE IF NOT EXISTS scenario_queries (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             scenario_id UUID NOT NULL REFERENCES test_scenarios(id) ON DELETE CASCADE,
@@ -182,15 +147,10 @@ def upgrade(conn) -> None:
             created_at TIMESTAMPTZ DEFAULT now()
         )
     """))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_scenario_queries_scenario_id ON scenario_queries(scenario_id)"))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_scenario_queries_type ON scenario_queries(query_type)"))
 
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_scenario_queries_scenario_id ON scenario_queries(scenario_id)
-    """))
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_scenario_queries_type ON scenario_queries(query_type)
-    """))
-
-    conn.execute(text("""
+    conn.execute(sa.text("""
         CREATE TABLE IF NOT EXISTS scenario_params (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             query_id UUID NOT NULL REFERENCES scenario_queries(id) ON DELETE CASCADE,
@@ -207,10 +167,16 @@ def upgrade(conn) -> None:
             created_at TIMESTAMPTZ DEFAULT now()
         )
     """))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_scenario_params_query_id ON scenario_params(query_id)"))
+    conn.execute(sa.text("CREATE INDEX IF NOT EXISTS idx_scenario_params_name ON scenario_params(param_name)"))
 
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_scenario_params_query_id ON scenario_params(query_id)
-    """))
-    conn.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_scenario_params_name ON scenario_params(param_name)
-    """))
+
+def downgrade() -> None:
+    op.drop_table("scenario_params")
+    op.drop_table("scenario_queries")
+    op.drop_table("test_scenarios")
+    op.drop_table("db_connection_configs")
+    op.drop_table("metric_samples")
+    op.drop_table("time_series")
+    op.drop_table("test_results")
+    op.drop_table("test_runs")
