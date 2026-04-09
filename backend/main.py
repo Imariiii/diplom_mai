@@ -2,6 +2,7 @@
 Backend API для системы нагрузочного тестирования
 Точка входа FastAPI приложения
 """
+from contextlib import asynccontextmanager
 from typing import Dict
 import sys
 import os
@@ -28,7 +29,25 @@ from backend.api.routes import test_routes, scenario_routes, database_state_rout
 # Используем централизованную инициализацию
 from backend import initialize
 
-app = FastAPI(title="Database Load Testing API", version="2.0.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Запуск миграций БД при старте приложения."""
+    from backend.core.config import settings as app_settings
+    db_url = app_settings.history_db_url
+    if db_url:
+        from backend.migrations.runner import run_migrations
+        print("[STARTUP] Запуск миграций базы данных...")
+        try:
+            run_migrations(db_url)
+        except Exception as e:
+            print(f"[STARTUP] ⚠ Миграции завершились с ошибкой: {e}")
+    else:
+        print("[STARTUP] HISTORY_DATABASE_URL не задан, миграции пропущены")
+    yield
+
+
+app = FastAPI(title="Database Load Testing API", version="2.0.0", lifespan=lifespan)
 
 # Инициализация менеджеров состояния БД (lazy - при первом использовании)
 db_state_manager: DatabaseStateManager = None
