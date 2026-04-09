@@ -903,7 +903,7 @@ class LoadTester:
             scenario_repo = scenario_repository
         else:
             # Fallback: создаем репозиторий с дефолтным URL
-            db_url = settings.history_db_url or 'postgresql+asyncpg://postgres:postgres@localhost:5433/test_history'
+            db_url = settings.history_db_url or 'postgresql+asyncpg://postgres:postgres@localhost:5433/project_data'
             scenario_repo = ScenarioRepository(db_url)
         
         scenario = await scenario_repo.get_scenario_for_execution(scenario_id)
@@ -1258,7 +1258,7 @@ class LoadTester:
             scenario_repo = scenario_repository
         else:
             # Fallback: создаем репозиторий с дефолтным URL
-            db_url = settings.history_db_url or 'postgresql+asyncpg://postgres:postgres@localhost:5433/test_history'
+            db_url = settings.history_db_url or 'postgresql+asyncpg://postgres:postgres@localhost:5433/project_data'
             scenario_repo = ScenarioRepository(db_url)
         
         scenario = await scenario_repo.get_scenario_for_execution(scenario_id)
