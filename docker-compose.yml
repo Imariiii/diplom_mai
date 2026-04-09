@@ -1,22 +1,59 @@
-version: '3.8'
-
 services:
-    history-db:
+    project-db:
         image: postgres:15-alpine
-        container_name: test_history_db
+        container_name: project_db
         environment:
             POSTGRES_USER: postgres
             POSTGRES_PASSWORD: history123
-            POSTGRES_DB: test_history
+            POSTGRES_DB: project_data
         ports:
         - "5433:5432"
         volumes:
-        - history_db_data:/var/lib/postgresql/data
+        - project_db_data:/var/lib/postgresql/data
         healthcheck:
-            test: ["CMD-SHELL", "pg_isready -U postgres -d test_history"]
+            test: ["CMD-SHELL", "pg_isready -U postgres -d project_data"]
             interval: 5s
             timeout: 5s
             retries: 5
+        restart: unless-stopped
+        networks:
+        - loadtest-network
+
+    backend:
+        build:
+            context: .
+            dockerfile: backend/Dockerfile
+        container_name: project_backend
+        env_file:
+        - .env
+        environment:
+            HISTORY_DATABASE_URL: postgresql+asyncpg://postgres:history123@project-db:5432/project_data
+            API_HOST: 0.0.0.0
+            API_PORT: 8000
+            NEXT_PUBLIC_API_URL: http://localhost:8000
+            NEXT_PUBLIC_WS_URL: ws://localhost:8000
+        depends_on:
+            project-db:
+                condition: service_healthy
+        ports:
+        - "8000:8000"
+        restart: unless-stopped
+        networks:
+        - loadtest-network
+
+    frontend:
+        build:
+            context: .
+            dockerfile: frontend/Dockerfile
+        container_name: project_frontend
+        environment:
+            NEXT_PUBLIC_API_URL: http://localhost:8000
+            NEXT_PUBLIC_WS_URL: ws://localhost:8000
+        depends_on:
+            backend:
+                condition: service_started
+        ports:
+        - "3000:3000"
         restart: unless-stopped
         networks:
         - loadtest-network
@@ -26,5 +63,5 @@ networks:
         driver: bridge
 
 volumes:
-    history_db_data:
+    project_db_data:
         driver: local
