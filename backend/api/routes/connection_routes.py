@@ -17,6 +17,7 @@ from backend.api.schemas.connection_schemas import (
     ConnectionListResponse,
     ConnectionGroupsResponse,
 )
+from backend.core.docker import resolve_host
 from backend import initialize
 
 router = APIRouter(prefix="/api/connections", tags=["connections"])
@@ -166,10 +167,11 @@ async def delete_connection(
 async def test_connection(data: ConnectionTestRequest):
     """Протестировать подключение к БД (без сохранения)"""
     try:
+        host = resolve_host(data.host)
         if data.dbms_type == 'mysql':
-            connection_string = f"mysql+aiomysql://{data.user}:{data.password}@{data.host}:{data.port}/{data.database}"
+            connection_string = f"mysql+aiomysql://{data.user}:{data.password}@{host}:{data.port}/{data.database}"
         elif data.dbms_type == 'postgresql':
-            connection_string = f"postgresql+asyncpg://{data.user}:{data.password}@{data.host}:{data.port}/{data.database}"
+            connection_string = f"postgresql+asyncpg://{data.user}:{data.password}@{host}:{data.port}/{data.database}"
         else:
             raise HTTPException(status_code=400, detail=f"Неподдерживаемый тип БД: {data.dbms_type}")
 
@@ -210,10 +212,11 @@ async def test_saved_connection(
         if not decrypted:
             raise HTTPException(status_code=404, detail="Подключение не найдено")
 
+        host = resolve_host(decrypted['host'])
         if decrypted['dbms_type'] == 'mysql':
-            connection_string = f"mysql+aiomysql://{decrypted['user']}:{decrypted['password']}@{decrypted['host']}:{decrypted['port']}/{decrypted['database']}"
+            connection_string = f"mysql+aiomysql://{decrypted['user']}:{decrypted['password']}@{host}:{decrypted['port']}/{decrypted['database']}"
         elif decrypted['dbms_type'] == 'postgresql':
-            connection_string = f"postgresql+asyncpg://{decrypted['user']}:{decrypted['password']}@{decrypted['host']}:{decrypted['port']}/{decrypted['database']}"
+            connection_string = f"postgresql+asyncpg://{decrypted['user']}:{decrypted['password']}@{host}:{decrypted['port']}/{decrypted['database']}"
         else:
             raise HTTPException(status_code=400, detail=f"Неподдерживаемый тип БД: {decrypted['dbms_type']}")
 

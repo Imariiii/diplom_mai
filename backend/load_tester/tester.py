@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Callable, Any
 from datetime import datetime, timezone
 from sqlalchemy import text
 from backend.core.config import settings
+from backend.core.docker import resolve_host
 from backend.database.connection import DatabaseConnection
 from backend.database.queries import QueryManager
 from backend.database.state_manager import DatabaseStateManager
@@ -903,7 +904,8 @@ class LoadTester:
             scenario_repo = scenario_repository
         else:
             # Fallback: создаем репозиторий с дефолтным URL
-            db_url = settings.history_db_url or 'postgresql+asyncpg://postgres:postgres@localhost:5433/project_data'
+            fallback_host = resolve_host('localhost')
+            db_url = settings.history_db_url or f'postgresql+asyncpg://postgres:postgres@{fallback_host}:5433/project_data'
             scenario_repo = ScenarioRepository(db_url)
         
         scenario = await scenario_repo.get_scenario_for_execution(scenario_id)
@@ -1258,7 +1260,8 @@ class LoadTester:
             scenario_repo = scenario_repository
         else:
             # Fallback: создаем репозиторий с дефолтным URL
-            db_url = settings.history_db_url or 'postgresql+asyncpg://postgres:postgres@localhost:5433/project_data'
+            fallback_host = resolve_host('localhost')
+            db_url = settings.history_db_url or f'postgresql+asyncpg://postgres:postgres@{fallback_host}:5433/project_data'
             scenario_repo = ScenarioRepository(db_url)
         
         scenario = await scenario_repo.get_scenario_for_execution(scenario_id)

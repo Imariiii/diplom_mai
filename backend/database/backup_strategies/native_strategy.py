@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy import text
 
 from . import BackupStrategy, BackupInfo, SizeEstimate
+from backend.core.docker import resolve_host
 
 
 class NativeDumpStrategy(BackupStrategy):
@@ -34,7 +35,7 @@ class NativeDumpStrategy(BackupStrategy):
         """Extract connection parameters from SQLAlchemy async engine"""
         url = engine.url
         return {
-            "host": url.host or "localhost",
+            "host": resolve_host(url.host or "localhost"),
             "port": url.port or (5432 if engine.sync_engine.dialect.name == "postgresql" else 3306),
             "user": url.username or "postgres",
             "password": url.password or "",

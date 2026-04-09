@@ -8,6 +8,7 @@ from typing import Dict, Optional, List, Any
 import asyncio
 
 from backend.core.config import settings
+from backend.core.docker import resolve_host
 
 
 class DatabaseConnection:
@@ -122,16 +123,17 @@ class DatabaseConnection:
 
         if connection_key in self._connection_configs:
             conn = self._connection_configs[connection_key]
+            host = resolve_host(conn['host'])
             if dbms_type == 'mysql':
                 return (
                     f"mysql+aiomysql://{conn['user']}:{conn['password']}"
-                    f"@{conn['host']}:{conn['port']}"
+                    f"@{host}:{conn['port']}"
                     f"/{conn['database']}"
                 )
             elif dbms_type == 'postgresql':
                 return (
                     f"postgresql+asyncpg://{conn['user']}:{conn['password']}"
-                    f"@{conn['host']}:{conn['port']}"
+                    f"@{host}:{conn['port']}"
                     f"/{conn['database']}"
                 )
         

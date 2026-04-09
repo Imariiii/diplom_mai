@@ -30,8 +30,8 @@ services:
             HISTORY_DATABASE_URL: postgresql+asyncpg://postgres:history123@project-db:5432/project_data
             API_HOST: 0.0.0.0
             API_PORT: 8000
-            NEXT_PUBLIC_API_URL: http://localhost:8000
-            NEXT_PUBLIC_WS_URL: ws://localhost:8000
+        extra_hosts:
+        - "host.docker.internal:host-gateway"
         depends_on:
             project-db:
                 condition: service_healthy
