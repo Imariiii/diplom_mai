@@ -23,6 +23,10 @@ interface ComparisonChartsProps {
   useNormalized?: boolean
 }
 
+function resolveDbKeyLabel(dbKey: string, labels?: Record<string, string>): string {
+  return labels?.[dbKey] || dbKey
+}
+
 const COMPARISON_TYPE_LABELS: Record<ComparisonResult["comparison_type"], string> = {
   cross_database: "Сравнение СУБД",
   scalability: "Анализ масштабируемости",
@@ -32,14 +36,14 @@ const COMPARISON_TYPE_LABELS: Record<ComparisonResult["comparison_type"], string
 
 export function ComparisonCharts({ result, useNormalized = false }: ComparisonChartsProps) {
   const barData = result.charts_data.bar_chart.map((item) => ({
-    name: `${item.test_name} · ${item.db_key}`,
+    name: `${item.test_name} · ${resolveDbKeyLabel(item.db_key, result.db_key_labels)}`,
     latency_mean: item.latency_mean,
     latency_p95: item.latency_p95,
     throughput_mean: item.throughput_mean,
   }))
 
   const boxData = result.charts_data.box_plot.map((item) => ({
-    name: `${item.test_name} · ${item.db_key}`,
+    name: `${item.test_name} · ${resolveDbKeyLabel(item.db_key, result.db_key_labels)}`,
     min: item.min,
     q1: item.q1,
     median: item.median,
@@ -47,13 +51,24 @@ export function ComparisonCharts({ result, useNormalized = false }: ComparisonCh
     max: item.max,
   }))
 
-  const throughputData = Object.entries(result.charts_data.throughput_series).flatMap(([seriesKey, points]) =>
-    points.map((point) => ({
-      key: seriesKey,
+  const testNameById = Object.fromEntries(result.tests.map((t) => [t.id, t.name]))
+
+  const resolveSeriesLabel = (seriesKey: string): string => {
+    const [testId, ...rest] = seriesKey.split(":")
+    const dbKey = rest.join(":")
+    const name = testNameById[testId] || testId
+    const dbLabel = dbKey ? resolveDbKeyLabel(dbKey, result.db_key_labels) : ""
+    return dbLabel ? `${name} · ${dbLabel}` : name
+  }
+
+  const throughputData = Object.entries(result.charts_data.throughput_series).flatMap(([seriesKey, points]) => {
+    const label = resolveSeriesLabel(seriesKey)
+    return points.map((point) => ({
+      key: label,
       timestamp: point.timestamp ? new Date(point.timestamp).toLocaleTimeString("ru-RU") : "",
       throughput: point.throughput ?? point.tps ?? 0,
     }))
-  )
+  })
 
   const normalizedByThreads = buildNormalizedByThreads(result)
   const efficiencyByThreads = buildEfficiencyByThreads(result)
@@ -236,7 +251,7 @@ function buildNormalizedByThreads(result: ComparisonResult): Array<Record<string
       }
 
       const threads = normalized.threads
-      const family = toDbFamilyLabel(dbKey)
+      const family = toDbFamilyLabel(dbKey, result.db_key_labels)
       const row = rows.get(threads) || { threads }
       row[family] = normalized.throughput_per_thread
       rows.set(threads, row)
@@ -257,7 +272,7 @@ function buildEfficiencyByThreads(result: ComparisonResult): Array<Record<string
       }
 
       const threads = normalized.threads
-      const family = toDbFamilyLabel(dbKey)
+      const family = toDbFamilyLabel(dbKey, result.db_key_labels)
       const row = rows.get(threads) || { threads }
       row[family] = normalized.scaling_efficiency
       rows.set(threads, row)
@@ -291,9 +306,10 @@ function mergeTimeSeriesByKey(
   })
 }
 
-function toDbFamilyLabel(dbKey: string): string {
-  const lower = dbKey.toLowerCase()
+function toDbFamilyLabel(dbKey: string, labels?: Record<string, string>): string {
+  const resolved = labels?.[dbKey] || dbKey
+  const lower = resolved.toLowerCase()
   if (lower.includes("post")) return "PostgreSQL"
   if (lower.includes("mysql")) return "MySQL"
-  return dbKey
+  return resolved
 }

@@ -27,6 +27,35 @@ class ComparisonRequest(BaseModel):
     report_config: Optional["AnalysisReportConfig"] = None
 
 
+class ScenarioQueryInfo(BaseModel):
+    """Информация о SQL-запросе сценария"""
+
+    sql_template: str
+    query_type: str
+    weight: int = 1
+    description: Optional[str] = None
+
+
+class ScenarioInfo(BaseModel):
+    """Развёрнутая информация о сценарии тестирования"""
+
+    name: str
+    description: Optional[str] = None
+    scenario_type: str
+    queries: List[ScenarioQueryInfo] = Field(default_factory=list)
+
+
+class ConnectionInfo(BaseModel):
+    """Информация о подключении к СУБД"""
+
+    id: str
+    name: str
+    dbms_type: str
+    host: str
+    port: int
+    database: str
+
+
 class ComparisonTestInfo(BaseModel):
     """Краткая информация о тесте для ответа"""
 
@@ -37,6 +66,8 @@ class ComparisonTestInfo(BaseModel):
     summary: Optional[Dict[str, Any]] = None
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
+    scenario_info: Optional[ScenarioInfo] = None
+    connections: List[ConnectionInfo] = Field(default_factory=list)
 
 
 class DescriptiveStats(BaseModel):
@@ -181,6 +212,7 @@ class ComparisonResult(BaseModel):
     pairwise_comparisons: List[PairwiseComparison] = Field(default_factory=list)
     charts_data: ComparisonChartsData = Field(default_factory=ComparisonChartsData)
     analysis_report: Optional[AnalysisReport] = None
+    db_key_labels: Dict[str, str] = Field(default_factory=dict, description="Маппинг db_key (UUID) -> человекочитаемое имя")
 
 
 ComparisonRequest.model_rebuild()

@@ -15,6 +15,29 @@ export type ComparisonType =
   | "mixed"
   | "temporal"
 
+export interface ScenarioQueryInfo {
+  sql_template: string
+  query_type: string
+  weight: number
+  description?: string | null
+}
+
+export interface ScenarioInfo {
+  name: string
+  description?: string | null
+  scenario_type: string
+  queries: ScenarioQueryInfo[]
+}
+
+export interface ConnectionInfo {
+  id: string
+  name: string
+  dbms_type: string
+  host: string
+  port: number
+  database: string
+}
+
 export interface ComparisonTestInfo {
   id: string
   name: string
@@ -23,6 +46,8 @@ export interface ComparisonTestInfo {
   summary?: Record<string, any> | null
   started_at?: string | null
   finished_at?: string | null
+  scenario_info?: ScenarioInfo | null
+  connections: ConnectionInfo[]
 }
 
 export interface DescriptiveStats {
@@ -142,6 +167,7 @@ export interface ComparisonResult {
   pairwise_comparisons: PairwiseComparison[]
   charts_data: ComparisonChartsData
   analysis_report?: AnalysisReport | null
+  db_key_labels: Record<string, string>
 }
 
 export async function analyzeComparison(request: ComparisonRequest): Promise<ComparisonResult> {

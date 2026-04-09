@@ -14,8 +14,11 @@ from backend.comparison.schemas import (
     ComparisonChartsData,
     ComparisonResult,
     ComparisonTestInfo,
+    ConnectionInfo,
     MetricStatsBundle,
     NormalizedMetrics,
+    ScenarioInfo,
+    ScenarioQueryInfo,
     ThroughputSeriesPoint,
 )
 from backend.comparison.statistics import (
@@ -29,8 +32,10 @@ from backend.comparison.statistics import (
 class ComparisonService:
     """Сервис для анализа и сравнения нескольких тестовых прогонов"""
 
-    def __init__(self, repository):
+    def __init__(self, repository, scenario_repository=None, connection_repository=None):
         self.repository = repository
+        self.scenario_repository = scenario_repository
+        self.connection_repository = connection_repository
         self.report_generator = ComparisonReportGenerator()
 
     async def analyze(
@@ -131,8 +136,11 @@ class ComparisonService:
             warnings=warnings,
         )
 
+        test_infos = [await self._build_test_info(test_data) for test_data in tests]
+        db_key_labels = self._build_db_key_labels(tests)
+
         comparison_result = ComparisonResult(
-            tests=[self._build_test_info(test_data) for test_data in tests],
+            tests=test_infos,
             baseline_id=baseline_uuid,
             comparison_type=comparison_type,
             warnings=self._deduplicate_warnings(warnings),
@@ -140,8 +148,11 @@ class ComparisonService:
             normalized_metrics=normalized_metrics,
             pairwise_comparisons=pairwise_comparisons,
             charts_data=charts_data,
+            db_key_labels=db_key_labels,
         )
         comparison_result.analysis_report = self.report_generator.generate(comparison_result, report_config)
+        if comparison_result.analysis_report and db_key_labels:
+            self._replace_db_keys_in_report(comparison_result.analysis_report, db_key_labels)
         return comparison_result
 
     def _normalize_test_ids(self, test_ids: List[UUID]) -> List[UUID]:
@@ -931,17 +942,120 @@ class ComparisonService:
         common_db_keys = [db_key for db_key in baseline_db_keys if db_key in compared_db_keys]
         return [(db_key, db_key, db_key) for db_key in common_db_keys]
 
-    def _build_test_info(self, test_data: Dict[str, Any]) -> ComparisonTestInfo:
-        """Преобразовать словарь теста в схему ответа"""
+    async def _build_test_info(self, test_data: Dict[str, Any]) -> ComparisonTestInfo:
+        """Преобразовать словарь теста в схему ответа с развёрнутой информацией"""
+        config = test_data.get("config", {}) or {}
+        scenario_info = await self._resolve_scenario_info(config.get("scenario"))
+        connections = await self._resolve_connections(config.get("connection_ids"))
+
         return ComparisonTestInfo(
             id=UUID(str(test_data["id"])),
             name=test_data.get("name", "Без имени"),
             status=test_data.get("status", "unknown"),
-            config=test_data.get("config", {}) or {},
+            config=config,
             summary=test_data.get("summary"),
             started_at=test_data.get("started_at"),
             finished_at=test_data.get("finished_at"),
+            scenario_info=scenario_info,
+            connections=connections,
         )
+
+    async def _resolve_scenario_info(self, scenario_ref: Optional[str]) -> Optional[ScenarioInfo]:
+        """Разрешить сценарий по UUID или имени"""
+        if not scenario_ref or not self.scenario_repository:
+            return None
+
+        try:
+            scenario = None
+            try:
+                UUID(scenario_ref)
+                scenario = await self.scenario_repository.get_scenario(scenario_ref)
+            except (ValueError, AttributeError):
+                scenario = await self.scenario_repository.get_scenario_by_name(scenario_ref)
+
+            if not scenario:
+                return None
+
+            queries = []
+            for q in (scenario.queries or []):
+                queries.append(ScenarioQueryInfo(
+                    sql_template=q.sql_template,
+                    query_type=q.query_type,
+                    weight=q.weight,
+                    description=q.description,
+                ))
+
+            return ScenarioInfo(
+                name=scenario.name,
+                description=scenario.description,
+                scenario_type=scenario.scenario_type,
+                queries=queries,
+            )
+        except Exception as exc:
+            print(f"[COMPARISON] Не удалось разрешить сценарий '{scenario_ref}': {exc}")
+            return None
+
+    async def _resolve_connections(self, connection_ids: Optional[List[str]]) -> List[ConnectionInfo]:
+        """Разрешить имена подключений по ID"""
+        if not connection_ids or not self.connection_repository:
+            return []
+
+        connections = []
+        for conn_id in connection_ids:
+            try:
+                conn = await self.connection_repository.get_connection_by_id(conn_id)
+                if conn:
+                    connections.append(ConnectionInfo(
+                        id=str(conn.id),
+                        name=conn.name,
+                        dbms_type=conn.dbms_type,
+                        host=conn.host,
+                        port=conn.port,
+                        database=conn.database,
+                    ))
+            except Exception as exc:
+                print(f"[COMPARISON] Не удалось разрешить подключение '{conn_id}': {exc}")
+
+        return connections
+
+    @staticmethod
+    def _replace_db_keys_in_report(report, db_key_labels: Dict[str, str]):
+        """Заменить UUID db_key в тексте отчёта на человекочитаемые метки"""
+        def _replace_text(text: str) -> str:
+            for uuid_key, label in db_key_labels.items():
+                text = text.replace(uuid_key, label)
+            return text
+
+        report.verdict = _replace_text(report.verdict)
+        report.patterns = [_replace_text(item) for item in report.patterns]
+        report.recommendations = [_replace_text(item) for item in report.recommendations]
+        report.hypotheses = [_replace_text(item) for item in report.hypotheses]
+        for section in report.sections:
+            section.title = _replace_text(section.title)
+            section.items = [_replace_text(item) for item in section.items]
+
+    def _build_db_key_labels(self, tests: List[Dict[str, Any]]) -> Dict[str, str]:
+        """Построить маппинг db_key -> человекочитаемое имя из результатов тестов"""
+        labels: Dict[str, str] = {}
+
+        for test_data in tests:
+            for result in test_data.get("results", []) or []:
+                metrics = result.get("metrics", {}) or {}
+                db_key = (
+                    metrics.get("connection_key")
+                    or metrics.get("db_name")
+                    or result.get("db_type")
+                )
+                if not db_key or db_key in labels:
+                    continue
+
+                db_name = metrics.get("db_name")
+                if db_name and db_name != db_key:
+                    labels[db_key] = db_name
+                elif result.get("db_type"):
+                    labels[db_key] = result["db_type"]
+
+        return labels
 
     def _deduplicate_warnings(self, warnings: List[str]) -> List[str]:
         """Удалить дубли предупреждений, сохранив порядок"""

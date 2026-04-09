@@ -5,6 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 
+function resolveDbKeyLabel(dbKey: string, labels?: Record<string, string>): string {
+  return labels?.[dbKey] || dbKey
+}
+
 interface ComparisonTableProps {
   result: ComparisonResult
   useNormalized?: boolean
@@ -189,7 +193,7 @@ export function ComparisonTable({ result, useNormalized = false }: ComparisonTab
         <Card key={dbKey} className="bg-card border-border">
           <CardHeader>
             <CardTitle className="flex items-center justify-between gap-4">
-              <span>{dbKey}</span>
+              <span>{resolveDbKeyLabel(dbKey, result.db_key_labels)}</span>
               <Badge variant="outline">Baseline: {result.tests.find((test) => test.id === baselineId)?.name || baselineId}</Badge>
             </CardTitle>
           </CardHeader>

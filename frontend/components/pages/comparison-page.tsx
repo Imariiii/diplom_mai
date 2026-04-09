@@ -1,9 +1,9 @@
 "use client"
 
 import { useEffect, useState, startTransition } from "react"
-import { ChevronLeft, Download, Loader2, Scale } from "lucide-react"
+import { ChevronLeft, Code, Database, Download, Loader2, Scale, Server, Settings } from "lucide-react"
 
-import { analyzeComparison, type AnalysisReportConfig, type ComparisonResult } from "@/lib/api"
+import { analyzeComparison, type AnalysisReportConfig, type ComparisonResult, type ComparisonTestInfo } from "@/lib/api"
 import { useAppStore } from "@/lib/store"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { ComparisonTable } from "@/components/comparison/comparison-table"
 import { ComparisonCharts } from "@/components/comparison/comparison-charts"
 import { StatisticalSummary } from "@/components/comparison/statistical-summary"
@@ -123,6 +124,8 @@ export function ComparisonPage() {
     )
   }
 
+  const baselineTest = result.tests.find((t) => t.id === result.baseline_id)
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -148,7 +151,10 @@ export function ComparisonPage() {
       <Card className="bg-card border-border">
         <CardHeader>
           <CardTitle>Выбранные тесты</CardTitle>
-          <CardDescription>{result.tests.map((test) => test.name).join(" · ")}</CardDescription>
+          <CardDescription>
+            {result.tests.map((test) => test.name).join(" · ")}
+            {baselineTest && <span className="ml-2 text-xs">(baseline: {baselineTest.name})</span>}
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
@@ -157,19 +163,14 @@ export function ComparisonPage() {
               <Badge variant="outline">Нормализация доступна</Badge>
             )}
           </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          {result.tests.map((test) => (
-            <div key={test.id} className="rounded-lg border border-border bg-muted/30 p-4">
-              <p className="font-medium">{test.name}</p>
-              <p className="text-xs text-muted-foreground">{test.id}</p>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Сценарий: {String(test.config?.scenario || "-")}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Потоки: {String(test.config?.virtual_users || test.config?.threads || "-")}
-              </p>
-            </div>
-          ))}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+            {result.tests.map((test) => (
+              <TestInfoCard
+                key={test.id}
+                test={test}
+                isBaseline={test.id === result.baseline_id}
+              />
+            ))}
           </div>
         </CardContent>
       </Card>
@@ -233,17 +234,121 @@ export function ComparisonPage() {
   )
 }
 
+function TestInfoCard({ test, isBaseline }: { test: ComparisonTestInfo; isBaseline: boolean }) {
+  const [queriesOpen, setQueriesOpen] = useState(false)
+  const config = test.config || {}
+  const scenarioName = test.scenario_info?.name || config.scenario || "-"
+  const scenarioType = test.scenario_info?.scenario_type
+  const queries = test.scenario_info?.queries || []
+
+  const formatDate = (dateStr?: string | null) => {
+    if (!dateStr) return null
+    try {
+      return new Date(dateStr).toLocaleString("ru-RU", {
+        day: "2-digit", month: "2-digit", year: "numeric",
+        hour: "2-digit", minute: "2-digit",
+      })
+    } catch {
+      return dateStr
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="font-semibold truncate">{test.name}</p>
+          {test.started_at && (
+            <p className="text-xs text-muted-foreground">{formatDate(test.started_at)}</p>
+          )}
+        </div>
+        {isBaseline && <Badge variant="default" className="shrink-0">Baseline</Badge>}
+      </div>
+
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2 text-sm">
+          <Settings className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <span className="text-muted-foreground">Конфигурация:</span>
+        </div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1 pl-5.5 text-sm">
+          <span className="text-muted-foreground">Потоки:</span>
+          <span className="font-mono">{config.virtual_users ?? config.threads ?? "-"}</span>
+          <span className="text-muted-foreground">Итерации:</span>
+          <span className="font-mono">{config.iterations ?? "-"}</span>
+          <span className="text-muted-foreground">Прогрев:</span>
+          <span className="font-mono">{config.warmup_time != null ? `${config.warmup_time} с` : "-"}</span>
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2 text-sm">
+          <Database className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <span className="text-muted-foreground">Сценарий:</span>
+          <span className="font-medium">{scenarioName}</span>
+        </div>
+        {scenarioType && scenarioType !== scenarioName && (
+          <p className="pl-5.5 text-xs text-muted-foreground">Тип: {scenarioType}</p>
+        )}
+        {test.scenario_info?.description && (
+          <p className="pl-5.5 text-xs text-muted-foreground">{test.scenario_info.description}</p>
+        )}
+      </div>
+
+      {test.connections.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 text-sm">
+            <Server className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span className="text-muted-foreground">Подключения:</span>
+          </div>
+          <div className="pl-5.5 space-y-1">
+            {test.connections.map((conn) => (
+              <div key={conn.id} className="flex items-center gap-2 text-sm">
+                <Badge variant="outline" className="text-xs px-1.5 py-0">{conn.dbms_type}</Badge>
+                <span className="font-medium">{conn.name}</span>
+                <span className="text-xs text-muted-foreground">{conn.host}:{conn.port}/{conn.database}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {queries.length > 0 && (
+        <Collapsible open={queriesOpen} onOpenChange={setQueriesOpen}>
+          <CollapsibleTrigger asChild>
+            <button className="flex items-center gap-2 text-sm text-primary hover:underline">
+              <Code className="h-3.5 w-3.5 shrink-0" />
+              Запросы сценария ({queries.length})
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-2 space-y-2">
+            {queries.map((q, idx) => (
+              <div key={idx} className="rounded border border-border bg-background p-2.5 space-y-1">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs px-1.5 py-0 uppercase">{q.query_type}</Badge>
+                  <span className="text-xs text-muted-foreground">вес: {q.weight}</span>
+                  {q.description && <span className="text-xs text-muted-foreground">— {q.description}</span>}
+                </div>
+                <pre className="text-xs font-mono bg-muted/50 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">{q.sql_template}</pre>
+              </div>
+            ))}
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+    </div>
+  )
+}
+
 function getComparisonTypeLabel(type: ComparisonResult["comparison_type"]): string {
   switch (type) {
     case "cross_database":
-      return "Тип сравнения: Сравнение СУБД"
+      return "Сравнение СУБД"
     case "scalability":
-      return "Тип сравнения: Анализ масштабируемости"
+      return "Анализ масштабируемости"
     case "mixed":
-      return "Тип сравнения: Смешанное сравнение"
+      return "Смешанное сравнение"
     case "temporal":
-      return "Тип сравнения: Временное сравнение"
+      return "Временное сравнение"
     default:
-      return "Тип сравнения: Смешанное сравнение"
+      return "Смешанное сравнение"
   }
 }

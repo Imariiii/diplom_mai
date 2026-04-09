@@ -7,6 +7,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 
+function resolveDbKeyLabel(dbKey: string, labels?: Record<string, string>): string {
+  return labels?.[dbKey] || dbKey
+}
+
 interface StatisticalSummaryProps {
   result: ComparisonResult
 }
@@ -69,33 +73,41 @@ export function StatisticalSummary({ result }: StatisticalSummaryProps) {
       )}
 
       <div className="grid gap-3">
-        {result.pairwise_comparisons.map((item) => (
-          <Card key={`${item.baseline_test_id}-${item.compared_test_id}-${item.db_key}-${item.metric}`} className="bg-card border-border">
-            <CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  {item.is_significant ? (
-                    <CheckCircle2 className="h-4 w-4 text-green-500" />
-                  ) : (
-                    <AlertCircle className="h-4 w-4 text-muted-foreground" />
-                  )}
+        {result.pairwise_comparisons.map((item) => {
+          const baselineName = result.tests.find((t) => t.id === item.baseline_test_id)?.name || item.baseline_test_id
+          const comparedName = result.tests.find((t) => t.id === item.compared_test_id)?.name || item.compared_test_id
+
+          return (
+            <Card key={`${item.baseline_test_id}-${item.compared_test_id}-${item.db_key}-${item.metric}`} className="bg-card border-border">
+              <CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    {item.is_significant ? (
+                      <CheckCircle2 className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <AlertCircle className="h-4 w-4 text-muted-foreground" />
+                    )}
                   <p className="font-medium">
-                    {item.db_key} · {formatMetricLabel(item.metric)}
+                    {resolveDbKeyLabel(item.db_key, result.db_key_labels)} · {formatMetricLabel(item.metric)}
                   </p>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {baselineName} vs {comparedName}
+                  </p>
+                  <p className="text-sm text-muted-foreground">{item.interpretation}</p>
+                  {item.warning && <p className="text-xs text-amber-600">{item.warning}</p>}
                 </div>
-                <p className="text-sm text-muted-foreground">{item.interpretation}</p>
-                {item.warning && <p className="text-xs text-amber-600">{item.warning}</p>}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="outline">p={item.p_value?.toFixed(4) ?? "N/A"}</Badge>
-                <Badge variant="outline">{item.test_used || "без теста"}</Badge>
-                <Badge variant={item.is_significant ? "default" : "outline"}>
-                  {item.is_significant ? "значимо" : "не значимо"}
-                </Badge>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="outline">p={item.p_value?.toFixed(4) ?? "N/A"}</Badge>
+                  <Badge variant="outline">{item.test_used || "без теста"}</Badge>
+                  <Badge variant={item.is_significant ? "default" : "outline"}>
+                    {item.is_significant ? "значимо" : "не значимо"}
+                  </Badge>
+                </div>
+              </CardContent>
+            </Card>
+          )
+        })}
       </div>
     </div>
   )
