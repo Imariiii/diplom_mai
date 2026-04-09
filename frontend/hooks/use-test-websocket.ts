@@ -111,7 +111,6 @@ export function useTestWebSocket({
           setElapsedSeconds(metricsData.elapsed_seconds)
           setRemainingSeconds(metricsData.remaining_seconds)
           
-          // Преобразуем в TimeSeriesPoint
           const point: TimeSeriesPoint = {
             timestamp: new Date(metricsData.timestamp).getTime(),
             responseTime: metricsData.response_time,

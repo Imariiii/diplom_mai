@@ -260,7 +260,6 @@ class TestStreamingCallback:
         """Callback вызываемый при получении новых метрик"""
         now = datetime.now(timezone.utc)
         elapsed = time.perf_counter() - self.start_time
-        # Защита от отрицательного elapsed при reconnect или изменении системного времени
         if elapsed < 0:
             elapsed = 0
         progress = self._calculate_progress()

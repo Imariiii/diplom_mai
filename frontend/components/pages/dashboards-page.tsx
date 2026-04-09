@@ -218,14 +218,14 @@ export function DashboardsPage() {
       if (!acc[index]) {
         acc[index] = { time: new Date(point.timestamp).toLocaleTimeString("ru") }
       }
-      acc[index][`${dbId}_responseTime`] = point.responseTime?.toFixed(2) || 0
-      acc[index][`${dbId}_throughput`] = point.throughput?.toFixed(0) || 0
-      acc[index][`${dbId}_tps`] = point.tps?.toFixed(0) || 0
-      acc[index][`${dbId}_cpu`] = point.cpuUsage?.toFixed(1) || 0
-      acc[index][`${dbId}_memory`] = point.memoryUsage?.toFixed(1) || 0
-      acc[index][`${dbId}_diskIO`] = point.diskIOps?.toFixed(0) || 0
-      acc[index][`${dbId}_connections`] = point.activeConnections || 0
-      acc[index][`${dbId}_errors`] = point.errorCount || 0
+      acc[index][`${dbId}_responseTime`] = point.responseTime ?? 0
+      acc[index][`${dbId}_throughput`] = point.throughput ?? 0
+      acc[index][`${dbId}_tps`] = point.tps ?? 0
+      acc[index][`${dbId}_cpu`] = point.cpuUsage ?? 0
+      acc[index][`${dbId}_memory`] = point.memoryUsage ?? 0
+      acc[index][`${dbId}_diskIO`] = point.diskIOps ?? 0
+      acc[index][`${dbId}_connections`] = point.activeConnections ?? 0
+      acc[index][`${dbId}_errors`] = point.errorCount ?? 0
     })
     return acc
   }, [])
@@ -271,6 +271,8 @@ export function DashboardsPage() {
           || result.databaseId
       ) || [])
 
+  const isTestFinished = currentTest?.status === "completed" || currentTest?.status === "failed"
+
   if (!currentTest && Object.keys(realtimeData).length === 0) {
     return <EmptyStateCard />
   }
@@ -294,14 +296,18 @@ export function DashboardsPage() {
             <Database className="h-4 w-4 mr-2" />
             База данных
           </TabsTrigger>
-          <TabsTrigger value="system" className="text-foreground data-[state=active]:text-foreground">
-            <Cpu className="h-4 w-4 mr-2" />
-            Системные
-          </TabsTrigger>
-          <TabsTrigger value="transactions" className="text-foreground data-[state=active]:text-foreground">
-            <BarChart3 className="h-4 w-4 mr-2" />
-            Транзакции
-          </TabsTrigger>
+          {isTestFinished && (
+            <TabsTrigger value="system" className="text-foreground data-[state=active]:text-foreground">
+              <Cpu className="h-4 w-4 mr-2" />
+              Системные
+            </TabsTrigger>
+          )}
+          {isTestFinished && (
+            <TabsTrigger value="transactions" className="text-foreground data-[state=active]:text-foreground">
+              <BarChart3 className="h-4 w-4 mr-2" />
+              Транзакции
+            </TabsTrigger>
+          )}
           <TabsTrigger value="dbms" className="text-foreground data-[state=active]:text-foreground">
             <Lock className="h-4 w-4 mr-2" />
             Внутренние СУБД
@@ -317,26 +323,31 @@ export function DashboardsPage() {
             getDbDisplayName={getDbDisplayName}
             getDbType={getDbType}
             virtualUsers={testConfig.virtualUsers}
+            showCharts={isTestFinished}
           />
         </TabsContent>
 
-        <TabsContent value="system">
-          <SystemMetricsTab
-            databases={chartDatabases}
-            chartData={chartData}
-            getDbType={getDbType}
-            getDbDisplayName={getDbDisplayName}
-          />
-        </TabsContent>
+        {isTestFinished && (
+          <TabsContent value="system">
+            <SystemMetricsTab
+              databases={chartDatabases}
+              chartData={chartData}
+              getDbType={getDbType}
+              getDbDisplayName={getDbDisplayName}
+            />
+          </TabsContent>
+        )}
 
-        <TabsContent value="transactions">
-          <TransactionMetricsTab
-            databases={chartDatabases}
-            results={currentTest?.results}
-            getDbType={getDbType}
-            getDbDisplayName={getDbDisplayName}
-          />
-        </TabsContent>
+        {isTestFinished && (
+          <TabsContent value="transactions">
+            <TransactionMetricsTab
+              databases={chartDatabases}
+              results={currentTest?.results}
+              getDbType={getDbType}
+              getDbDisplayName={getDbDisplayName}
+            />
+          </TabsContent>
+        )}
 
         <TabsContent value="dbms">
           <DbmsMetricsTab

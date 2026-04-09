@@ -29,9 +29,9 @@ class LoadTester:
         # Callback для real-time обновлений
         self._metrics_callback: Optional[Callable] = None
         self._status_callback: Optional[Callable] = None
-        self._backup_callback: Optional[Callable] = None  # Callback для backup/restore статусов
+        self._backup_callback: Optional[Callable] = None
         self._is_streaming: bool = False
-        self._streaming_interval: float = 1.0  # Интервал отправки метрик в секундах
+        self._streaming_interval: float = 1.0
     
     def set_streaming_callback(self, callback: Any):
         """Установить callback для потоковой отправки метрик"""
@@ -68,10 +68,7 @@ class LoadTester:
                 db_type = self.db_connection.get_dbms_type(db_key)
                 db_name = self.db_connection.get_connection_name(db_key)
                 
-                # Получаем системные метрики
                 system_metrics = await self.get_system_metrics(db_key)
-                
-                # Получаем внутренние метрики СУБД
                 dbms_metrics = await self.get_dbms_metrics(db_key)
                 
                 await self._metrics_callback.on_metrics(
@@ -195,7 +192,6 @@ class LoadTester:
         query = self.query_manager.get_query(query_id)
         queries = [query['sql']]
         
-        # Подготовка БД (backup если нужно)
         prepare_info = await self.prepare_database_for_test(
             db_key, queries, auto_restore
         )
@@ -768,10 +764,8 @@ class LoadTester:
                 'failed': 0
             }
 
-        # Получаем SQL запросы для анализа
         sql_queries = [q['sql_template'] for q in queries]
         
-        # Подготовка БД
         prepare_info = await self.prepare_database_for_test(
             db_key, sql_queries, auto_restore
         )
@@ -779,7 +773,6 @@ class LoadTester:
         results = []
         start_time = time.perf_counter()
 
-        # Создаем взвешенный список запросов
         weighted_queries = []
         for query in queries:
             weight = query.get('weight', 1)
@@ -793,7 +786,6 @@ class LoadTester:
 
         try:
             for i in range(iterations):
-                # Выбираем случайный запрос из взвешенного списка
                 query = random.choice(weighted_queries)
 
                 result = await self.execute_scenario_query(
@@ -810,7 +802,6 @@ class LoadTester:
                 else:
                     recent_failed += 1
 
-                # Потоковая отправка метрик
                 current_time = time.perf_counter()
                 if self._is_streaming and (current_time - last_emit_time) >= self._streaming_interval:
                     if recent_times:
@@ -1124,10 +1115,8 @@ class LoadTester:
                 'failed': 0
             }
 
-        # Получаем SQL запросы для анализа
         sql_queries = [q['sql_template'] for q in queries]
         
-        # Подготовка БД
         prepare_info = await self.prepare_database_for_test(
             db_key, sql_queries, auto_restore
         )
@@ -1135,7 +1124,6 @@ class LoadTester:
         results = []
         start_time = time.perf_counter()
 
-        # Создаем взвешенный список запросов
         weighted_queries = []
         for query in queries:
             weight = query.get('weight', 1)
@@ -1149,7 +1137,6 @@ class LoadTester:
 
         try:
             for i in range(iterations):
-                # Выбираем случайный запрос из взвешенного списка
                 query = random.choice(weighted_queries)
 
                 result = await self.execute_scenario_query(
@@ -1166,7 +1153,6 @@ class LoadTester:
                 else:
                     recent_failed += 1
 
-                # Потоковая отправка метрик
                 current_time = time.perf_counter()
                 if self._is_streaming and (current_time - last_emit_time) >= self._streaming_interval:
                     if recent_times:
