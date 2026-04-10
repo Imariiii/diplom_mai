@@ -33,6 +33,8 @@ class LoadTester:
         self._backup_callback: Optional[Callable] = None
         self._is_streaming: bool = False
         self._streaming_interval: float = 1.0
+        
+        psutil.cpu_percent(interval=None)
     
     def set_streaming_callback(self, callback: Any):
         """Установить callback для потоковой отправки метрик"""
@@ -113,12 +115,13 @@ class LoadTester:
         Запуск виртуальных пользователей для параллельного выполнения запросов.
         
         При virtual_users <= 1 выполнение последовательное (обратная совместимость).
-        При virtual_users > 1 создаются параллельные asyncio-задачи, каждая из которых
-        выполняет свою долю итераций. Пул соединений масштабируется автоматически.
+        При virtual_>users 1 каждый воркер выполняет iterations запросов независимо
+        (итого = iterations × virtual_users), создавая реальную конкурентную нагрузку.
+        Пул соединений масштабируется автоматически.
         
         Args:
             db_key: Ключ подключения к БД
-            iterations: Общее количество итераций (распределяются между воркерами)
+            iterations: Количество итераций на каждого виртуального пользователя
             virtual_users: Количество параллельных воркеров
             query_func: Async-функция без аргументов, возвращающая Dict с результатом
         """
@@ -162,6 +165,8 @@ class LoadTester:
         
         await self.db_connection.ensure_pool_size(db_key, virtual_users)
         
+        psutil.cpu_percent(interval=None)
+        
         results: List[Dict] = []
         results_lock = asyncio.Lock()
         metrics_state = {
@@ -171,11 +176,8 @@ class LoadTester:
             'total_completed': 0,
         }
         
-        base_count = iterations // virtual_users
-        remainder = iterations % virtual_users
-        
-        async def worker(worker_id: int, count: int):
-            for _ in range(count):
+        async def worker(worker_id: int):
+            for _ in range(iterations):
                 result = await query_func()
                 async with results_lock:
                     results.append(result)
@@ -192,32 +194,35 @@ class LoadTester:
             try:
                 while True:
                     await asyncio.sleep(self._streaming_interval)
+                    snapshot = None
                     async with results_lock:
                         now = time.perf_counter()
                         interval = now - last_emit
                         if metrics_state['recent_times']:
-                            avg_rt = statistics.mean(metrics_state['recent_times'])
-                            total = metrics_state['recent_successful'] + metrics_state['recent_failed']
-                            tps = total / interval if interval > 0 else 0
-                            await self._emit_metrics(
-                                db_key=db_key,
-                                response_time=avg_rt,
-                                tps=tps,
-                                successful=metrics_state['recent_successful'],
-                                failed=metrics_state['recent_failed'],
-                            )
+                            snapshot = {
+                                'avg_rt': statistics.mean(metrics_state['recent_times']),
+                                'successful': metrics_state['recent_successful'],
+                                'failed': metrics_state['recent_failed'],
+                                'tps': (metrics_state['recent_successful'] + metrics_state['recent_failed']) / interval if interval > 0 else 0,
+                            }
                         metrics_state['recent_times'] = []
                         metrics_state['recent_successful'] = 0
                         metrics_state['recent_failed'] = 0
                         last_emit = now
+                    if snapshot:
+                        await self._emit_metrics(
+                            db_key=db_key,
+                            response_time=snapshot['avg_rt'],
+                            tps=snapshot['tps'],
+                            successful=snapshot['successful'],
+                            failed=snapshot['failed'],
+                        )
             except asyncio.CancelledError:
                 return
         
         tasks = []
         for w in range(virtual_users):
-            count = base_count + (1 if w < remainder else 0)
-            if count > 0:
-                tasks.append(asyncio.create_task(worker(w, count)))
+            tasks.append(asyncio.create_task(worker(w)))
         
         emitter_task = asyncio.create_task(metrics_emitter()) if self._is_streaming else None
         
@@ -386,7 +391,7 @@ class LoadTester:
                 
                 # Количество ошибок
                 'error_count': failed_count,
-                'error_rate': (failed_count / iterations) * 100 if iterations > 0 else 0,
+                'error_rate': (failed_count / len(results)) * 100 if len(results) > 0 else 0,
                 
                 # Информация о restore
                 'restore_info': {
@@ -563,7 +568,7 @@ class LoadTester:
     async def get_system_metrics(self, db_key: str) -> Dict:
         """Получить системные метрики"""
         try:
-            cpu_usage = psutil.cpu_percent(interval=1)
+            cpu_usage = psutil.cpu_percent(interval=None)
             memory = psutil.virtual_memory()
             disk_io = psutil.disk_io_counters()
             network_io = psutil.net_io_counters()
@@ -924,7 +929,7 @@ class LoadTester:
             'p99_time_ms': self.calculate_percentile(execution_times, 99) if execution_times else 0,
             'tps': successful_count / total_test_time if total_test_time > 0 else 0,
             'throughput': successful_count / total_test_time if total_test_time > 0 else 0,
-            'error_rate': (failed_count / iterations) * 100 if iterations > 0 else 0,
+            'error_rate': (failed_count / len(results)) * 100 if len(results) > 0 else 0,
             'restore_info': {
                 'needed': prepare_info.get('needs_restore', False),
                 'restored': restore_info.get('restored', False),
@@ -1246,7 +1251,7 @@ class LoadTester:
             'p99_time_ms': self.calculate_percentile(execution_times, 99) if execution_times else 0,
             'tps': successful_count / total_test_time if total_test_time > 0 else 0,
             'throughput': successful_count / total_test_time if total_test_time > 0 else 0,
-            'error_rate': (failed_count / iterations) * 100 if iterations > 0 else 0,
+            'error_rate': (failed_count / len(results)) * 100 if len(results) > 0 else 0,
             'restore_info': {
                 'needed': prepare_info.get('needs_restore', False),
                 'restored': restore_info.get('restored', False),
