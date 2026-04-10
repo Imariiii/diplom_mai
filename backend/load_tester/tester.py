@@ -102,6 +102,136 @@ class LoadTester:
             except Exception as e:
                 print(f"Ошибка отправки статуса: {e}")
     
+    async def _run_workers(
+        self,
+        db_key: str,
+        iterations: int,
+        virtual_users: int,
+        query_func: Callable,
+    ) -> List[Dict]:
+        """
+        Запуск виртуальных пользователей для параллельного выполнения запросов.
+        
+        При virtual_users <= 1 выполнение последовательное (обратная совместимость).
+        При virtual_users > 1 создаются параллельные asyncio-задачи, каждая из которых
+        выполняет свою долю итераций. Пул соединений масштабируется автоматически.
+        
+        Args:
+            db_key: Ключ подключения к БД
+            iterations: Общее количество итераций (распределяются между воркерами)
+            virtual_users: Количество параллельных воркеров
+            query_func: Async-функция без аргументов, возвращающая Dict с результатом
+        """
+        if virtual_users <= 1:
+            results = []
+            last_emit_time = time.perf_counter()
+            recent_times = []
+            recent_successful = 0
+            recent_failed = 0
+            
+            for i in range(iterations):
+                result = await query_func()
+                results.append(result)
+                
+                if result['error'] is None:
+                    recent_times.append(result['execution_time_ms'])
+                    recent_successful += 1
+                else:
+                    recent_failed += 1
+                
+                current_time = time.perf_counter()
+                if self._is_streaming and (current_time - last_emit_time) >= self._streaming_interval:
+                    if recent_times:
+                        avg_response_time = statistics.mean(recent_times)
+                        tps = (recent_successful + recent_failed) / (current_time - last_emit_time)
+                        await self._emit_metrics(
+                            db_key=db_key,
+                            response_time=avg_response_time,
+                            tps=tps,
+                            successful=recent_successful,
+                            failed=recent_failed
+                        )
+                    recent_times = []
+                    recent_successful = 0
+                    recent_failed = 0
+                    last_emit_time = current_time
+                
+                await asyncio.sleep(0.01)
+            
+            return results
+        
+        await self.db_connection.ensure_pool_size(db_key, virtual_users)
+        
+        results: List[Dict] = []
+        results_lock = asyncio.Lock()
+        metrics_state = {
+            'recent_times': [],
+            'recent_successful': 0,
+            'recent_failed': 0,
+            'total_completed': 0,
+        }
+        
+        base_count = iterations // virtual_users
+        remainder = iterations % virtual_users
+        
+        async def worker(worker_id: int, count: int):
+            for _ in range(count):
+                result = await query_func()
+                async with results_lock:
+                    results.append(result)
+                    if result['error'] is None:
+                        metrics_state['recent_times'].append(result['execution_time_ms'])
+                        metrics_state['recent_successful'] += 1
+                    else:
+                        metrics_state['recent_failed'] += 1
+                    metrics_state['total_completed'] += 1
+                await asyncio.sleep(0.001)
+        
+        async def metrics_emitter():
+            last_emit = time.perf_counter()
+            try:
+                while True:
+                    await asyncio.sleep(self._streaming_interval)
+                    async with results_lock:
+                        now = time.perf_counter()
+                        interval = now - last_emit
+                        if metrics_state['recent_times']:
+                            avg_rt = statistics.mean(metrics_state['recent_times'])
+                            total = metrics_state['recent_successful'] + metrics_state['recent_failed']
+                            tps = total / interval if interval > 0 else 0
+                            await self._emit_metrics(
+                                db_key=db_key,
+                                response_time=avg_rt,
+                                tps=tps,
+                                successful=metrics_state['recent_successful'],
+                                failed=metrics_state['recent_failed'],
+                            )
+                        metrics_state['recent_times'] = []
+                        metrics_state['recent_successful'] = 0
+                        metrics_state['recent_failed'] = 0
+                        last_emit = now
+            except asyncio.CancelledError:
+                return
+        
+        tasks = []
+        for w in range(virtual_users):
+            count = base_count + (1 if w < remainder else 0)
+            if count > 0:
+                tasks.append(asyncio.create_task(worker(w, count)))
+        
+        emitter_task = asyncio.create_task(metrics_emitter()) if self._is_streaming else None
+        
+        await asyncio.gather(*tasks)
+        
+        if emitter_task:
+            emitter_task.cancel()
+            try:
+                await emitter_task
+            except asyncio.CancelledError:
+                pass
+        
+        return results
+    
     def calculate_percentile(self, data: List[float], percentile: float) -> float:
         """Вычисление перцентиля"""
         if not data:
@@ -197,57 +327,23 @@ class LoadTester:
             db_key, queries, auto_restore
         )
         
-        results = []
         start_time = time.perf_counter()
-        last_emit_time = start_time
-        
-        # Буферы для потоковых метрик
-        recent_times = []
-        recent_successful = 0
-        recent_failed = 0
         
         try:
-            # Запуск итераций (симуляция виртуальных пользователей)
-            for i in range(iterations):
-                result = await self.execute_query(db_key, query['sql'], query_id)
-                results.append(result)
-                
-                # Накапливаем метрики для потоковой отправки
-                if result['error'] is None:
-                    recent_times.append(result['execution_time_ms'])
-                    recent_successful += 1
-                else:
-                    recent_failed += 1
-                
-                # Отправляем метрики каждые N миллисекунд
-                current_time = time.perf_counter()
-                if self._is_streaming and (current_time - last_emit_time) >= self._streaming_interval:
-                    if recent_times:
-                        avg_response_time = statistics.mean(recent_times) if recent_times else 0
-                        elapsed = current_time - start_time
-                        tps = (recent_successful + recent_failed) / (current_time - last_emit_time) if (current_time - last_emit_time) > 0 else 0
-                        
-                        await self._emit_metrics(
-                            db_key=db_key,
-                            response_time=avg_response_time,
-                            tps=tps,
-                            successful=recent_successful,
-                            failed=recent_failed
-                        )
-                    
-                    # Сбрасываем буферы
-                    recent_times = []
-                    recent_successful = 0
-                    recent_failed = 0
-                    last_emit_time = current_time
-                
-                await asyncio.sleep(0.01)  # Небольшая задержка между запросами
+            async def _make_query():
+                return await self.execute_query(db_key, query['sql'], query_id)
+            
+            results = await self._run_workers(
+                db_key=db_key,
+                iterations=iterations,
+                virtual_users=virtual_users,
+                query_func=_make_query,
+            )
             
             end_time = time.perf_counter()
             total_test_time = end_time - start_time
             
         finally:
-            # Восстановление БД (даже при ошибке)
             restore_info = await self.restore_database_after_test(
                 db_key, prepare_info, auto_restore
             )
@@ -771,7 +867,6 @@ class LoadTester:
             db_key, sql_queries, auto_restore
         )
 
-        results = []
         start_time = time.perf_counter()
 
         weighted_queries = []
@@ -780,55 +875,27 @@ class LoadTester:
             for _ in range(weight):
                 weighted_queries.append(query)
 
-        last_emit_time = start_time
-        recent_times = []
-        recent_successful = 0
-        recent_failed = 0
-
         try:
-            for i in range(iterations):
-                query = random.choice(weighted_queries)
-
-                result = await self.execute_scenario_query(
+            async def _make_scenario_query():
+                q = random.choice(weighted_queries)
+                return await self.execute_scenario_query(
                     db_key,
-                    query['sql_template'],
-                    query.get('params', []),
+                    q['sql_template'],
+                    q.get('params', []),
                     scenario.get('name', 'unknown')
                 )
-                results.append(result)
-
-                if result['error'] is None:
-                    recent_times.append(result['execution_time_ms'])
-                    recent_successful += 1
-                else:
-                    recent_failed += 1
-
-                current_time = time.perf_counter()
-                if self._is_streaming and (current_time - last_emit_time) >= self._streaming_interval:
-                    if recent_times:
-                        avg_response_time = statistics.mean(recent_times)
-                        tps = (recent_successful + recent_failed) / (current_time - last_emit_time)
-
-                        await self._emit_metrics(
-                            db_key=db_key,
-                            response_time=avg_response_time,
-                            tps=tps,
-                            successful=recent_successful,
-                            failed=recent_failed
-                        )
-
-                    recent_times = []
-                    recent_successful = 0
-                    recent_failed = 0
-                    last_emit_time = current_time
-
-                await asyncio.sleep(0.01)
+            
+            results = await self._run_workers(
+                db_key=db_key,
+                iterations=iterations,
+                virtual_users=virtual_users,
+                query_func=_make_scenario_query,
+            )
 
             end_time = time.perf_counter()
             total_test_time = end_time - start_time
             
         finally:
-            # Восстановление БД
             restore_info = await self.restore_database_after_test(
                 db_key, prepare_info, auto_restore
             )
@@ -1122,7 +1189,6 @@ class LoadTester:
             db_key, sql_queries, auto_restore
         )
 
-        results = []
         start_time = time.perf_counter()
 
         weighted_queries = []
@@ -1131,55 +1197,27 @@ class LoadTester:
             for _ in range(weight):
                 weighted_queries.append(query)
 
-        last_emit_time = start_time
-        recent_times = []
-        recent_successful = 0
-        recent_failed = 0
-
         try:
-            for i in range(iterations):
-                query = random.choice(weighted_queries)
-
-                result = await self.execute_scenario_query(
+            async def _make_scenario_query():
+                q = random.choice(weighted_queries)
+                return await self.execute_scenario_query(
                     db_key,
-                    query['sql_template'],
-                    query.get('params', []),
+                    q['sql_template'],
+                    q.get('params', []),
                     scenario.get('name', 'unknown')
                 )
-                results.append(result)
-
-                if result['error'] is None:
-                    recent_times.append(result['execution_time_ms'])
-                    recent_successful += 1
-                else:
-                    recent_failed += 1
-
-                current_time = time.perf_counter()
-                if self._is_streaming and (current_time - last_emit_time) >= self._streaming_interval:
-                    if recent_times:
-                        avg_response_time = statistics.mean(recent_times)
-                        tps = (recent_successful + recent_failed) / (current_time - last_emit_time)
-
-                        await self._emit_metrics(
-                            db_key=db_key,
-                            response_time=avg_response_time,
-                            tps=tps,
-                            successful=recent_successful,
-                            failed=recent_failed
-                        )
-
-                    recent_times = []
-                    recent_successful = 0
-                    recent_failed = 0
-                    last_emit_time = current_time
-
-                await asyncio.sleep(0.01)
+            
+            results = await self._run_workers(
+                db_key=db_key,
+                iterations=iterations,
+                virtual_users=virtual_users,
+                query_func=_make_scenario_query,
+            )
 
             end_time = time.perf_counter()
             total_test_time = end_time - start_time
             
         finally:
-            # Восстановление БД
             restore_info = await self.restore_database_after_test(
                 db_key, prepare_info, auto_restore
             )

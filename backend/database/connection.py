@@ -16,6 +16,7 @@ class DatabaseConnection:
     
     def __init__(self, config_path: Optional[str] = None):
         self.engines: Dict[str, AsyncEngine] = {}
+        self._pool_sizes: Dict[str, int] = {}
         self._connection_configs: Dict[str, Dict[str, Any]] = {}
         self._connection_repo = None
         self._connections_loaded = False
@@ -147,10 +148,11 @@ class DatabaseConnection:
         connection_key = self._resolve_connection_key(connection_key)
         if connection_key not in self.engines:
             connection_string = self.get_connection_string(connection_key)
+            pool_size = self._pool_sizes.get(connection_key, 5)
             self.engines[connection_key] = create_async_engine(
                 connection_string,
-                pool_size=5,
-                max_overflow=10,
+                pool_size=pool_size,
+                max_overflow=pool_size * 2,
                 echo=False
             )
         return self.engines[connection_key]
@@ -159,6 +161,17 @@ class DatabaseConnection:
         """Получение engine с предварительной загрузкой подключений из БД"""
         await self.ensure_connection_config(connection_key)
         return self.get_engine(connection_key)
+    
+    async def ensure_pool_size(self, connection_key: str, min_size: int):
+        """Масштабировать пул соединений под количество виртуальных пользователей"""
+        connection_key = self._resolve_connection_key(connection_key)
+        current = self._pool_sizes.get(connection_key, 5)
+        if current >= min_size:
+            return
+        self._pool_sizes[connection_key] = min_size
+        if connection_key in self.engines:
+            await self.engines[connection_key].dispose()
+            del self.engines[connection_key]
     
     async def test_connection(self, db_type: str) -> bool:
         """Проверка подключения к БД"""
