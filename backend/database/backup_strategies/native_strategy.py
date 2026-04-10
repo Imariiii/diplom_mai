@@ -1,6 +1,12 @@
 """
 Native dump strategy for database backup/restore using pg_dump/mysqldump
 Optional fallback strategy when SQL-based strategy is not suitable for large databases
+
+NOTE: Эта стратегия реализована, но НЕ интегрирована в DatabaseStateManager.
+Используется только SqlBackupStrategy. NativeDumpStrategy может быть подключена
+в будущем для поддержки больших баз данных (>10M строк), где CREATE TABLE AS SELECT
+становится неэффективным. Для интеграции необходимо обновить DatabaseStateManager._refresh_config()
+и добавить выбор стратегии по конфигу default_strategy="native".
 """
 import asyncio
 import os

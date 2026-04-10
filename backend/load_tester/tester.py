@@ -25,6 +25,7 @@ class LoadTester:
         self.query_manager = QueryManager()
         self.state_manager = DatabaseStateManager()
         self.results: List[Dict] = []
+        self.auto_restore: bool = True
         
         # Callback для real-time обновлений
         self._metrics_callback: Optional[Callable] = None
@@ -947,7 +948,7 @@ class LoadTester:
                 scenario,
                 iterations=iterations,
                 virtual_users=virtual_users,
-                auto_restore=True
+                auto_restore=self.auto_restore
             )
 
             all_results.append({
@@ -1298,7 +1299,7 @@ class LoadTester:
                 scenario,
                 iterations=iterations,
                 virtual_users=virtual_users,
-                auto_restore=True
+                auto_restore=self.auto_restore
             )
 
             all_results.append({

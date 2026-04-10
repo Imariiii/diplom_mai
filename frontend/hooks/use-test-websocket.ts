@@ -50,12 +50,21 @@ interface ConnectedMessage {
   message: string
 }
 
-type WebSocketMessage = MetricsMessage | StatusMessage | ConnectedMessage | { type: "pong" }
+interface BackupStatusMessage {
+  type: "backup_status"
+  status: string
+  test_id: string
+  data: Record<string, unknown>
+  timestamp: string
+}
+
+type WebSocketMessage = MetricsMessage | StatusMessage | ConnectedMessage | BackupStatusMessage | { type: "pong" }
 
 interface UseTestWebSocketOptions {
   testId: string
   onMetrics?: (data: MetricsMessage["data"]) => void
   onStatus?: (data: StatusMessage["data"]) => void
+  onBackupStatus?: (data: BackupStatusMessage) => void
   onConnect?: () => void
   onDisconnect?: () => void
   onError?: (error: Event) => void
@@ -67,6 +76,7 @@ interface UseTestWebSocketReturn {
   isConnected: boolean
   progress: number
   status: string
+  backupStatus: string
   elapsedSeconds: number
   remainingSeconds: number
   connect: () => void
@@ -80,6 +90,7 @@ export function useTestWebSocket({
   testId,
   onMetrics,
   onStatus,
+  onBackupStatus,
   onConnect,
   onDisconnect,
   onError,
@@ -93,6 +104,7 @@ export function useTestWebSocket({
   const [isConnected, setIsConnected] = useState(false)
   const [progress, setProgress] = useState(0)
   const [status, setStatus] = useState<string>("pending")
+  const [backupStatus, setBackupStatus] = useState<string>("")
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [remainingSeconds, setRemainingSeconds] = useState(0)
   
@@ -159,6 +171,11 @@ export function useTestWebSocket({
           onStatus?.(statusData)
           break
           
+        case "backup_status":
+          setBackupStatus(message.status)
+          onBackupStatus?.(message)
+          break
+
         case "connected":
           console.log(`[WS] Connected to test: ${message.test_id}`)
           break
@@ -170,7 +187,7 @@ export function useTestWebSocket({
     } catch (error) {
       console.error("[WS] Error parsing message:", error)
     }
-  }, [addRealtimeData, currentTest, setCurrentTest, onMetrics, onStatus])
+  }, [addRealtimeData, currentTest, setCurrentTest, onMetrics, onStatus, onBackupStatus])
 
   const connect = useCallback(() => {
     // Не подключаемся если testId пустой или невалидный
@@ -275,6 +292,7 @@ export function useTestWebSocket({
     isConnected,
     progress,
     status,
+    backupStatus,
     elapsedSeconds,
     remainingSeconds,
     connect,

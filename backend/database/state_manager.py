@@ -53,14 +53,7 @@ class DatabaseStateManager:
         self.config = config or get_restore_config()
         self._analyzer = QueryAnalyzer()
         self._verifier = StateVerifier(self.config)
-        
-        # Выбираем стратегию бэкапа
-        strategy_type = self.config.get("default_strategy", "sql")
-        if strategy_type == "sql":
-            self._strategy = SqlBackupStrategy(self.config)
-        else:
-            # В будущем: NativeDumpStrategy с fallback
-            self._strategy = SqlBackupStrategy(self.config)
+        self._strategy = SqlBackupStrategy(self.config)
         
         # Блокировки для каждой СУБД (для параллельных тестов)
         self._locks: Dict[str, asyncio.Lock] = {
@@ -131,6 +124,12 @@ class DatabaseStateManager:
         """Получить блокировку для СУБД"""
         return self._locks.get(dbms_type, asyncio.Lock())
     
+    def _refresh_config(self):
+        """Перечитать конфигурацию из актуального состояния"""
+        self.config = get_restore_config()
+        self._verifier = StateVerifier(self.config)
+        self._strategy = SqlBackupStrategy(self.config)
+
     async def prepare_for_test(self, engine: AsyncEngine, dbms_type: str, 
                              queries: List[str]) -> PrepareResult:
         """
@@ -144,6 +143,8 @@ class DatabaseStateManager:
         Returns:
             PrepareResult с результатами подготовки
         """
+        self._refresh_config()
+        
         # Проверяем, нужен ли backup
         if not self.needs_restore(queries):
             return PrepareResult(
@@ -242,7 +243,7 @@ class DatabaseStateManager:
                 
                 if self.config.get("verify_after_restore", True):
                     post_fingerprint = await self._verifier.capture_fingerprint(
-                        engine, prepare_result.affected_tables
+                        engine, prepare_result.backup_info.tables
                     )
                     verify_result = await self._verifier.verify(
                         prepare_result.pre_test_fingerprint, post_fingerprint
@@ -279,19 +280,45 @@ class DatabaseStateManager:
                     errors=errors
                 )
     
+    def get_active_backup_id(self, dbms_type: str) -> Optional[str]:
+        """
+        Получить ID последнего активного бэкапа для данного типа СУБД
+        
+        Args:
+            dbms_type: Тип СУБД
+            
+        Returns:
+            backup_id или None
+        """
+        for key, info in self._active_backups.items():
+            if key.startswith(f"{dbms_type}:"):
+                return info.backup_id
+        return None
+
     async def manual_restore(self, engine: AsyncEngine, dbms_type: str, 
-                            backup_id: str) -> RestoreResult:
+                            backup_id: Optional[str] = None) -> RestoreResult:
         """
         Ручное восстановление из сохранённого бэкапа
         
         Args:
             engine: SQLAlchemy async engine
             dbms_type: Тип СУБД
-            backup_id: ID бэкапа
+            backup_id: ID бэкапа (если None — восстановит последний активный)
             
         Returns:
             RestoreResult с результатами восстановления
         """
+        if not backup_id:
+            backup_id = self.get_active_backup_id(dbms_type)
+        
+        if not backup_id:
+            return RestoreResult(
+                success=False,
+                duration_ms=0,
+                verified=False,
+                errors=[f"Нет активных бэкапов для {dbms_type}"]
+            )
+        
         backup_key = f"{dbms_type}:{backup_id}"
         
         if backup_key not in self._active_backups:
@@ -353,6 +380,41 @@ class DatabaseStateManager:
                 errors=errors
             )
     
+    async def cleanup_all_backups(self, engine: AsyncEngine, dbms_type: str) -> List[str]:
+        """
+        Найти и удалить все backup-таблицы из БД
+        
+        Args:
+            engine: SQLAlchemy async engine
+            dbms_type: Тип СУБД
+            
+        Returns:
+            Список удалённых backup-таблиц
+        """
+        prefix = self.config.get("backup_table_prefix", "_loadtest_backup_")
+        all_tables = await self._get_all_tables(engine, dbms_type)
+        backup_tables = [t for t in all_tables if t.startswith(prefix)]
+        
+        deleted = []
+        async with engine.connect() as conn:
+            for table in backup_tables:
+                try:
+                    if dbms_type == 'postgresql':
+                        await conn.execute(text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
+                    else:
+                        await conn.execute(text(f'DROP TABLE IF EXISTS `{table}`'))
+                    deleted.append(table)
+                except Exception as e:
+                    print(f"[BACKUP] Ошибка удаления таблицы {table}: {e}")
+            await conn.commit()
+        
+        # Очищаем _active_backups для этого типа СУБД
+        keys_to_remove = [k for k in self._active_backups if k.startswith(f"{dbms_type}:")]
+        for key in keys_to_remove:
+            self._active_backups.pop(key, None)
+        
+        return deleted
+
     async def get_database_state(self, engine: AsyncEngine, dbms_type: str) -> Dict:
         """
         Получить текущее состояние БД

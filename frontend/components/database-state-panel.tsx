@@ -35,6 +35,7 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState("overview")
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({})
+  const [backupIds, setBackupIds] = useState<Record<string, string>>({})
 
   const fetchStates = useCallback(async () => {
     setLoading(true)
@@ -84,7 +85,10 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
     const key = `backup-${connectionId}`
     setActionLoading((prev) => ({ ...prev, [key]: true }))
     try {
-      await apiClient.createBackup(connectionId)
+      const result = await apiClient.createBackup(connectionId)
+      if (result?.backup_id) {
+        setBackupIds((prev) => ({ ...prev, [connectionId]: result.backup_id }))
+      }
       await fetchStates()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create backup")
@@ -97,7 +101,12 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
     const key = `restore-${connectionId}`
     setActionLoading((prev) => ({ ...prev, [key]: true }))
     try {
-      await apiClient.restoreBackup(connectionId)
+      await apiClient.restoreBackup(connectionId, backupIds[connectionId])
+      setBackupIds((prev) => {
+        const next = { ...prev }
+        delete next[connectionId]
+        return next
+      })
       await fetchStates()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to restore database")

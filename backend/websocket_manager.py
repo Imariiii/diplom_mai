@@ -363,6 +363,10 @@ class TestStreamingCallback:
             message += f". Длительность: {actual_duration:.1f} сек, TPS: {summary.get('overall_tps', 0):.2f}"
         await self.on_status_change("completed", message)
     
+    async def on_backup_status(self, status: str, data: Dict[str, Any] = None):
+        """Вызывается при изменении статуса backup/restore"""
+        await self.manager.send_backup_status(self.test_id, status, data or {})
+
     async def on_test_error(self, error: str):
         """Вызывается при ошибке теста"""
         await self._flush_metric_samples()

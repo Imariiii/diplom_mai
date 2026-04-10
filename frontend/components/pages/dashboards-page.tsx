@@ -24,6 +24,7 @@ export function DashboardsPage() {
     isConnected,
     progress,
     status,
+    backupStatus,
     elapsedSeconds,
     remainingSeconds,
   } = useTestWebSocket({
@@ -286,6 +287,7 @@ export function DashboardsPage() {
           progress={progress}
           elapsedSeconds={elapsedSeconds}
           statusMessage={statusMessage}
+          backupStatus={backupStatus}
           formatTime={formatTime}
         />
       )}

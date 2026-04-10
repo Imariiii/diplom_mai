@@ -155,9 +155,6 @@ async def _restore_backup_for_connection(
     repo: ConnectionRepository,
 ) -> RestoreResponse:
     """Восстановить backup для конкретного подключения"""
-    if not restore_request.backup_id:
-        raise HTTPException(status_code=400, detail="backup_id is required")
-
     context = await _get_connection_context(connection_id, repo)
     restore_result = await get_db_state_manager().manual_restore(
         context["engine"], context["dbms_type"], restore_request.backup_id
