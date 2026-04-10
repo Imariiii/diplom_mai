@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any
 class ConnectionCreateRequest(BaseModel):
     """Запрос на создание нового подключения"""
     name: str = Field(..., min_length=1, max_length=255, description="Уникальное имя подключения")
-    dbms_type: str = Field(..., description="Тип СУБД: mysql или postgresql")
+    dbms_type: str = Field(..., description="Тип СУБД: mysql, mariadb или postgresql")
     host: str = Field(..., min_length=1, max_length=255, description="Хост базы данных")
     port: int = Field(..., ge=1, le=65535, description="Порт подключения")
     user: str = Field(..., min_length=1, max_length=100, description="Пользователь")
@@ -55,7 +55,7 @@ class ConnectionTestRequest(BaseModel):
     user: str = Field(..., min_length=1, max_length=100)
     password: str = Field(..., min_length=1)
     database: str = Field(..., min_length=1, max_length=100)
-    dbms_type: str = Field(..., description="Тип СУБД: mysql или postgresql")
+    dbms_type: str = Field(..., description="Тип СУБД: mysql, mariadb или postgresql")
     extra_params: Optional[Dict[str, Any]] = Field(default=None)
 
 

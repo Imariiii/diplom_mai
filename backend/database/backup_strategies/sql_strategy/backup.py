@@ -7,8 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy import text
 
 from .. import BackupInfo, SizeEstimate
-from .helpers import save_postgres_sequences, save_mysql_auto_increments
-from backend.database.sql_utils import get_row_count, get_table_size
+from .helpers import save_auto_values
+from backend.database.dialects import get_dialect
+from backend.database.sql_utils import get_row_count, get_table_size, resolve_dbms_type
 
 
 async def create_backup_logic(
@@ -30,7 +31,7 @@ async def create_backup_logic(
         BackupInfo с информацией о созданном бэкапе
     """
     backup_id = str(uuid.uuid4())[:8]
-    dbms_type = engine.dialect.name
+    dbms_type = resolve_dbms_type(engine)
     
     backup_tables = set()
     row_counts = {}
@@ -50,10 +51,11 @@ async def create_backup_logic(
         row_counts[table] = row_count
     
     # Сохраняем sequences (PostgreSQL) или AUTO_INCREMENT (MySQL)
+    auto_values = await save_auto_values(engine, tables, dbms_type)
     if dbms_type == 'postgresql':
-        sequences = await save_postgres_sequences(engine, tables)
-    elif dbms_type == 'mysql':
-        auto_increments = await save_mysql_auto_increments(engine, tables)
+        sequences = auto_values
+    else:
+        auto_increments = auto_values
     
     return BackupInfo(
         backup_id=backup_id,
@@ -78,24 +80,12 @@ async def create_table_backup(engine: AsyncEngine, table: str, backup_table: str
     Returns:
         Количество скопированных строк
     """
+    dialect = get_dialect(resolve_dbms_type(engine))
     async with engine.connect() as conn:
-        dbms_type = engine.dialect.name
-        
-        # Создаём копию таблицы с учётом синтаксиса БД
-        if dbms_type == 'postgresql':
-            sql = f'CREATE TABLE "{backup_table}" AS SELECT * FROM "{table}"'
-        else:
-            sql = f'CREATE TABLE `{backup_table}` AS SELECT * FROM `{table}`'
-        
-        await conn.execute(text(sql))
+        await conn.execute(text(dialect.get_create_backup_table_sql(table, backup_table)))
         await conn.commit()
         
-        # Получаем количество строк
-        if dbms_type == 'postgresql':
-            result = await conn.execute(text(f'SELECT COUNT(*) FROM "{backup_table}"'))
-        else:
-            result = await conn.execute(text(f'SELECT COUNT(*) FROM `{backup_table}`'))
-        
+        result = await conn.execute(text(dialect.get_row_count_sql(backup_table)))
         row_count = result.scalar()
         
         return row_count
@@ -103,14 +93,9 @@ async def create_table_backup(engine: AsyncEngine, table: str, backup_table: str
 
 async def drop_table_if_exists(engine: AsyncEngine, table: str) -> None:
     """Удалить таблицу если существует"""
+    dialect = get_dialect(resolve_dbms_type(engine))
     async with engine.connect() as conn:
-        # Учитываем различия в синтаксисе DROP
-        if engine.dialect.name == 'postgresql':
-            sql = f'DROP TABLE IF EXISTS "{table}" CASCADE'
-        else:
-            sql = f'DROP TABLE IF EXISTS `{table}`'
-        
-        await conn.execute(text(sql))
+        await conn.execute(text(dialect.get_drop_table_sql(table, cascade=True)))
         await conn.commit()
 
 
@@ -137,7 +122,6 @@ async def estimate_size_logic(
     Returns:
         SizeEstimate с оценкой размера и времени
     """
-    dbms_type = engine.dialect.name
     table_info = {}
     total_rows = 0
     total_size = 0

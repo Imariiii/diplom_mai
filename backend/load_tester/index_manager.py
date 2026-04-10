@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 
+from backend.database.dialects import get_dialect
+
 
 @dataclass
 class IndexOperationDetail:
@@ -58,9 +60,7 @@ class IndexManager:
     """Создание и удаление индексов для сценариев"""
 
     def _quote_identifier(self, db_type: str, identifier: str) -> str:
-        quote = '"' if db_type == "postgresql" else "`"
-        sanitized = identifier.strip().replace(quote, "")
-        return f"{quote}{sanitized}{quote}"
+        return get_dialect(db_type).quote_identifier(identifier)
 
     def _normalize_columns(self, column_names: str) -> List[str]:
         return [column.strip() for column in column_names.split(",") if column.strip()]
@@ -76,35 +76,15 @@ class IndexManager:
         )
 
     def _build_column_sql(self, db_type: str, column_names: str) -> str:
-        columns = self._normalize_columns(column_names)
-        return ", ".join(self._quote_identifier(db_type, column) for column in columns)
+        return get_dialect(db_type).build_columns_sql(column_names)
 
     def _build_create_index_sql(self, db_type: str, index_def: Dict[str, Any]) -> str:
-        index_name = self._quote_identifier(db_type, self._resolve_index_name(index_def))
-        table_name = self._quote_identifier(db_type, index_def["table_name"])
-        columns_sql = self._build_column_sql(db_type, index_def["column_names"])
-        index_type = (index_def.get("index_type") or "btree").upper()
-        is_unique = "UNIQUE " if index_def.get("is_unique") else ""
-        condition = (index_def.get("condition") or "").strip()
-
-        if db_type == "postgresql":
-            sql = f"CREATE {is_unique}INDEX {index_name} ON {table_name} USING {index_type} ({columns_sql})"
-            if condition:
-                sql += f" WHERE {condition}"
-            return sql
-
-        sql = f"CREATE {is_unique}INDEX {index_name} ON {table_name} ({columns_sql})"
-        if index_type and index_type != "BTREE":
-            sql += f" USING {index_type}"
-        return sql
+        dialect = get_dialect(db_type)
+        return dialect.get_create_index_sql(index_def, self._resolve_index_name(index_def))
 
     def _build_drop_index_sql(self, db_type: str, index_def: Dict[str, Any]) -> str:
-        index_name = self._quote_identifier(db_type, self._resolve_index_name(index_def))
-        if db_type == "postgresql":
-            return f"DROP INDEX IF EXISTS {index_name}"
-
-        table_name = self._quote_identifier(db_type, index_def["table_name"])
-        return f"DROP INDEX {index_name} ON {table_name}"
+        dialect = get_dialect(db_type)
+        return dialect.get_drop_index_sql(index_def, self._resolve_index_name(index_def))
 
     def _normalize_columns_key(self, column_names: str) -> str:
         return ",".join(column.strip().lower() for column in self._normalize_columns(column_names))
@@ -116,30 +96,9 @@ class IndexManager:
         table_name: str,
     ) -> Dict[str, str]:
         """Получить существующие индексы таблицы как map normalized_columns -> index_name"""
+        dialect = get_dialect(db_type)
         async with engine.connect() as conn:
-            if db_type == "postgresql":
-                result = await conn.execute(text("""
-                    SELECT
-                        i.relname AS index_name,
-                        string_agg(a.attname, ',' ORDER BY x.ordinality) AS columns
-                    FROM pg_class t
-                    JOIN pg_index ix ON t.oid = ix.indrelid
-                    JOIN pg_class i ON i.oid = ix.indexrelid
-                    JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS x(attnum, ordinality) ON true
-                    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = x.attnum
-                    WHERE t.relname = :table_name
-                    GROUP BY i.relname
-                """), {"table_name": table_name})
-            else:
-                result = await conn.execute(text("""
-                    SELECT
-                        INDEX_NAME AS index_name,
-                        GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') AS columns
-                    FROM information_schema.STATISTICS
-                    WHERE TABLE_SCHEMA = DATABASE()
-                      AND TABLE_NAME = :table_name
-                    GROUP BY INDEX_NAME
-                """), {"table_name": table_name})
+            result = await conn.execute(text(dialect.get_existing_indexes_sql()), {"table_name": table_name})
 
             return {
                 self._normalize_columns_key(row[1] or ""): row[0]

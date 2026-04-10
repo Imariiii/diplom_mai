@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from backend.database.repository.connection_repository import ConnectionRepository
+from backend.database.dialects import get_dialect, is_registered_dbms_type
 from backend.api.schemas.connection_schemas import (
     ConnectionCreateRequest,
     ConnectionUpdateRequest,
@@ -33,6 +34,31 @@ def get_connection_repo() -> ConnectionRepository:
 def _connection_to_response(config) -> ConnectionResponse:
     """Конвертировать модель БД в Pydantic схему"""
     return ConnectionResponse(**config.to_dict())
+
+
+def _validate_dbms_type(dbms_type: Optional[str]) -> None:
+    """Проверить, что тип СУБД поддерживается проектом."""
+    if dbms_type and not is_registered_dbms_type(dbms_type):
+        raise HTTPException(status_code=400, detail=f"Неподдерживаемый тип БД: {dbms_type}")
+
+
+def _build_connection_string(
+    dbms_type: str,
+    host: str,
+    port: int,
+    user: str,
+    password: str,
+    database: str,
+) -> str:
+    """Построить строку подключения через зарегистрированный диалект."""
+    dialect = get_dialect(dbms_type)
+    return dialect.get_connection_url(
+        host=host,
+        port=port,
+        user=user,
+        password=password,
+        database=database,
+    )
 
 
 @router.get("/", response_model=ConnectionListResponse)
@@ -91,6 +117,7 @@ async def create_connection(
 ):
     """Создать новое подключение"""
     try:
+        _validate_dbms_type(data.dbms_type)
         existing = await repo.get_connection_by_name(data.name)
         if existing:
             raise HTTPException(status_code=400, detail=f"Подключение с именем '{data.name}' уже существует")
@@ -122,6 +149,7 @@ async def update_connection(
 ):
     """Обновить подключение"""
     try:
+        _validate_dbms_type(data.dbms_type)
         config = await repo.update_connection(
             connection_id=connection_id,
             name=data.name,
@@ -168,12 +196,15 @@ async def test_connection(data: ConnectionTestRequest):
     """Протестировать подключение к БД (без сохранения)"""
     try:
         host = resolve_host(data.host)
-        if data.dbms_type == 'mysql':
-            connection_string = f"mysql+aiomysql://{data.user}:{data.password}@{host}:{data.port}/{data.database}"
-        elif data.dbms_type == 'postgresql':
-            connection_string = f"postgresql+asyncpg://{data.user}:{data.password}@{host}:{data.port}/{data.database}"
-        else:
-            raise HTTPException(status_code=400, detail=f"Неподдерживаемый тип БД: {data.dbms_type}")
+        _validate_dbms_type(data.dbms_type)
+        connection_string = _build_connection_string(
+            dbms_type=data.dbms_type,
+            host=host,
+            port=data.port,
+            user=data.user,
+            password=data.password,
+            database=data.database,
+        )
 
         engine = create_async_engine(connection_string, pool_pre_ping=True)
         start_time = time.time()
@@ -213,12 +244,15 @@ async def test_saved_connection(
             raise HTTPException(status_code=404, detail="Подключение не найдено")
 
         host = resolve_host(decrypted['host'])
-        if decrypted['dbms_type'] == 'mysql':
-            connection_string = f"mysql+aiomysql://{decrypted['user']}:{decrypted['password']}@{host}:{decrypted['port']}/{decrypted['database']}"
-        elif decrypted['dbms_type'] == 'postgresql':
-            connection_string = f"postgresql+asyncpg://{decrypted['user']}:{decrypted['password']}@{host}:{decrypted['port']}/{decrypted['database']}"
-        else:
-            raise HTTPException(status_code=400, detail=f"Неподдерживаемый тип БД: {decrypted['dbms_type']}")
+        _validate_dbms_type(decrypted["dbms_type"])
+        connection_string = _build_connection_string(
+            dbms_type=decrypted["dbms_type"],
+            host=host,
+            port=decrypted["port"],
+            user=decrypted["user"],
+            password=decrypted["password"],
+            database=decrypted["database"],
+        )
 
         engine = create_async_engine(connection_string, pool_pre_ping=True)
         start_time = time.time()

@@ -1,9 +1,11 @@
 """
 Вспомогательные методы для SQL Backup Strategy
 """
-from typing import Dict, Set, List
+from typing import Any, Dict, Set, List
 from sqlalchemy.ext.asyncio import AsyncEngine
-from sqlalchemy import text
+
+from backend.database.dialects import get_dialect
+from backend.database.sql_utils import resolve_dbms_type
 
 
 async def get_fk_dependencies(engine: AsyncEngine, tables: Set[str]) -> Dict[str, Set[str]]:
@@ -17,49 +19,10 @@ async def get_fk_dependencies(engine: AsyncEngine, tables: Set[str]) -> Dict[str
     Returns:
         Dict[table -> set of referenced tables]
     """
-    dependencies = {}
-    dbms_type = engine.dialect.name
-    
+    dbms_type = resolve_dbms_type(engine)
+    dialect = get_dialect(dbms_type)
     async with engine.connect() as conn:
-        if dbms_type == 'postgresql':
-            sql = """
-                SELECT 
-                    tc.table_name,
-                    ccu.table_name AS referenced_table
-                FROM information_schema.table_constraints tc
-                JOIN information_schema.constraint_column_usage ccu
-                    ON tc.constraint_name = ccu.constraint_name
-                WHERE tc.constraint_type = 'FOREIGN KEY'
-                    AND tc.table_schema = 'public'
-            """
-            result = await conn.execute(text(sql))
-            
-            for row in result:
-                table, ref_table = row
-                if table in tables and ref_table in tables:
-                    if table not in dependencies:
-                        dependencies[table] = set()
-                    dependencies[table].add(ref_table)
-                    
-        elif dbms_type == 'mysql':
-            sql = """
-                SELECT 
-                    TABLE_NAME,
-                    REFERENCED_TABLE_NAME
-                FROM information_schema.KEY_COLUMN_USAGE
-                WHERE REFERENCED_TABLE_NAME IS NOT NULL
-                    AND TABLE_SCHEMA = DATABASE()
-            """
-            result = await conn.execute(text(sql))
-            
-            for row in result:
-                table, ref_table = row
-                if table in tables and ref_table in tables:
-                    if table not in dependencies:
-                        dependencies[table] = set()
-                    dependencies[table].add(ref_table)
-    
-    return dependencies
+        return await dialect.load_fk_dependencies(conn, tables)
 
 
 def topological_sort_restore_order(tables: Set[str], dependencies: Dict[str, Set[str]]) -> List[str]:
@@ -105,73 +68,14 @@ def topological_sort_restore_order(tables: Set[str], dependencies: Dict[str, Set
     return result
 
 
-async def save_postgres_sequences(engine: AsyncEngine, tables: Set[str]) -> Dict:
-    """
-    Сохранить значения sequences для PostgreSQL
-    
-    Args:
-        engine: SQLAlchemy async engine
-        tables: Множество таблиц
-    
-    Returns:
-        Dict[seq_name -> {last_value, is_called}]
-    """
-    sequences = {}
-    
+async def save_auto_values(
+    engine: AsyncEngine,
+    tables: Set[str],
+    dbms_type: str = None,
+) -> Dict[str, Any]:
+    """Сохранить sequence/AUTO_INCREMENT-подобные значения в DBMS-agnostic виде."""
+    resolved_dbms_type = resolve_dbms_type(engine, dbms_type)
+    dialect = get_dialect(resolved_dbms_type)
     async with engine.connect() as conn:
-        for table in tables:
-            # Находим primary key column с sequence
-            sql = """
-                SELECT column_name, 
-                       pg_get_serial_sequence(:table, column_name) as seq_name
-                FROM information_schema.columns
-                WHERE table_name = :table
-                  AND table_schema = 'public'
-                  AND data_type IN ('integer', 'bigint')
-                  AND column_default LIKE 'nextval%'
-            """
-            result = await conn.execute(text(sql), {"table": table})
-            row = result.fetchone()
-            
-            if row and row[1]:  # seq_name
-                seq_name = row[1]
-                # Получаем текущее значение sequence
-                seq_result = await conn.execute(text(f"SELECT last_value, is_called FROM {seq_name}"))
-                seq_row = seq_result.fetchone()
-                if seq_row:
-                    sequences[seq_name] = {
-                        "last_value": seq_row[0],
-                        "is_called": seq_row[1]
-                    }
-    
-    return sequences
-
-
-async def save_mysql_auto_increments(engine: AsyncEngine, tables: Set[str]) -> Dict:
-    """
-    Сохранить AUTO_INCREMENT значения для MySQL
-    
-    Args:
-        engine: SQLAlchemy async engine
-        tables: Множество таблиц
-    
-    Returns:
-        Dict[table -> auto_increment_value]
-    """
-    auto_increments = {}
-    
-    async with engine.connect() as conn:
-        for table in tables:
-            sql = """
-                SELECT AUTO_INCREMENT 
-                FROM information_schema.TABLES 
-                WHERE TABLE_SCHEMA = DATABASE() 
-                  AND TABLE_NAME = :table
-            """
-            result = await conn.execute(text(sql), {"table": table})
-            row = result.fetchone()
-            if row and row[0]:
-                auto_increments[table] = row[0]
-    
-    return auto_increments
+        return await dialect.save_auto_values(conn, tables)
 

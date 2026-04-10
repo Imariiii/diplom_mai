@@ -18,6 +18,8 @@ from sqlalchemy import text
 
 from . import BackupStrategy, BackupInfo, SizeEstimate
 from backend.core.docker import resolve_host
+from backend.database.dialects import get_dialect
+from backend.database.sql_utils import resolve_dbms_type
 
 
 class NativeDumpStrategy(BackupStrategy):
@@ -40,9 +42,11 @@ class NativeDumpStrategy(BackupStrategy):
     def _get_connection_params(self, engine: AsyncEngine) -> Dict:
         """Extract connection parameters from SQLAlchemy async engine"""
         url = engine.url
+        dbms_type = resolve_dbms_type(engine)
+        dialect = get_dialect(dbms_type)
         return {
             "host": resolve_host(url.host or "localhost"),
-            "port": url.port or (5432 if engine.sync_engine.dialect.name == "postgresql" else 3306),
+            "port": url.port or dialect.default_port,
             "user": url.username or "postgres",
             "password": url.password or "",
             "database": url.database or "postgres"
@@ -50,14 +54,15 @@ class NativeDumpStrategy(BackupStrategy):
     
     async def create_backup(self, engine: AsyncEngine, tables: Set[str]) -> BackupInfo:
         """Create backup using native dump utilities"""
-        dbms_type = engine.sync_engine.dialect.name
+        dbms_type = resolve_dbms_type(engine)
+        dialect = get_dialect(dbms_type)
         backup_id = str(uuid.uuid4())[:8]
         
         conn_params = self._get_connection_params(engine)
         
-        if dbms_type == "postgresql":
+        if dialect.native_dump_family == "postgresql":
             file_path = await self._create_postgres_backup(backup_id, conn_params, tables)
-        elif dbms_type == "mysql":
+        elif dialect.native_dump_family == "mysql":
             file_path = await self._create_mysql_backup(backup_id, conn_params, tables)
         else:
             raise ValueError(f"Unsupported DBMS type: {dbms_type}")
@@ -66,11 +71,7 @@ class NativeDumpStrategy(BackupStrategy):
         row_counts = {}
         async with engine.connect() as conn:
             for table in tables:
-                if dbms_type == "postgresql":
-                    sql = f'SELECT COUNT(*) FROM "{table}"'
-                else:
-                    sql = f'SELECT COUNT(*) FROM `{table}`'
-                result = await conn.execute(text(sql))
+                result = await conn.execute(text(dialect.get_row_count_sql(table)))
                 row_counts[table] = result.scalar()
         
         return BackupInfo(
@@ -156,15 +157,16 @@ class NativeDumpStrategy(BackupStrategy):
     
     async def restore_backup(self, engine: AsyncEngine, backup_info: BackupInfo) -> None:
         """Restore database from native dump"""
-        dbms_type = engine.sync_engine.dialect.name
+        dbms_type = backup_info.dbms_type or resolve_dbms_type(engine)
+        dialect = get_dialect(dbms_type)
         conn_params = self._get_connection_params(engine)
         
         if not backup_info.file_path or not os.path.exists(backup_info.file_path):
             raise ValueError(f"Backup file not found: {backup_info.file_path}")
         
-        if dbms_type == "postgresql":
+        if dialect.native_dump_family == "postgresql":
             await self._restore_postgres_backup(conn_params, backup_info.file_path)
-        elif dbms_type == "mysql":
+        elif dialect.native_dump_family == "mysql":
             await self._restore_mysql_backup(conn_params, backup_info.file_path)
     
     async def _restore_postgres_backup(self, conn_params: Dict, file_path: str) -> None:
@@ -231,7 +233,8 @@ class NativeDumpStrategy(BackupStrategy):
     
     async def estimate_size(self, engine: AsyncEngine, tables: Set[str]) -> SizeEstimate:
         """Estimate backup size and time using native utilities"""
-        dbms_type = engine.sync_engine.dialect.name
+        dbms_type = resolve_dbms_type(engine)
+        dialect = get_dialect(dbms_type)
         
         table_info = {}
         total_rows = 0
@@ -240,22 +243,10 @@ class NativeDumpStrategy(BackupStrategy):
         
         async with engine.connect() as conn:
             for table in tables:
-                if dbms_type == "postgresql":
-                    row_sql = f'SELECT COUNT(*) FROM "{table}"'
-                else:
-                    row_sql = f'SELECT COUNT(*) FROM `{table}`'
-                result = await conn.execute(text(row_sql))
+                result = await conn.execute(text(dialect.get_row_count_sql(table)))
                 row_count = result.scalar()
                 
-                if dbms_type == "postgresql":
-                    size_sql = f"SELECT pg_total_relation_size('\"{table}\"')"
-                    size_result = await conn.execute(text(size_sql))
-                else:
-                    size_sql = text(
-                        "SELECT DATA_LENGTH + INDEX_LENGTH FROM information_schema.TABLES "
-                        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table"
-                    )
-                    size_result = await conn.execute(size_sql, {"table": table})
+                size_result = await conn.execute(text(dialect.get_table_size_sql(table)))
                 size_bytes = size_result.scalar() or 0
                 
                 table_info[table] = {

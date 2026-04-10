@@ -12,6 +12,7 @@ from sqlalchemy import text
 from backend.config import get_restore_config
 from backend.database.query_analyzer import QueryAnalyzer
 from backend.database.backup_strategies import BackupInfo, SizeEstimate, SqlBackupStrategy
+from backend.database.dialects import get_dialect
 from backend.database.sql_utils import get_row_count
 from backend.database.state_verifier import StateVerifier, StateFingerprint, VerifyResult
 
@@ -57,10 +58,7 @@ class DatabaseStateManager:
         self._strategy = SqlBackupStrategy(self.config)
         
         # Блокировки для каждой СУБД (для параллельных тестов)
-        self._locks: Dict[str, asyncio.Lock] = {
-            "mysql": asyncio.Lock(),
-            "postgresql": asyncio.Lock()
-        }
+        self._locks: Dict[str, asyncio.Lock] = {}
         
         # Хранилище активных бэкапов (для ручного восстановления)
         self._active_backups: Dict[str, BackupInfo] = {}
@@ -91,28 +89,14 @@ class DatabaseStateManager:
     
     async def _get_all_tables(self, engine: AsyncEngine, dbms_type: str) -> Set[str]:
         """Получить все таблицы базы данных"""
+        dialect = get_dialect(dbms_type)
         async with engine.connect() as conn:
-            if dbms_type == 'postgresql':
-                sql = """
-                    SELECT table_name 
-                    FROM information_schema.tables 
-                    WHERE table_schema = 'public'
-                    AND table_type = 'BASE TABLE'
-                """
-            else:
-                sql = """
-                    SELECT table_name 
-                    FROM information_schema.tables 
-                    WHERE table_schema = DATABASE()
-                    AND table_type = 'BASE TABLE'
-                """
-            
-            result = await conn.execute(text(sql))
+            result = await conn.execute(text(dialect.get_list_tables_sql()))
             return {row[0] for row in result}
     
     def _get_lock(self, dbms_type: str) -> asyncio.Lock:
         """Получить блокировку для СУБД"""
-        return self._locks.get(dbms_type, asyncio.Lock())
+        return self._locks.setdefault(dbms_type, asyncio.Lock())
     
     def _refresh_config(self):
         """Перечитать конфигурацию из актуального состояния"""
@@ -386,13 +370,11 @@ class DatabaseStateManager:
         backup_tables = [t for t in all_tables if t.startswith(prefix)]
         
         deleted = []
+        dialect = get_dialect(dbms_type)
         async with engine.connect() as conn:
             for table in backup_tables:
                 try:
-                    if dbms_type == 'postgresql':
-                        await conn.execute(text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
-                    else:
-                        await conn.execute(text(f'DROP TABLE IF EXISTS `{table}`'))
+                    await conn.execute(text(dialect.get_drop_table_sql(table, cascade=True)))
                     deleted.append(table)
                 except Exception as e:
                     print(f"[BACKUP] Ошибка удаления таблицы {table}: {e}")
@@ -413,25 +395,11 @@ class DatabaseStateManager:
             Словарь с информацией о состоянии
         """
         prefix = self.config.get("backup_table_prefix", "_loadtest_backup_")
+        dialect = get_dialect(dbms_type)
         
         async with engine.connect() as conn:
             # Получаем список таблиц (только BASE TABLE, исключая views)
-            if dbms_type == 'postgresql':
-                sql = """
-                    SELECT table_name 
-                    FROM information_schema.tables 
-                    WHERE table_schema = 'public'
-                    AND table_type = 'BASE TABLE'
-                """
-            else:  # mysql
-                sql = """
-                    SELECT table_name 
-                    FROM information_schema.tables 
-                    WHERE table_schema = DATABASE()
-                    AND table_type = 'BASE TABLE'
-                """
-            
-            result = await conn.execute(text(sql))
+            result = await conn.execute(text(dialect.get_list_tables_sql()))
             all_tables = [row[0] for row in result]
             
             # Проверяем backup-таблицы

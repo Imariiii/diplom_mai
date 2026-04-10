@@ -8,7 +8,8 @@ from typing import Dict, List, Optional, Set
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy import text
 
-from backend.database.sql_utils import get_row_count
+from backend.database.dialects import get_dialect
+from backend.database.sql_utils import get_row_count, resolve_dbms_type
 
 
 @dataclass
@@ -100,7 +101,7 @@ class StateVerifier:
             StateFingerprint с информацией о состоянии
         """
         fingerprint = StateFingerprint(timestamp=datetime.utcnow())
-        dbms_type = engine.dialect.name
+        dbms_type = resolve_dbms_type(engine)
         
         for table in tables:
             table_fp = await self._capture_table_fingerprint(engine, table, dbms_type)
@@ -165,10 +166,12 @@ class StateVerifier:
         sequence_value = None
         auto_increment_value = None
         
+        async with engine.connect() as conn:
+            auto_value = await get_dialect(dbms_type).get_auto_value(conn, table)
         if dbms_type == 'postgresql':
-            sequence_value = await self._get_postgres_sequence_value(engine, table)
-        elif dbms_type == 'mysql':
-            auto_increment_value = await self._get_mysql_auto_increment(engine, table)
+            sequence_value = auto_value
+        else:
+            auto_increment_value = auto_value
         
         return TableFingerprint(
             table_name=table,
@@ -180,65 +183,13 @@ class StateVerifier:
     
     async def _compute_checksum(self, engine: AsyncEngine, table: str, dbms_type: str) -> str:
         """Вычислить чексумму данных таблицы"""
+        dialect = get_dialect(dbms_type)
         async with engine.connect() as conn:
-            if dbms_type == 'postgresql':
-                # Используем MD5 агрегацию PostgreSQL
-                sql = f"""
-                    SELECT MD5(string_agg(row_text, ',' ORDER BY row_text))
-                    FROM (
-                        SELECT row_to_json(t)::text AS row_text
-                        FROM "{table}" t
-                    ) subq
-                """
-                try:
-                    result = await conn.execute(text(sql))
-                    return result.scalar() or ""
-                except:
-                    # Fallback: просто считаем строки
-                    return ""
-            
-            elif dbms_type == 'mysql':
-                # MySQL не имеет встроенной MD5 агрегации, используем простой хеш
-                sql = f"SELECT COUNT(*), MD5(CONCAT(GROUP_CONCAT(id))) FROM `{table}`"
-                try:
-                    result = await conn.execute(text(sql))
-                    row = result.fetchone()
-                    return row[1] if row else ""
-                except:
-                    return ""
-        
+            try:
+                result = await conn.execute(text(dialect.get_checksum_sql(table)))
+                row = result.fetchone()
+                return dialect.extract_checksum_value(row)
+            except Exception:
+                return ""
+
         return ""
-    
-    async def _get_postgres_sequence_value(self, engine: AsyncEngine, table: str) -> Optional[int]:
-        """Получить текущее значение sequence для таблицы PostgreSQL"""
-        async with engine.connect() as conn:
-            # Находим primary key column с sequence
-            sql = """
-                SELECT column_name, pg_get_serial_sequence(:table, column_name) as seq_name
-                FROM information_schema.columns
-                WHERE table_name = :table
-                AND data_type IN ('integer', 'bigint')
-                AND column_default LIKE 'nextval%'
-            """
-            result = await conn.execute(text(sql), {"table": table})
-            row = result.fetchone()
-            
-            if row and row[1]:  # seq_name
-                seq_result = await conn.execute(text(f"SELECT last_value FROM {row[1]}"))
-                seq_row = seq_result.fetchone()
-                return seq_row[0] if seq_row else None
-        
-        return None
-    
-    async def _get_mysql_auto_increment(self, engine: AsyncEngine, table: str) -> Optional[int]:
-        """Получить AUTO_INCREMENT значение для таблицы MySQL"""
-        async with engine.connect() as conn:
-            sql = """
-                SELECT AUTO_INCREMENT 
-                FROM information_schema.TABLES 
-                WHERE TABLE_SCHEMA = DATABASE() 
-                AND TABLE_NAME = :table
-            """
-            result = await conn.execute(text(sql), {"table": table})
-            row = result.fetchone()
-            return row[0] if row else None

@@ -456,6 +456,8 @@ class ComparisonService:
         lower_key = db_key.lower()
         if "post" in lower_key:
             return "postgresql"
+        if "maria" in lower_key:
+            return "mariadb"
         if "mysql" in lower_key:
             return "mysql"
         return db_key

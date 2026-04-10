@@ -25,7 +25,12 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { apiClient } from "@/lib/api"
-import type { DatabaseConnection, ConnectionCreateRequest, ConnectionTestResponse } from "@/lib/types"
+import type {
+  ConnectionCreateRequest,
+  ConnectionTestResponse,
+  DatabaseConnection,
+  SupportedDbmsType,
+} from "@/lib/types"
 import { toast } from "sonner"
 
 interface ConnectionManagerProps {
@@ -34,8 +39,30 @@ interface ConnectionManagerProps {
 
 const DBMS_OPTIONS = [
   { value: "mysql", label: "MySQL" },
+  { value: "mariadb", label: "MariaDB" },
   { value: "postgresql", label: "PostgreSQL" },
 ]
+
+const DEFAULT_PORTS: Record<SupportedDbmsType, number> = {
+  mysql: 3306,
+  mariadb: 3306,
+  postgresql: 5432,
+}
+
+const DBMS_STYLES: Record<SupportedDbmsType, { color: string; icon: string }> = {
+  mysql: {
+    color: "bg-blue-500/10 text-blue-500 border-blue-500/20",
+    icon: "🐬",
+  },
+  mariadb: {
+    color: "bg-violet-500/10 text-violet-500 border-violet-500/20",
+    icon: "🦭",
+  },
+  postgresql: {
+    color: "bg-indigo-500/10 text-indigo-500 border-indigo-500/20",
+    icon: "🐘",
+  },
+}
 
 const DEFAULT_GROUPS = ["local", "staging", "production"]
 
@@ -114,8 +141,12 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
   }
 
   const handleDbmsTypeChange = (dbmsType: string) => {
-    const newPort = dbmsType === "mysql" ? 3306 : 5432
-    setFormData({ ...formData, dbms_type: dbmsType as "mysql" | "postgresql", port: newPort })
+    const typedDbmsType = dbmsType as SupportedDbmsType
+    setFormData({
+      ...formData,
+      dbms_type: typedDbmsType,
+      port: DEFAULT_PORTS[typedDbmsType],
+    })
   }
 
   const testFormConnection = async () => {
@@ -207,11 +238,11 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
   }
 
   const getDbmsColor = (dbmsType: string) => {
-    return dbmsType === "mysql" ? "bg-blue-500/10 text-blue-500 border-blue-500/20" : "bg-indigo-500/10 text-indigo-500 border-indigo-500/20"
+    return DBMS_STYLES[dbmsType as SupportedDbmsType]?.color || DBMS_STYLES.mysql.color
   }
 
   const getDbmsIcon = (dbmsType: string) => {
-    return dbmsType === "mysql" ? "🐬" : "🐘"
+    return DBMS_STYLES[dbmsType as SupportedDbmsType]?.icon || DBMS_STYLES.mysql.icon
   }
 
   return (

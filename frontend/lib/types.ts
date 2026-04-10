@@ -286,10 +286,12 @@ export interface RestoreSettings {
 
 // ==================== Database Connection Management Types ====================
 
+export type SupportedDbmsType = "mysql" | "mariadb" | "postgresql"
+
 export interface DatabaseConnection {
   id: string
   name: string
-  dbms_type: 'mysql' | 'postgresql'
+  dbms_type: SupportedDbmsType
   host: string
   port: number
   user: string
@@ -303,7 +305,7 @@ export interface DatabaseConnection {
 
 export interface ConnectionCreateRequest {
   name: string
-  dbms_type: 'mysql' | 'postgresql'
+  dbms_type: SupportedDbmsType
   host: string
   port: number
   user: string
@@ -332,7 +334,7 @@ export interface ConnectionTestRequest {
   user: string
   password: string
   database: string
-  dbms_type: 'mysql' | 'postgresql'
+  dbms_type: SupportedDbmsType
   extra_params?: Record<string, unknown>
 }
 

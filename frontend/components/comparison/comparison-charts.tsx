@@ -310,6 +310,7 @@ function toDbFamilyLabel(dbKey: string, labels?: Record<string, string>): string
   const resolved = labels?.[dbKey] || dbKey
   const lower = resolved.toLowerCase()
   if (lower.includes("post")) return "PostgreSQL"
+  if (lower.includes("maria")) return "MariaDB"
   if (lower.includes("mysql")) return "MySQL"
   return resolved
 }

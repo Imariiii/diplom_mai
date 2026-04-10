@@ -9,6 +9,8 @@ import asyncio
 
 from backend.core.config import settings
 from backend.core.docker import resolve_host
+from backend.database.dialects import get_dialect, supported_dbms_types
+from backend.database.sql_utils import register_engine_dbms_type
 
 
 class DatabaseConnection:
@@ -27,7 +29,7 @@ class DatabaseConnection:
         if connection_key in self._connection_configs:
             return connection_key
 
-        if connection_key in {"mysql", "postgresql"}:
+        if connection_key in supported_dbms_types():
             matches = [
                 key for key, config in self._connection_configs.items()
                 if config.get("dbms_type") == connection_key
@@ -125,18 +127,14 @@ class DatabaseConnection:
         if connection_key in self._connection_configs:
             conn = self._connection_configs[connection_key]
             host = resolve_host(conn['host'])
-            if dbms_type == 'mysql':
-                return (
-                    f"mysql+aiomysql://{conn['user']}:{conn['password']}"
-                    f"@{host}:{conn['port']}"
-                    f"/{conn['database']}"
-                )
-            elif dbms_type == 'postgresql':
-                return (
-                    f"postgresql+asyncpg://{conn['user']}:{conn['password']}"
-                    f"@{host}:{conn['port']}"
-                    f"/{conn['database']}"
-                )
+            dialect = get_dialect(dbms_type)
+            return dialect.get_connection_url(
+                host=host,
+                port=conn["port"],
+                user=conn["user"],
+                password=conn["password"],
+                database=conn["database"],
+            )
         
         raise ValueError(
             f"Подключение '{connection_key}' не найдено. "
@@ -148,17 +146,20 @@ class DatabaseConnection:
         connection_key = self._resolve_connection_key(connection_key)
         if connection_key not in self.engines:
             connection_string = self.get_connection_string(connection_key)
+            dbms_type = self.get_dbms_type(connection_key)
             pool_size = max(1, min(
                 self._pool_sizes.get(connection_key, 5),
                 settings.test.db_pool_max_size,
             ))
             max_overflow = max(0, settings.test.db_pool_max_overflow)
-            self.engines[connection_key] = create_async_engine(
+            engine = create_async_engine(
                 connection_string,
                 pool_size=pool_size,
                 max_overflow=max_overflow,
                 echo=False
             )
+            register_engine_dbms_type(engine, dbms_type)
+            self.engines[connection_key] = engine
         return self.engines[connection_key]
     
     async def get_engine_async(self, connection_key: str) -> AsyncEngine:
@@ -220,42 +221,16 @@ class DatabaseConnection:
         """
         terminated = 0
         
+        connection_key = db_type
+        resolved_key = self._resolve_connection_key(connection_key)
         db_name = None
-        db_type = self.get_dbms_type(db_type)
-        resolved_key = self._resolve_connection_key(db_type)
         if resolved_key in self._connection_configs:
             db_name = self._connection_configs[resolved_key].get('database')
-        
+        resolved_dbms_type = self.get_dbms_type(connection_key)
+        dialect = get_dialect(resolved_dbms_type)
+
         async with engine.connect() as conn:
-            if db_type == 'postgresql':
-                sql = """
-                    SELECT pg_terminate_backend(pid)
-                    FROM pg_stat_activity
-                    WHERE datname = current_database()
-                    AND pid <> pg_backend_pid()
-                    AND state != 'idle'
-                """
-                result = await conn.execute(text(sql))
-                terminated = sum(1 for row in result if row[0])
-                await conn.commit()
-                
-            elif db_type == 'mysql':
-                result = await conn.execute(text("SHOW PROCESSLIST"))
-                rows = result.fetchall()
-                
-                for row in rows:
-                    process_id = row[0]
-                    process_db = row[3] if len(row) > 3 else None
-                    process_command = row[4] if len(row) > 4 else None
-                    
-                    if (process_command != 'Sleep' and 
-                        process_db == db_name):
-                        try:
-                            await conn.execute(text(f"KILL {process_id}"))
-                            terminated += 1
-                        except:
-                            pass
-                
-                await conn.commit()
-        
+            terminated = await dialect.terminate_other_connections(conn, db_name)
+            await conn.commit()
+
         return terminated

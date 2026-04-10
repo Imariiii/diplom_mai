@@ -18,6 +18,7 @@ interface ConfigSummaryCardProps {
 
 const databases = [
   { id: "mysql", name: "MySQL (Sakila)" },
+  { id: "mariadb", name: "MariaDB (Sakila)" },
   { id: "postgresql", name: "PostgreSQL (Pagila)" },
 ]
 
@@ -43,7 +44,7 @@ export function ConfigSummaryCard({
             <span className="text-muted-foreground">СУБД:</span>
             <span className="ml-2 font-medium">
               {selectedDatabases.length > 0
-                ? selectedDatabases.map(d => databases.find(db => db.id === d)?.name).join(", ")
+                ? selectedDatabases.map(d => databases.find(db => db.id === d)?.name || d).join(", ")
                 : "Не выбрано"}
             </span>
           </div>

@@ -11,7 +11,7 @@ const features = [
   {
     icon: Database,
     title: "Множество СУБД",
-    description: "Поддержка PostgreSQL и MySQL с примерами баз данных Sakila и Pagila",
+    description: "Поддержка PostgreSQL, MySQL и MariaDB с примерами баз данных Sakila и Pagila",
   },
   {
     icon: Cpu,

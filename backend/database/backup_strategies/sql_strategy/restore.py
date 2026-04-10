@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy import text
 
 from .. import BackupInfo
+from backend.database.dialects import get_dialect
+from backend.database.sql_utils import resolve_dbms_type
 from .helpers import get_fk_dependencies, topological_sort_restore_order
 
 
@@ -22,7 +24,8 @@ async def restore_backup_logic(
         backup_info: Информация о бэкапе
         get_backup_table_name_func: Функция для получения имени backup-таблицы
     """
-    dbms_type = engine.dialect.name
+    dbms_type = backup_info.dbms_type or resolve_dbms_type(engine)
+    dialect = get_dialect(dbms_type)
     tables = backup_info.tables
     
     # Определяем порядок восстановления
@@ -32,11 +35,7 @@ async def restore_backup_logic(
     # Это важно для MySQL, где SET FOREIGN_KEY_CHECKS сессионный
     async with engine.connect() as conn:
         # Отключаем constraints
-        if dbms_type == 'postgresql':
-            await conn.execute(text("SET session_replication_role = 'replica'"))
-        elif dbms_type == 'mysql':
-            await conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
-        
+        await conn.execute(text(dialect.get_disable_constraints_sql()))
         await conn.commit()
         
         try:
@@ -46,23 +45,13 @@ async def restore_backup_logic(
                 await do_restore_table(dbms_type, table, backup_table, conn)
             
             # Восстанавливаем sequences / AUTO_INCREMENT
-            if dbms_type == 'postgresql' and backup_info.sequences:
-                for seq_name, info in backup_info.sequences.items():
-                    sql = f"SELECT setval('{seq_name}', {info['last_value']}, {str(info['is_called']).lower()})"
-                    await conn.execute(text(sql))
+            auto_values = backup_info.sequences if dbms_type == 'postgresql' else backup_info.auto_increments
+            if auto_values:
+                await dialect.restore_auto_values(conn, auto_values)
                 await conn.commit()
-            elif dbms_type == 'mysql' and backup_info.auto_increments:
-                for table, value in backup_info.auto_increments.items():
-                    sql = f"ALTER TABLE `{table}` AUTO_INCREMENT = {value}"
-                    await conn.execute(text(sql))
-                    await conn.commit()
         finally:
             # Включаем constraints обратно
-            if dbms_type == 'postgresql':
-                await conn.execute(text("SET session_replication_role = 'origin'"))
-            elif dbms_type == 'mysql':
-                await conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
-            
+            await conn.execute(text(dialect.get_enable_constraints_sql()))
             await conn.commit()
 
 
@@ -92,7 +81,7 @@ async def restore_table(
     conn=None
 ) -> None:
     """Восстановить одну таблицу из бэкапа"""
-    dbms_type = engine.dialect.name
+    dbms_type = resolve_dbms_type(engine)
     
     # Используем переданное соединение или создаём новое
     if conn is None:
@@ -112,38 +101,25 @@ async def do_restore_table(dbms_type: str, table: str, backup_table: str, conn) 
         backup_table: Имя backup-таблицы
         conn: Активное соединение с БД
     """
-    # Очищаем таблицу
-    if dbms_type == 'postgresql':
-        await conn.execute(text(f'TRUNCATE TABLE "{table}" CASCADE'))
-    else:
-        await conn.execute(text(f'TRUNCATE TABLE `{table}`'))
+    dialect = get_dialect(dbms_type)
+    await conn.execute(text(dialect.get_truncate_table_sql(table)))
     await conn.commit()  # Commit после TRUNCATE для MySQL
     
-    # Вставляем данные из backup
-    if dbms_type == 'postgresql':
-        sql = f'INSERT INTO "{table}" SELECT * FROM "{backup_table}"'
-    else:
-        sql = f'INSERT INTO `{table}` SELECT * FROM `{backup_table}`'
-    
-    await conn.execute(text(sql))
+    await conn.execute(text(dialect.get_insert_from_backup_sql(table, backup_table)))
     await conn.commit()
 
 
 async def disable_constraints(engine: AsyncEngine, dbms_type: str) -> None:
     """Отключить FK constraints"""
+    dialect = get_dialect(dbms_type)
     async with engine.connect() as conn:
-        if dbms_type == 'postgresql':
-            await conn.execute(text("SET session_replication_role = 'replica'"))
-        elif dbms_type == 'mysql':
-            await conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
+        await conn.execute(text(dialect.get_disable_constraints_sql()))
         await conn.commit()
 
 
 async def enable_constraints(engine: AsyncEngine, dbms_type: str) -> None:
     """Включить FK constraints"""
+    dialect = get_dialect(dbms_type)
     async with engine.connect() as conn:
-        if dbms_type == 'postgresql':
-            await conn.execute(text("SET session_replication_role = 'origin'"))
-        elif dbms_type == 'mysql':
-            await conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
+        await conn.execute(text(dialect.get_enable_constraints_sql()))
         await conn.commit()

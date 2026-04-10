@@ -11,6 +11,7 @@ from sqlalchemy import text
 from backend.core.config import settings
 from backend.core.docker import resolve_host
 from backend.database.connection import DatabaseConnection
+from backend.database.dialects import get_dialect
 from backend.database.queries import QueryManager
 from backend.database.state_manager import DatabaseStateManager
 from backend.load_tester.index_manager import IndexManager
@@ -606,7 +607,16 @@ class LoadTester:
     
     async def get_dbms_metrics(self, db_key: str) -> Dict:
         """Получить внутренние метрики СУБД"""
-        metrics = {
+        try:
+            db_type = self.db_connection.get_dbms_type(db_key)
+            engine = await self.db_connection.get_engine_async(db_key)
+            dialect = get_dialect(db_type)
+            async with engine.connect() as conn:
+                return await dialect.collect_dbms_metrics(conn)
+        except Exception as e:
+            print(f"Ошибка получения метрик СУБД {db_key}: {e}")
+
+        return {
             'cache_hit_ratio': 0,
             'buffer_pool_hit_ratio': 0,
             'lock_waits': 0,
@@ -616,124 +626,6 @@ class LoadTester:
             'index_sizes_mb': {},
             'total_db_size_mb': 0,
         }
-        
-        try:
-            db_type = self.db_connection.get_dbms_type(db_key)
-            engine = await self.db_connection.get_engine_async(db_key)
-            
-            if db_type == 'postgresql':
-                async with engine.connect() as conn:
-                    # Cache hit ratio
-                    result = await conn.execute(text("""
-                        SELECT 
-                            CASE WHEN blks_hit + blks_read = 0 THEN 0
-                            ELSE round(100.0 * blks_hit / (blks_hit + blks_read), 2)
-                            END as cache_hit_ratio
-                        FROM pg_stat_database 
-                        WHERE datname = current_database()
-                    """))
-                    row = result.fetchone()
-                    if row:
-                        metrics['cache_hit_ratio'] = float(row[0] or 0)
-                        metrics['buffer_pool_hit_ratio'] = float(row[0] or 0)
-                    
-                    # Active connections
-                    result = await conn.execute(text("""
-                        SELECT count(*) FROM pg_stat_activity 
-                        WHERE datname = current_database()
-                    """))
-                    row = result.fetchone()
-                    if row:
-                        metrics['active_connections'] = int(row[0] or 0)
-                    
-                    # Lock waits
-                    result = await conn.execute(text("""
-                        SELECT count(*) FROM pg_locks WHERE NOT granted
-                    """))
-                    row = result.fetchone()
-                    if row:
-                        metrics['lock_waits'] = int(row[0] or 0)
-                    
-                    # Table sizes
-                    result = await conn.execute(text("""
-                        SELECT relname, pg_total_relation_size(relid) / (1024*1024) as size_mb
-                        FROM pg_stat_user_tables
-                        ORDER BY pg_total_relation_size(relid) DESC
-                        LIMIT 10
-                    """))
-                    for row in result:
-                        metrics['table_sizes_mb'][row[0]] = float(row[1] or 0)
-                    
-                    # Total DB size
-                    result = await conn.execute(text("""
-                        SELECT pg_database_size(current_database()) / (1024*1024) as size_mb
-                    """))
-                    row = result.fetchone()
-                    if row:
-                        metrics['total_db_size_mb'] = float(row[0] or 0)
-                    
-            elif db_type == 'mysql':
-                async with engine.connect() as conn:
-                    # Buffer pool hit ratio
-                    result = await conn.execute(text("""
-                        SELECT 
-                            (1 - (Innodb_buffer_pool_reads / Innodb_buffer_pool_read_requests)) * 100 
-                            as hit_ratio
-                        FROM (
-                            SELECT 
-                                (SELECT VARIABLE_VALUE FROM performance_schema.global_status 
-                                 WHERE VARIABLE_NAME = 'Innodb_buffer_pool_reads') as Innodb_buffer_pool_reads,
-                                (SELECT VARIABLE_VALUE FROM performance_schema.global_status 
-                                 WHERE VARIABLE_NAME = 'Innodb_buffer_pool_read_requests') as Innodb_buffer_pool_read_requests
-                        ) as stats
-                    """))
-                    row = result.fetchone()
-                    if row and row[0]:
-                        metrics['buffer_pool_hit_ratio'] = float(row[0])
-                        metrics['cache_hit_ratio'] = float(row[0])
-                    
-                    # Active connections
-                    result = await conn.execute(text("""
-                        SELECT COUNT(*) FROM information_schema.PROCESSLIST
-                    """))
-                    row = result.fetchone()
-                    if row:
-                        metrics['active_connections'] = int(row[0] or 0)
-                    
-                    # Lock waits
-                    result = await conn.execute(text("""
-                        SELECT COUNT(*) FROM performance_schema.data_lock_waits
-                    """))
-                    row = result.fetchone()
-                    if row:
-                        metrics['lock_waits'] = int(row[0] or 0)
-                    
-                    # Table sizes
-                    result = await conn.execute(text("""
-                        SELECT TABLE_NAME, 
-                               ROUND((DATA_LENGTH + INDEX_LENGTH) / (1024 * 1024), 2) AS size_mb
-                        FROM information_schema.TABLES
-                        WHERE TABLE_SCHEMA = DATABASE()
-                        ORDER BY (DATA_LENGTH + INDEX_LENGTH) DESC
-                        LIMIT 10
-                    """))
-                    for row in result:
-                        metrics['table_sizes_mb'][row[0]] = float(row[1] or 0)
-                    
-                    # Total DB size
-                    result = await conn.execute(text("""
-                        SELECT ROUND(SUM(DATA_LENGTH + INDEX_LENGTH) / (1024 * 1024), 2) AS size_mb
-                        FROM information_schema.TABLES
-                        WHERE TABLE_SCHEMA = DATABASE()
-                    """))
-                    row = result.fetchone()
-                    if row:
-                        metrics['total_db_size_mb'] = float(row[0] or 0)
-                        
-        except Exception as e:
-            print(f"Ошибка получения метрик СУБД {db_key}: {e}")
-        
-        return metrics
     
     async def execute_scenario_query(
         self,
