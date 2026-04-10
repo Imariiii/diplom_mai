@@ -61,6 +61,7 @@ export function DashboardsPage() {
                   activeConnections: number[]
                   successful: number
                   failed: number
+                  indexInfo?: any
                 }> = {}
 
                 response.results.forEach((result: any) => {
@@ -88,6 +89,7 @@ export function DashboardsPage() {
                       if (typeof stats.active_connections === "number") bucket.activeConnections.push(stats.active_connections)
                       bucket.successful += stats.successful || 0
                       bucket.failed += stats.failed || 0
+                      if (stats.index_info) bucket.indexInfo = stats.index_info
                     })
                   } else if (result.db_key && result.stats) {
                     const dbKey = result.db_key
@@ -111,6 +113,7 @@ export function DashboardsPage() {
                     if (typeof stats.active_connections === "number") bucket.activeConnections.push(stats.active_connections)
                     bucket.successful += stats.successful || 0
                     bucket.failed += stats.failed || 0
+                    if (stats.index_info) bucket.indexInfo = stats.index_info
                   }
                 })
 
@@ -127,6 +130,7 @@ export function DashboardsPage() {
                     databaseId: dbKey,
                     databaseType: dbType,
                     databaseName: connName || DB_NAMES[dbType] || dbType,
+                    indexInfo: bucket.indexInfo,
                     metrics: {
                       avgResponseTime: average(bucket.avgTimes),
                       p50ResponseTime: average(bucket.p50Times),

@@ -7,7 +7,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy import select, desc
 from sqlalchemy.orm import joinedload
 
-from backend.database.models import Base, TestScenario, ScenarioQuery, ScenarioParam
+from backend.database.models import Base, TestScenario, ScenarioQuery, ScenarioParam, ScenarioIndex
 from backend.database.repository.base import BaseRepository
 
 
@@ -49,7 +49,8 @@ class ScenarioRepository(BaseRepository):
             result = await session.execute(
                 select(TestScenario)
                 .options(
-                    joinedload(TestScenario.queries).joinedload(ScenarioQuery.params)
+                    joinedload(TestScenario.queries).joinedload(ScenarioQuery.params),
+                    joinedload(TestScenario.indexes),
                 )
                 .where(TestScenario.id == uuid.UUID(scenario_id))
             )
@@ -74,7 +75,8 @@ class ScenarioRepository(BaseRepository):
         """Получить список всех сценариев"""
         async with self.SessionLocal() as session:
             query = select(TestScenario).options(
-                joinedload(TestScenario.queries).joinedload(ScenarioQuery.params)
+                joinedload(TestScenario.queries).joinedload(ScenarioQuery.params),
+                joinedload(TestScenario.indexes),
             )
 
             if scenario_type:
@@ -136,7 +138,12 @@ class ScenarioRepository(BaseRepository):
         """Клонировать сценарий"""
         async with self.SessionLocal() as session:
             result = await session.execute(
-                select(TestScenario).where(TestScenario.id == uuid.UUID(scenario_id))
+                select(TestScenario)
+                .options(
+                    joinedload(TestScenario.queries).joinedload(ScenarioQuery.params),
+                    joinedload(TestScenario.indexes),
+                )
+                .where(TestScenario.id == uuid.UUID(scenario_id))
             )
             original = result.scalar_one_or_none()
 
@@ -183,6 +190,20 @@ class ScenarioRepository(BaseRepository):
                         step=orig_param.step
                     )
                     session.add(new_param)
+
+            for orig_index in original.indexes:
+                new_index = ScenarioIndex(
+                    id=uuid.uuid4(),
+                    scenario_id=cloned.id,
+                    table_name=orig_index.table_name,
+                    column_names=orig_index.column_names,
+                    index_type=orig_index.index_type,
+                    index_name=orig_index.index_name,
+                    is_unique=orig_index.is_unique,
+                    condition=orig_index.condition,
+                    description=orig_index.description,
+                )
+                session.add(new_index)
 
             await session.commit()
             await session.refresh(cloned)
@@ -377,6 +398,108 @@ class ScenarioRepository(BaseRepository):
                 return True
             return False
 
+    # ==================== ScenarioIndex CRUD ====================
+
+    async def add_index_to_scenario(
+        self,
+        scenario_id: str,
+        table_name: str,
+        column_names: str,
+        index_type: str = "btree",
+        index_name: Optional[str] = None,
+        is_unique: bool = False,
+        condition: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> ScenarioIndex:
+        """Добавить индекс к сценарию"""
+        async with self.SessionLocal() as session:
+            scenario_index = ScenarioIndex(
+                id=uuid.uuid4(),
+                scenario_id=uuid.UUID(scenario_id),
+                table_name=table_name,
+                column_names=column_names,
+                index_type=index_type,
+                index_name=index_name,
+                is_unique='t' if is_unique else 'f',
+                condition=condition,
+                description=description,
+            )
+            session.add(scenario_index)
+            await session.commit()
+            await session.refresh(scenario_index)
+            return scenario_index
+
+    async def get_index(self, index_id: str) -> Optional[ScenarioIndex]:
+        """Получить индекс сценария по ID"""
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(ScenarioIndex).where(ScenarioIndex.id == uuid.UUID(index_id))
+            )
+            return result.scalar_one_or_none()
+
+    async def get_scenario_indexes(self, scenario_id: str) -> List[ScenarioIndex]:
+        """Получить все индексы сценария"""
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(ScenarioIndex)
+                .where(ScenarioIndex.scenario_id == uuid.UUID(scenario_id))
+                .order_by(ScenarioIndex.table_name, ScenarioIndex.column_names)
+            )
+            return result.scalars().all()
+
+    async def update_index(
+        self,
+        index_id: str,
+        table_name: Optional[str] = None,
+        column_names: Optional[str] = None,
+        index_type: Optional[str] = None,
+        index_name: Optional[str] = None,
+        is_unique: Optional[bool] = None,
+        condition: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> Optional[ScenarioIndex]:
+        """Обновить индекс сценария"""
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(ScenarioIndex).where(ScenarioIndex.id == uuid.UUID(index_id))
+            )
+            scenario_index = result.scalar_one_or_none()
+
+            if scenario_index:
+                if table_name is not None:
+                    scenario_index.table_name = table_name
+                if column_names is not None:
+                    scenario_index.column_names = column_names
+                if index_type is not None:
+                    scenario_index.index_type = index_type
+                if index_name is not None:
+                    scenario_index.index_name = index_name
+                if is_unique is not None:
+                    scenario_index.is_unique = 't' if is_unique else 'f'
+                if condition is not None:
+                    scenario_index.condition = condition
+                if description is not None:
+                    scenario_index.description = description
+
+                await session.commit()
+                await session.refresh(scenario_index)
+
+            return scenario_index
+
+    async def delete_index(self, index_id: str) -> bool:
+        """Удалить индекс сценария"""
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(ScenarioIndex).where(ScenarioIndex.id == uuid.UUID(index_id))
+            )
+            scenario_index = result.scalar_one_or_none()
+
+            if scenario_index:
+                await session.delete(scenario_index)
+                await session.commit()
+                return True
+            return False
+
     async def increment_sequential_param(self, param_id: str) -> int:
         """Инкрементировать значение sequential параметра"""
         async with self.SessionLocal() as session:
@@ -399,7 +522,10 @@ class ScenarioRepository(BaseRepository):
         async with self.SessionLocal() as session:
             result = await session.execute(
                 select(TestScenario)
-                .options(joinedload(TestScenario.queries).joinedload(ScenarioQuery.params))
+                .options(
+                    joinedload(TestScenario.queries).joinedload(ScenarioQuery.params),
+                    joinedload(TestScenario.indexes),
+                )
                 .where(
                     TestScenario.id == uuid.UUID(scenario_id),
                     TestScenario.is_active == 't'
@@ -414,6 +540,19 @@ class ScenarioRepository(BaseRepository):
                 'id': str(scenario.id),
                 'name': scenario.name,
                 'scenario_type': scenario.scenario_type,
+                'indexes': [
+                    {
+                        'id': str(idx.id),
+                        'table_name': idx.table_name,
+                        'column_names': idx.column_names,
+                        'index_type': idx.index_type,
+                        'index_name': idx.index_name,
+                        'is_unique': idx.is_unique == 't',
+                        'condition': idx.condition,
+                        'description': idx.description,
+                    }
+                    for idx in scenario.indexes
+                ],
                 'queries': [
                     {
                         'id': str(q.id),

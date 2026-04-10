@@ -7,6 +7,12 @@ import { TimeSeriesChart } from "./shared/time-series-chart"
 
 interface TestResult {
   databaseId: string
+  indexInfo?: {
+    enabled?: boolean
+    indexes_count?: number
+    total_creation_time_ms?: number
+    drop_time_ms?: number
+  }
   metrics?: {
     avgResponseTime?: number
     p50ResponseTime?: number
@@ -69,6 +75,14 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
                   <span className="text-muted-foreground">Ошибки</span>
                   <span className="font-mono text-foreground">{result?.metrics?.errorCount || 0}</span>
                 </div>
+                {result?.indexInfo?.enabled && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Индексы</span>
+                    <span className="font-mono text-foreground">
+                      {result.indexInfo.indexes_count || 0} / {result.indexInfo.total_creation_time_ms?.toFixed(1) || "0.0"} ms
+                    </span>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )
@@ -120,6 +134,18 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
                         <span className="text-muted-foreground">Max:</span>
                         <span className="font-mono text-foreground">{formatMetric(metrics?.maxResponseTime) ?? "—"} ms</span>
                       </div>
+                      {result?.indexInfo?.enabled && (
+                        <>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Индексы:</span>
+                            <span className="font-mono text-foreground">{result.indexInfo.indexes_count || 0}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Создание:</span>
+                            <span className="font-mono text-foreground">{result.indexInfo.total_creation_time_ms?.toFixed(1) || "0.0"} ms</span>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 )

@@ -177,6 +177,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                 iterations=request.iterations,
                 virtual_users=request.virtual_users,
                 warmup_time=request.warmup_time,
+                use_indexes=request.use_indexes,
                 scenario_repository=scenario_repository
             )
         else:

@@ -13,6 +13,7 @@ from backend.core.docker import resolve_host
 from backend.database.connection import DatabaseConnection
 from backend.database.queries import QueryManager
 from backend.database.state_manager import DatabaseStateManager
+from backend.load_tester.index_manager import IndexManager
 
 
 class LoadTester:
@@ -24,8 +25,11 @@ class LoadTester:
             self.db_connection.set_connection_repository(connection_repo)
         self.query_manager = QueryManager()
         self.state_manager = DatabaseStateManager()
+        self.index_manager = IndexManager()
         self.results: List[Dict] = []
         self.auto_restore: bool = True
+        self._random_value_cache: Dict[str, List[Any]] = {}
+        self._random_value_cache_locks: Dict[str, asyncio.Lock] = {}
         
         # Callback для real-time обновлений
         self._metrics_callback: Optional[Callable] = None
@@ -56,6 +60,10 @@ class LoadTester:
     def set_status_callback(self, callback: Callable):
         """Установить callback для обновления статуса"""
         self._status_callback = callback
+
+    def _build_random_value_cache_key(self, db_key: str, table: str, column: str) -> str:
+        """Построить ключ кэша значений для random_from_table"""
+        return f"{db_key}:{table}:{column}"
     
     async def _emit_metrics(
         self,
@@ -829,20 +837,55 @@ class LoadTester:
         table: str,
         column: str
     ) -> Any:
-        """Получение случайного значения из таблицы"""
+        """Получение случайного значения из таблицы с кэшированием на время теста"""
+        import random
+
+        cache_key = self._build_random_value_cache_key(db_key, table, column)
+        cached_values = self._random_value_cache.get(cache_key)
+        if cached_values:
+            return random.choice(cached_values)
+
+        lock = self._random_value_cache_locks.setdefault(cache_key, asyncio.Lock())
         try:
-            db_type = self.db_connection.get_dbms_type(db_key)
-            engine = await self.db_connection.get_engine_async(db_key)
-            async with engine.connect() as conn:
-                result = await conn.execute(text(f"""
-                    SELECT {column} FROM {table}
-                    ORDER BY RANDOM() LIMIT 1
-                """))
-                row = result.fetchone()
-                return row[0] if row else 1
+            async with lock:
+                cached_values = self._random_value_cache.get(cache_key)
+                if cached_values:
+                    return random.choice(cached_values)
+
+                engine = await self.db_connection.get_engine_async(db_key)
+                async with engine.connect() as conn:
+                    result = await conn.execute(text(f"SELECT {column} FROM {table}"))
+                    values = [row[0] for row in result.fetchall() if row[0] is not None]
+
+                self._random_value_cache[cache_key] = values
+                if values:
+                    return random.choice(values)
+                return 1
         except Exception as e:
             print(f"Error getting random value: {e}")
             return 1
+
+    async def _prime_random_value_cache(self, db_key: str, queries: List[Dict[str, Any]]):
+        """Предзагрузить значения для random_from_table до запуска воркеров"""
+        refs = []
+        seen = set()
+
+        for query in queries:
+            for param in query.get('params', []):
+                if param.get('param_type') != 'random_from_table':
+                    continue
+                table = param.get('table_ref')
+                column = param.get('column_ref')
+                if not table or not column:
+                    continue
+                key = (table, column)
+                if key in seen:
+                    continue
+                seen.add(key)
+                refs.append(key)
+
+        for table, column in refs:
+            await self._get_random_value_from_table(db_key, table, column)
 
     async def run_scenario_test(
         self,
@@ -850,12 +893,15 @@ class LoadTester:
         scenario: Dict,
         iterations: int = 10,
         virtual_users: int = 1,
-        auto_restore: bool = True
+        auto_restore: bool = True,
+        warmup_time: int = 0,
+        use_indexes: bool = False,
     ) -> Dict:
         """Запуск теста на основе сценария с автовосстановлением БД"""
         import random
 
         queries = scenario.get('queries', [])
+        scenario_indexes = scenario.get('indexes', [])
         if not queries:
             return {
                 'scenario': scenario.get('name', 'unknown'),
@@ -872,15 +918,90 @@ class LoadTester:
             db_key, sql_queries, auto_restore
         )
 
-        start_time = time.perf_counter()
-
         weighted_queries = []
         for query in queries:
             weight = query.get('weight', 1)
             for _ in range(weight):
                 weighted_queries.append(query)
 
+        created_indexes: List[Dict[str, Any]] = []
+        index_creation_result = None
+        index_drop_result = None
+
+        index_info = {
+            'enabled': bool(use_indexes),
+            'indexes_count': len(scenario_indexes) if use_indexes else 0,
+            'total_creation_time_ms': 0.0,
+            'drop_time_ms': 0.0,
+            'details': [],
+            'drop_details': [],
+            'errors': [],
+            'drop_errors': [],
+        }
+
         try:
+            if use_indexes and scenario_indexes:
+                db_type = self.db_connection.get_dbms_type(db_key)
+                engine = await self.db_connection.get_engine_async(db_key)
+
+                await self._emit_backup_status("index_creation_started", {
+                    "dbms_type": db_type,
+                    "indexes_count": len(scenario_indexes),
+                    "indexes": scenario_indexes,
+                })
+
+                index_creation_result = await self.index_manager.create_indexes(
+                    engine=engine,
+                    db_type=db_type,
+                    indexes=scenario_indexes,
+                    callback=self._emit_backup_status,
+                )
+                index_info['total_creation_time_ms'] = index_creation_result.total_time_ms
+                index_info['details'] = [detail.to_dict() for detail in index_creation_result.details]
+                index_info['errors'] = index_creation_result.errors
+                created_indexes = [
+                    {
+                        **index_def,
+                        'index_name': detail.name,
+                    }
+                    for index_def, detail in zip(scenario_indexes, index_creation_result.details)
+                    if detail.success and not detail.skipped
+                ]
+
+                await self._emit_backup_status("index_creation_completed", {
+                    "dbms_type": db_type,
+                    "success": index_creation_result.success,
+                    "duration_ms": index_creation_result.total_time_ms,
+                    "details": index_info['details'],
+                    "errors": index_creation_result.errors,
+                })
+
+                if not index_creation_result.success:
+                    raise RuntimeError(
+                        "Не удалось создать индексы: " + "; ".join(index_creation_result.errors)
+                    )
+
+            await self._prime_random_value_cache(db_key, queries)
+
+            if warmup_time > 0:
+                await self._emit_status(
+                    "running",
+                    f"Прогрев сценария {scenario.get('name', 'unknown')} ({warmup_time} сек)..."
+                )
+                warmup_iterations = max(1, min(5, max(1, iterations // 10)))
+                for _ in range(warmup_iterations):
+                    q = random.choice(weighted_queries)
+                    await self.execute_scenario_query(
+                        db_key,
+                        q['sql_template'],
+                        q.get('params', []),
+                        scenario.get('name', 'unknown')
+                    )
+                    await asyncio.sleep(0.1)
+                await asyncio.sleep(warmup_time)
+
+            start_time = time.perf_counter()
+
             async def _make_scenario_query():
                 q = random.choice(weighted_queries)
                 return await self.execute_scenario_query(
@@ -901,6 +1022,36 @@ class LoadTester:
             total_test_time = end_time - start_time
             
         finally:
+            if created_indexes:
+                try:
+                    db_type = self.db_connection.get_dbms_type(db_key)
+                    engine = await self.db_connection.get_engine_async(db_key)
+                    await self._emit_backup_status("index_drop_started", {
+                        "dbms_type": db_type,
+                        "indexes_count": len(created_indexes),
+                    })
+                    index_drop_result = await self.index_manager.drop_indexes(
+                        engine=engine,
+                        db_type=db_type,
+                        indexes=created_indexes,
+                        callback=self._emit_backup_status,
+                    )
+                    index_info['drop_time_ms'] = index_drop_result.total_time_ms
+                    index_info['drop_details'] = [detail.to_dict() for detail in index_drop_result.details]
+                    index_info['drop_errors'] = index_drop_result.errors
+                    await self._emit_backup_status("index_drop_completed", {
+                        "dbms_type": db_type,
+                        "success": index_drop_result.success,
+                        "duration_ms": index_drop_result.total_time_ms,
+                        "details": index_info['drop_details'],
+                        "errors": index_drop_result.errors,
+                    })
+                except Exception as e:
+                    index_info['drop_errors'].append(str(e))
+                    await self._emit_backup_status("index_drop_failed", {
+                        "dbms_type": self.db_connection.get_dbms_type(db_key),
+                        "error": str(e),
+                    })
             restore_info = await self.restore_database_after_test(
                 db_key, prepare_info, auto_restore
             )
@@ -938,6 +1089,7 @@ class LoadTester:
                 'verified': restore_info.get('verified'),
                 'errors': restore_info.get('errors')
             },
+            'index_info': index_info,
             'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
@@ -955,6 +1107,7 @@ class LoadTester:
         iterations: int = 100,
         virtual_users: int = 10,
         warmup_time: int = 5,
+        use_indexes: bool = False,
         scenario_repository = None
     ) -> List[Dict]:
         """Запуск полного теста на основе сценария из БД"""
@@ -984,25 +1137,6 @@ class LoadTester:
             self._metrics_callback.set_total_queries(len(db_types))
             await self._metrics_callback.on_test_start()
 
-        # Прогрев
-        if warmup_time > 0:
-            print(f"Прогрев системы ({warmup_time} сек)...")
-            await self._emit_status("running", f"Прогрев системы ({warmup_time} сек)...")
-
-            queries = scenario.get('queries', [])
-            if queries:
-                warmup_query = queries[0]
-                for db_key in db_types:
-                    for _ in range(min(5, iterations // 10)):
-                        await self.execute_scenario_query(
-                            db_key,
-                            warmup_query['sql_template'],
-                            warmup_query.get('params', []),
-                            scenario['name']
-                        )
-                        await asyncio.sleep(0.1)
-            await asyncio.sleep(warmup_time)
-
         # Запуск тестов для каждой БД
         for idx, db_key in enumerate(db_types):
             print(f"Тестирование {db_key} со сценарием {scenario['name']}...")
@@ -1020,7 +1154,9 @@ class LoadTester:
                 scenario,
                 iterations=iterations,
                 virtual_users=virtual_users,
-                auto_restore=self.auto_restore
+                auto_restore=self.auto_restore,
+                warmup_time=warmup_time,
+                use_indexes=use_indexes,
             )
 
             all_results.append({
@@ -1044,7 +1180,7 @@ class LoadTester:
 
         return all_results
 
-    async def execute_scenario_query(
+    async def _legacy_execute_scenario_query(
         self,
         db_key: str,
         sql_template: str,
@@ -1099,7 +1235,7 @@ class LoadTester:
             'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
-    async def _generate_param_value(
+    async def _legacy_generate_param_value(
         self,
         db_key: str,
         param_type: str,
@@ -1143,7 +1279,7 @@ class LoadTester:
         else:
             return 1  # Default fallback
 
-    async def _get_random_value_from_table(
+    async def _legacy_get_random_value_from_table(
         self,
         db_key: str,
         table: str,
@@ -1166,7 +1302,7 @@ class LoadTester:
             print(f"Error getting random value: {e}")
             return 1
 
-    async def run_scenario_test(
+    async def _legacy_run_scenario_test(
         self,
         db_key: str,
         scenario: Dict,
@@ -1270,7 +1406,7 @@ class LoadTester:
         )
         return stats
 
-    async def run_full_scenario_test_suite(
+    async def _legacy_run_full_scenario_test_suite(
         self,
         scenario_id: str,
         db_types: List[str] = None,

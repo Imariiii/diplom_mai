@@ -127,6 +127,7 @@ export function ConfigPage() {
         iterations: testConfig.iterations,
         virtual_users: testConfig.virtualUsers,
         scenario: testConfig.testMode === "scenario" ? testConfig.scenario : "custom",
+        use_indexes: testConfig.testMode === "scenario" ? testConfig.useIndexes : false,
         warmup_time: testConfig.warmupTime,
         test_name: testName,
       })
@@ -217,7 +218,15 @@ export function ConfigPage() {
         <ScenarioSelectorCard
           scenarios={scenarios}
           selectedScenarioId={testConfig.scenario}
-          onScenarioChange={(id) => setTestConfig({ scenario: id })}
+          useIndexes={testConfig.useIndexes}
+          onScenarioChange={(id) => {
+            const nextScenario = scenarios.find((scenario) => scenario.id === id)
+            setTestConfig({
+              scenario: id,
+              useIndexes: (nextScenario?.indexes?.length ?? 0) > 0 ? testConfig.useIndexes : false,
+            })
+          }}
+          onUseIndexesChange={(value) => setTestConfig({ useIndexes: value })}
         />
       )}
 
@@ -278,6 +287,7 @@ export function ConfigPage() {
         selectedScenario={selectedScenario}
         selectedQuery={selectedQuery}
         useCustomSql={useCustomSql}
+        useIndexes={testConfig.useIndexes}
         virtualUsers={testConfig.virtualUsers}
         iterations={testConfig.iterations}
         warmupTime={testConfig.warmupTime}

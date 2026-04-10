@@ -161,11 +161,11 @@ class ConnectionManager:
     
     async def send_backup_status(self, test_id: str, status: str, data: Dict[str, Any]):
         """
-        Отправить статус backup/restore операции
+        Отправить статус backup/restore или index-операции
         
         Args:
             test_id: ID теста
-            status: Тип статуса (backup_started, backup_completed, restore_started, restore_completed, etc.)
+            status: Тип статуса (backup_started, restore_completed, index_creation_started, etc.)
             data: Данные статуса (tables, duration_ms, verified, etc.)
         """
         message = {
@@ -178,6 +178,10 @@ class ConnectionManager:
         await self.broadcast_to_test(test_id, message)
         # Также отправляем в глобальный канал
         await self.broadcast_to_test("global", message)
+
+    async def send_operation_status(self, test_id: str, status: str, data: Dict[str, Any]):
+        """Совместимый алиас для статусов служебных операций теста"""
+        await self.send_backup_status(test_id, status, data)
     
     def get_connection_count(self, test_id: str = None) -> int:
         """Получить количество соединений"""
@@ -364,8 +368,8 @@ class TestStreamingCallback:
         await self.on_status_change("completed", message)
     
     async def on_backup_status(self, status: str, data: Dict[str, Any] = None):
-        """Вызывается при изменении статуса backup/restore"""
-        await self.manager.send_backup_status(self.test_id, status, data or {})
+        """Вызывается при изменении статуса backup/restore/index-операций"""
+        await self.manager.send_operation_status(self.test_id, status, data or {})
 
     async def on_test_error(self, error: str):
         """Вызывается при ошибке теста"""

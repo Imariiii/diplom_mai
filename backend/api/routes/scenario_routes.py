@@ -166,6 +166,99 @@ async def clone_scenario(scenario_id: str, request):
 
 # ==================== Scenario Query Endpoints ====================
 
+@router.get("/{scenario_id}/indexes")
+async def get_scenario_indexes(scenario_id: str):
+    """Получить все индексы сценария"""
+    repo = get_scenario_repository()
+
+    scenario = await repo.get_scenario(scenario_id)
+    if not scenario:
+        raise HTTPException(status_code=404, detail=f"Сценарий {scenario_id} не найден")
+
+    indexes = await repo.get_scenario_indexes(scenario_id)
+    return {"indexes": [idx.to_dict() for idx in indexes]}
+
+
+@router.post("/{scenario_id}/indexes")
+async def add_index_to_scenario(scenario_id: str, request):
+    """Добавить индекс к сценарию"""
+    from backend.api.schemas import ScenarioIndexCreate
+    request = ScenarioIndexCreate(**request)
+    repo = get_scenario_repository()
+
+    scenario = await repo.get_scenario(scenario_id)
+    if not scenario:
+        raise HTTPException(status_code=404, detail=f"Сценарий {scenario_id} не найден")
+
+    if scenario.is_builtin == 't':
+        raise HTTPException(status_code=403, detail="Встроенные сценарии нельзя редактировать")
+
+    scenario_index = await repo.add_index_to_scenario(
+        scenario_id=scenario_id,
+        table_name=request.table_name,
+        column_names=request.column_names,
+        index_type=request.index_type,
+        index_name=request.index_name,
+        is_unique=request.is_unique,
+        condition=request.condition,
+        description=request.description,
+    )
+    return scenario_index.to_dict()
+
+
+@router.put("/{scenario_id}/indexes/{index_id}")
+async def update_scenario_index(scenario_id: str, index_id: str, request):
+    """Обновить индекс сценария"""
+    from backend.api.schemas import ScenarioIndexUpdate
+    request = ScenarioIndexUpdate(**request)
+    repo = get_scenario_repository()
+
+    scenario = await repo.get_scenario(scenario_id)
+    if not scenario:
+        raise HTTPException(status_code=404, detail=f"Сценарий {scenario_id} не найден")
+
+    if scenario.is_builtin == 't':
+        raise HTTPException(status_code=403, detail="Встроенные сценарии нельзя редактировать")
+
+    scenario_index = await repo.get_index(index_id)
+    if not scenario_index or str(scenario_index.scenario_id) != scenario_id:
+        raise HTTPException(status_code=404, detail=f"Индекс {index_id} не найден в сценарии {scenario_id}")
+
+    updated = await repo.update_index(
+        index_id=index_id,
+        table_name=request.table_name,
+        column_names=request.column_names,
+        index_type=request.index_type,
+        index_name=request.index_name,
+        is_unique=request.is_unique,
+        condition=request.condition,
+        description=request.description,
+    )
+    return updated.to_dict()
+
+
+@router.delete("/{scenario_id}/indexes/{index_id}")
+async def delete_scenario_index(scenario_id: str, index_id: str):
+    """Удалить индекс сценария"""
+    repo = get_scenario_repository()
+
+    scenario = await repo.get_scenario(scenario_id)
+    if not scenario:
+        raise HTTPException(status_code=404, detail=f"Сценарий {scenario_id} не найден")
+
+    if scenario.is_builtin == 't':
+        raise HTTPException(status_code=403, detail="Встроенные сценарии нельзя редактировать")
+
+    scenario_index = await repo.get_index(index_id)
+    if not scenario_index or str(scenario_index.scenario_id) != scenario_id:
+        raise HTTPException(status_code=404, detail=f"Индекс {index_id} не найден в сценарии {scenario_id}")
+
+    await repo.delete_index(index_id)
+    return {"deleted": True, "index_id": index_id}
+
+
+# ==================== Scenario Query Endpoints ====================
+
 @router.get("/{scenario_id}/queries")
 async def get_scenario_queries(scenario_id: str):
     """Получить все запросы сценария"""

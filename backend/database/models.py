@@ -323,6 +323,7 @@ class TestScenario(Base):
     
     # Relationships
     queries = relationship("ScenarioQuery", back_populates="scenario", cascade="all, delete-orphan", order_by="ScenarioQuery.order_index")
+    indexes = relationship("ScenarioIndex", back_populates="scenario", cascade="all, delete-orphan")
     
     # Indexes
     __table_args__ = (
@@ -341,6 +342,7 @@ class TestScenario(Base):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'queries': [q.to_dict() for q in self.queries] if self.queries else [],
+            'indexes': [idx.to_dict() for idx in self.indexes] if self.indexes else [],
         }
 
 
@@ -426,6 +428,44 @@ class ScenarioParam(Base):
             'column_ref': self.column_ref,
             'current_value': self.current_value,
             'step': self.step,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class ScenarioIndex(Base):
+    """Модель для хранения индексов, создаваемых перед тестом"""
+    __tablename__ = 'scenario_indexes'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scenario_id = Column(UUID(as_uuid=True), ForeignKey('test_scenarios.id', ondelete='CASCADE'), nullable=False)
+    table_name = Column(String(100), nullable=False)
+    column_names = Column(String(500), nullable=False)  # "col1,col2"
+    index_type = Column(String(50), nullable=False, default='btree')
+    index_name = Column(String(255), nullable=True)
+    is_unique = Column(String(1), nullable=False, default='f')
+    condition = Column(Text, nullable=True)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    scenario = relationship("TestScenario", back_populates="indexes")
+
+    __table_args__ = (
+        Index('idx_scenario_indexes_scenario_id', 'scenario_id'),
+        Index('idx_scenario_indexes_table_name', 'table_name'),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'id': str(self.id),
+            'scenario_id': str(self.scenario_id),
+            'table_name': self.table_name,
+            'column_names': self.column_names,
+            'index_type': self.index_type,
+            'index_name': self.index_name,
+            'is_unique': self.is_unique == 't',
+            'condition': self.condition,
+            'description': self.description,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 

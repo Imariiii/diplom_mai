@@ -23,6 +23,7 @@ class TestRequest(BaseModel):
     iterations: int = 10
     virtual_users: Optional[int] = 10
     scenario: Optional[str] = "mixed_light"
+    use_indexes: Optional[bool] = False
     warmup_time: Optional[int] = 5
     test_name: Optional[str] = None
 
@@ -35,5 +36,6 @@ class AsyncTestRequest(BaseModel):
     iterations: int = 10
     virtual_users: Optional[int] = 10
     scenario: Optional[str] = "mixed_light"
+    use_indexes: Optional[bool] = False
     warmup_time: Optional[int] = 5
     test_name: Optional[str] = None

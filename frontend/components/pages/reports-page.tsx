@@ -228,6 +228,14 @@ export function ReportsPage() {
                   <p className="text-muted-foreground">P99</p>
                   <p className="font-mono font-semibold">{result.metrics.p99ResponseTime.toFixed(2)} ms</p>
                 </div>
+                {result.indexInfo?.enabled && (
+                  <div>
+                    <p className="text-muted-foreground">Индексы</p>
+                    <p className="font-mono font-semibold">
+                      {result.indexInfo.indexes_count} / {result.indexInfo.total_creation_time_ms.toFixed(1)} ms
+                    </p>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

@@ -148,11 +148,15 @@ class DatabaseConnection:
         connection_key = self._resolve_connection_key(connection_key)
         if connection_key not in self.engines:
             connection_string = self.get_connection_string(connection_key)
-            pool_size = self._pool_sizes.get(connection_key, 5)
+            pool_size = max(1, min(
+                self._pool_sizes.get(connection_key, 5),
+                settings.test.db_pool_max_size,
+            ))
+            max_overflow = max(0, settings.test.db_pool_max_overflow)
             self.engines[connection_key] = create_async_engine(
                 connection_string,
                 pool_size=pool_size,
-                max_overflow=pool_size * 2,
+                max_overflow=max_overflow,
                 echo=False
             )
         return self.engines[connection_key]
@@ -166,9 +170,15 @@ class DatabaseConnection:
         """Масштабировать пул соединений под количество виртуальных пользователей"""
         connection_key = self._resolve_connection_key(connection_key)
         current = self._pool_sizes.get(connection_key, 5)
-        if current >= min_size:
+        target_size = max(1, min(min_size, settings.test.db_pool_max_size))
+        if current >= target_size:
             return
-        self._pool_sizes[connection_key] = min_size
+        if target_size < min_size:
+            print(
+                f"[DB_CONNECTION] Пул для {connection_key} ограничен: "
+                f"requested={min_size}, actual={target_size}"
+            )
+        self._pool_sizes[connection_key] = target_size
         if connection_key in self.engines:
             await self.engines[connection_key].dispose()
             del self.engines[connection_key]

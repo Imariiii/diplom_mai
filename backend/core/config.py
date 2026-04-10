@@ -97,6 +97,8 @@ class TestSettings(BaseSettings):
     default_users: int = Field(default=10)
     default_spawn_rate: int = Field(default=2)
     default_duration: int = Field(default=60)
+    db_pool_max_size: int = Field(default=80)
+    db_pool_max_overflow: int = Field(default=0)
     default_queries: list = Field(default_factory=lambda: [
         "SELECT * FROM actor LIMIT 100",
         "SELECT * FROM film WHERE length > 120",
@@ -212,6 +214,8 @@ class Settings(BaseSettings):
                 "default_users": self.test.default_users,
                 "default_spawn_rate": self.test.default_spawn_rate,
                 "default_duration": self.test.default_duration,
+                "db_pool_max_size": self.test.db_pool_max_size,
+                "db_pool_max_overflow": self.test.db_pool_max_overflow,
                 "default_queries": self.test.default_queries,
             },
         }

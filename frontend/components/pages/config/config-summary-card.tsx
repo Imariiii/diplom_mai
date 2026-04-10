@@ -10,6 +10,7 @@ interface ConfigSummaryCardProps {
   selectedScenario?: Scenario
   selectedQuery?: Query
   useCustomSql: boolean
+  useIndexes: boolean
   virtualUsers: number
   iterations: number
   warmupTime: number
@@ -26,6 +27,7 @@ export function ConfigSummaryCard({
   selectedScenario,
   selectedQuery,
   useCustomSql,
+  useIndexes,
   virtualUsers,
   iterations,
   warmupTime,
@@ -52,10 +54,16 @@ export function ConfigSummaryCard({
             </span>
           </div>
           {testMode === "scenario" ? (
-            <div>
-              <span className="text-muted-foreground">Сценарий:</span>
-              <span className="ml-2 font-medium">{selectedScenario?.name || "Не выбрано"}</span>
-            </div>
+            <>
+              <div>
+                <span className="text-muted-foreground">Сценарий:</span>
+                <span className="ml-2 font-medium">{selectedScenario?.name || "Не выбрано"}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Индексы:</span>
+                <span className="ml-2 font-medium">{useIndexes ? "Включены" : "Выключены"}</span>
+              </div>
+            </>
           ) : (
             <div>
               <span className="text-muted-foreground">Запрос:</span>

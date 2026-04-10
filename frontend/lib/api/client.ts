@@ -10,6 +10,8 @@ import type {
   ConnectionTestResponse,
   ConnectionListResponse,
   ConnectionGroupsResponse,
+  CreateScenarioIndexRequest,
+  ScenarioIndex,
 } from '@/lib/types'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
@@ -159,6 +161,29 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ new_name: newName }),
     })
+  }
+
+  // Индексы сценария
+  async getScenarioIndexes(scenarioId: string): Promise<{ indexes: ScenarioIndex[] }> {
+    return this.request(`/scenarios/${scenarioId}/indexes`)
+  }
+
+  async createScenarioIndex(scenarioId: string, index: CreateScenarioIndexRequest): Promise<ScenarioIndex> {
+    return this.request(`/scenarios/${scenarioId}/indexes`, {
+      method: 'POST',
+      body: JSON.stringify(index),
+    })
+  }
+
+  async updateScenarioIndex(scenarioId: string, indexId: string, index: Partial<CreateScenarioIndexRequest>): Promise<ScenarioIndex> {
+    return this.request(`/scenarios/${scenarioId}/indexes/${indexId}`, {
+      method: 'PUT',
+      body: JSON.stringify(index),
+    })
+  }
+
+  async deleteScenarioIndex(scenarioId: string, indexId: string): Promise<{ deleted: boolean; index_id: string }> {
+    return this.request(`/scenarios/${scenarioId}/indexes/${indexId}`, { method: 'DELETE' })
   }
 
   // Запросы сценария

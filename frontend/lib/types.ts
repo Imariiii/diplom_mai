@@ -26,6 +26,7 @@ export interface TestConfig {
   databases: string[]           // Выбранные СУБД
   testMode: TestMode            // Режим тестирования
   scenario: string               // ID сценария тестирования (для режима scenario) - UUID из БД или строковый сценарий
+  useIndexes: boolean           // Создавать индексы сценария перед тестом
   selectedQueryId: string       // ID выбранного запроса (для режима custom_query)
   customSql: string             // Пользовательский SQL запрос
   virtualUsers: number          // Количество виртуальных пользователей (параллельных соединений)
@@ -110,6 +111,7 @@ export interface TestResult {
   databaseId: string
   databaseType: string
   databaseName: string
+  indexInfo?: IndexInfo
   metrics: DatabaseMetrics
   systemMetrics?: SystemMetrics
   transactionMetrics?: TransactionMetrics
@@ -151,11 +153,13 @@ export interface Scenario {
   name: string
   description: string | null
   scenario_type: string
-  is_builtin: 't' | 'f'
+  is_builtin: boolean | 't' | 'f'
+  is_active?: boolean
   created_at: string
   updated_at: string | null
   queries_count?: number  // Количество запросов в сценарии
   queries?: ScenarioQuery[]
+  indexes?: ScenarioIndex[]
 }
 
 export interface ScenarioQuery {
@@ -184,6 +188,41 @@ export interface ScenarioParam {
   created_at: string
 }
 
+export interface ScenarioIndex {
+  id: string
+  scenario_id: string
+  table_name: string
+  column_names: string
+  index_type: string
+  index_name: string | null
+  is_unique: boolean
+  condition: string | null
+  description: string | null
+  created_at: string
+}
+
+export interface IndexInfoDetail {
+  name: string
+  table: string
+  columns: string
+  index_type: string
+  creation_time_ms?: number
+  drop_time_ms?: number
+  success: boolean
+  error?: string | null
+}
+
+export interface IndexInfo {
+  enabled: boolean
+  indexes_count: number
+  total_creation_time_ms: number
+  drop_time_ms: number
+  details: IndexInfoDetail[]
+  drop_details?: IndexInfoDetail[]
+  errors?: string[]
+  drop_errors?: string[]
+}
+
 export interface CreateScenarioRequest {
   name: string
   description?: string
@@ -207,6 +246,16 @@ export interface CreateScenarioParamRequest {
   column_ref?: string
   fixed_value?: string
   string_length?: number
+}
+
+export interface CreateScenarioIndexRequest {
+  table_name: string
+  column_names: string
+  index_type?: string
+  index_name?: string
+  is_unique?: boolean
+  condition?: string
+  description?: string
 }
 
 // ==================== Database State Management Types ====================

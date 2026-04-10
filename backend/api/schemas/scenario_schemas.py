@@ -47,6 +47,39 @@ class ScenarioParamResponse(BaseModel):
     created_at: str
 
 
+class ScenarioIndexCreate(BaseModel):
+    table_name: str
+    column_names: str
+    index_type: str = "btree"
+    index_name: Optional[str] = None
+    is_unique: bool = False
+    condition: Optional[str] = None
+    description: Optional[str] = None
+
+
+class ScenarioIndexUpdate(BaseModel):
+    table_name: Optional[str] = None
+    column_names: Optional[str] = None
+    index_type: Optional[str] = None
+    index_name: Optional[str] = None
+    is_unique: Optional[bool] = None
+    condition: Optional[str] = None
+    description: Optional[str] = None
+
+
+class ScenarioIndexResponse(BaseModel):
+    id: str
+    scenario_id: str
+    table_name: str
+    column_names: str
+    index_type: str
+    index_name: Optional[str]
+    is_unique: bool
+    condition: Optional[str]
+    description: Optional[str]
+    created_at: str
+
+
 class ScenarioQueryCreate(BaseModel):
     sql_template: str
     query_type: str  # select, insert, update, delete
@@ -100,6 +133,7 @@ class TestScenarioResponse(BaseModel):
     created_at: str
     updated_at: str
     queries: List[ScenarioQueryResponse]
+    indexes: List[ScenarioIndexResponse]
 
 
 class TestScenarioListResponse(BaseModel):

@@ -6,7 +6,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Copy, Trash2, Edit, Code, ChevronRight, ChevronDown, Hash, X, AlertCircle, Plus } from "lucide-react"
-import type { Scenario, ScenarioQuery } from "@/lib/types"
+import type { Scenario, ScenarioQuery, ScenarioIndex } from "@/lib/types"
 
 const PARAM_TYPES = [
   { value: "random_int", label: "Случайное целое число" },
@@ -21,6 +21,7 @@ const PARAM_TYPES = [
 interface QueryCardProps {
   query: ScenarioQuery
   index: number
+  canEdit: boolean
   isExpanded: boolean
   onToggle: () => void
   onDelete: () => void
@@ -29,7 +30,7 @@ interface QueryCardProps {
   extractParamsFromSql: (sql: string) => string[]
 }
 
-function QueryCard({ query, index, isExpanded, onToggle, onDelete, onAddParam, onDeleteParam, extractParamsFromSql }: QueryCardProps) {
+function QueryCard({ query, index, canEdit, isExpanded, onToggle, onDelete, onAddParam, onDeleteParam, extractParamsFromSql }: QueryCardProps) {
   const params = extractParamsFromSql(query.sql_template)
 
   return (
@@ -52,16 +53,20 @@ function QueryCard({ query, index, isExpanded, onToggle, onDelete, onAddParam, o
             weight: {query.weight}
           </Badge>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={(e) => {
-            e.stopPropagation()
-            onDelete()
-          }}
-        >
-          <Trash2 className="h-4 w-4 text-destructive" />
-        </Button>
+        {canEdit ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation()
+              onDelete()
+            }}
+          >
+            <Trash2 className="h-4 w-4 text-destructive" />
+          </Button>
+        ) : (
+          <div />
+        )}
       </div>
 
       {isExpanded && (
@@ -85,14 +90,16 @@ function QueryCard({ query, index, isExpanded, onToggle, onDelete, onAddParam, o
                   <Hash className="h-4 w-4" />
                   Параметры ({query.params?.length || 0}/{params.length})
                 </h4>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={onAddParam}
-                >
-                  <Plus className="h-4 w-4 mr-1" />
-                  Добавить
-                </Button>
+                {canEdit && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={onAddParam}
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Добавить
+                  </Button>
+                )}
               </div>
 
               {query.params && query.params.length > 0 ? (
@@ -110,14 +117,16 @@ function QueryCard({ query, index, isExpanded, onToggle, onDelete, onAddParam, o
                           {PARAM_TYPES.find(t => t.value === param.param_type)?.label || param.param_type}
                         </Badge>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={() => onDeleteParam(param.id)}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
+                      {canEdit && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          onClick={() => onDeleteParam(param.id)}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -152,12 +161,15 @@ function QueryCard({ query, index, isExpanded, onToggle, onDelete, onAddParam, o
 interface ScenarioDetailPanelProps {
   selectedScenario: Scenario
   queries: ScenarioQuery[]
+  indexes: ScenarioIndex[]
   expandedQueries: Set<string>
   onClone: () => void
   onEdit: () => void
   onDelete: () => void
   onAddQuery: () => void
+  onAddIndex: () => void
   onDeleteQuery: (queryId: string) => void
+  onDeleteIndex: (indexId: string) => void
   onToggleQuery: (queryId: string) => void
   onAddParam: (queryId: string) => void
   onDeleteParam: (queryId: string, paramId: string) => void
@@ -167,24 +179,29 @@ interface ScenarioDetailPanelProps {
 export function ScenarioDetailPanel({
   selectedScenario,
   queries,
+  indexes,
   expandedQueries,
   onClone,
   onEdit,
   onDelete,
   onAddQuery,
+  onAddIndex,
   onDeleteQuery,
+  onDeleteIndex,
   onToggleQuery,
   onAddParam,
   onDeleteParam,
   extractParamsFromSql,
 }: ScenarioDetailPanelProps) {
+  const isBuiltin = selectedScenario.is_builtin === true || selectedScenario.is_builtin === "t"
+
   return (
     <>
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2">
             <h3 className="text-lg font-semibold">{selectedScenario.name}</h3>
-            {selectedScenario.is_builtin === 't' && (
+            {isBuiltin && (
               <Badge variant="secondary">built-in</Badge>
             )}
           </div>
@@ -196,7 +213,7 @@ export function ScenarioDetailPanel({
           <Button variant="outline" size="icon" onClick={onClone} title="Клонировать">
             <Copy className="h-4 w-4" />
           </Button>
-          {selectedScenario.is_builtin !== 't' && (
+          {!isBuiltin && (
             <>
               <Button variant="outline" size="icon" onClick={onEdit} title="Редактировать">
                 <Edit className="h-4 w-4" />
@@ -220,15 +237,21 @@ export function ScenarioDetailPanel({
             <Code className="h-4 w-4" />
             Запросы ({queries.length})
           </TabsTrigger>
+          <TabsTrigger value="indexes" className="flex items-center gap-2">
+            <Hash className="h-4 w-4" />
+            Индексы ({indexes.length})
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="queries" className="space-y-4">
-          <div className="flex justify-end">
-            <Button variant="outline" size="sm" onClick={onAddQuery}>
-              <Plus className="mr-2 h-4 w-4" />
-              Добавить запрос
-            </Button>
-          </div>
+          {!isBuiltin && (
+            <div className="flex justify-end">
+              <Button variant="outline" size="sm" onClick={onAddQuery}>
+                <Plus className="mr-2 h-4 w-4" />
+                Добавить запрос
+              </Button>
+            </div>
+          )}
 
           <ScrollArea className="h-[400px]">
             <div className="space-y-4">
@@ -237,6 +260,7 @@ export function ScenarioDetailPanel({
                   key={query.id}
                   query={query}
                   index={index}
+                  canEdit={!isBuiltin}
                   isExpanded={expandedQueries.has(query.id)}
                   onToggle={() => onToggleQuery(query.id)}
                   onDelete={() => onDeleteQuery(query.id)}
@@ -245,6 +269,63 @@ export function ScenarioDetailPanel({
                   extractParamsFromSql={extractParamsFromSql}
                 />
               ))}
+            </div>
+          </ScrollArea>
+        </TabsContent>
+
+        <TabsContent value="indexes" className="space-y-4">
+          {!isBuiltin && (
+            <div className="flex justify-end">
+              <Button variant="outline" size="sm" onClick={onAddIndex}>
+                <Plus className="mr-2 h-4 w-4" />
+                Добавить индекс
+              </Button>
+            </div>
+          )}
+
+          <ScrollArea className="h-[400px]">
+            <div className="space-y-4">
+              {indexes.length > 0 ? (
+                indexes.map((scenarioIndex) => (
+                  <div key={scenarioIndex.id} className="rounded-lg border p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge variant="outline">{scenarioIndex.index_type.toUpperCase()}</Badge>
+                          {scenarioIndex.is_unique && <Badge>UNIQUE</Badge>}
+                          <code className="text-sm">{scenarioIndex.index_name || "автоимя"}</code>
+                        </div>
+                        <div className="text-sm">
+                          <span className="text-muted-foreground">Таблица:</span> <code>{scenarioIndex.table_name}</code>
+                        </div>
+                        <div className="text-sm">
+                          <span className="text-muted-foreground">Колонки:</span> <code>{scenarioIndex.column_names}</code>
+                        </div>
+                        {scenarioIndex.condition && (
+                          <div className="text-sm">
+                            <span className="text-muted-foreground">Условие:</span> <code>{scenarioIndex.condition}</code>
+                          </div>
+                        )}
+                        {scenarioIndex.description && (
+                          <p className="text-sm text-muted-foreground">{scenarioIndex.description}</p>
+                        )}
+                      </div>
+                      {!isBuiltin && (
+                        <Button variant="ghost" size="sm" onClick={() => onDeleteIndex(scenarioIndex.id)}>
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    Для этого сценария пока не настроены индексы.
+                  </AlertDescription>
+                </Alert>
+              )}
             </div>
           </ScrollArea>
         </TabsContent>
