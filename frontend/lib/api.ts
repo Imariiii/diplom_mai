@@ -1,22 +1,8 @@
 /**
- * API клиент для работы с backend
- * 
- * Этот файл сохраняет обратную совместимость.
- * Новый код рекомендуется импортировать из '@/lib/api'
- * 
- * @deprecated Используйте import из '@/lib/api'
+ * Canonical API entrypoint для frontend
  */
 
-import type {
-  Scenario,
-  ScenarioQuery,
-  ScenarioParam,
-  CreateScenarioRequest,
-  CreateScenarioQueryRequest,
-  CreateScenarioParamRequest,
-} from "./types"
-
-// Реэкспорт из новой модульной структуры для обратной совместимости
+// Реэкспорт из модульной структуры
 export { apiClient } from "./api/client"
 export type { HealthStatus, Query } from "./api/client"
 

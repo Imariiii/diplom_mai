@@ -33,54 +33,12 @@ def get_connection_repo() -> ConnectionRepository:
     return initialize.connection_repository
 
 
-async def _resolve_connection_by_type(
-    dbms_type: str,
-    repo: ConnectionRepository,
-) -> Dict[str, str]:
-    """Разрешить legacy dbms_type в явное активное подключение"""
-    if dbms_type not in {"mysql", "postgresql"}:
-        raise HTTPException(status_code=400, detail=f"Неподдерживаемый тип БД: {dbms_type}")
-
-    connections = await repo.get_active_connections()
-    matches = [conn for conn in connections if conn.dbms_type == dbms_type]
-
-    if not matches:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                f"Активное подключение типа '{dbms_type}' не найдено. "
-                "Создайте его через UI/API или используйте route с connection_id."
-            ),
-        )
-
-    if len(matches) > 1:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Найдено несколько активных подключений типа '{dbms_type}'. "
-                "Используйте route с явным connection_id."
-            ),
-        )
-
-    match = matches[0]
-    return {
-        "connection_id": str(match.id),
-        "dbms_type": match.dbms_type,
-        "name": match.name,
-    }
-
-
 async def _resolve_connection_by_id(
     connection_id: str,
     repo: ConnectionRepository,
 ) -> Dict[str, Any]:
     """Получить явное подключение по ID"""
-    resolved_connection_id = connection_id
-    if connection_id in {"mysql", "postgresql"}:
-        resolved = await _resolve_connection_by_type(connection_id, repo)
-        resolved_connection_id = resolved["connection_id"]
-
-    decrypted = await repo.get_decrypted_connection(resolved_connection_id)
+    decrypted = await repo.get_decrypted_connection(connection_id)
     if not decrypted:
         raise HTTPException(status_code=404, detail="Подключение не найдено")
     return decrypted
@@ -93,19 +51,14 @@ async def _get_connection_context(
     """Собрать контекст подключения для database-state операций"""
     db_connection = get_db_connection()
     db_connection.set_connection_repository(repo)
-    resolved_connection_id = connection_id
-    if connection_id in {"mysql", "postgresql"}:
-        resolved = await _resolve_connection_by_type(connection_id, repo)
-        resolved_connection_id = resolved["connection_id"]
-
-    connection_config = await _resolve_connection_by_id(resolved_connection_id, repo)
-    await db_connection.ensure_connection_config(resolved_connection_id)
+    connection_config = await _resolve_connection_by_id(connection_id, repo)
+    await db_connection.ensure_connection_config(connection_id)
 
     return {
-        "connection_id": resolved_connection_id,
+        "connection_id": connection_id,
         "connection_name": connection_config["name"],
         "dbms_type": connection_config["dbms_type"],
-        "engine": await db_connection.get_engine_async(resolved_connection_id),
+        "engine": await db_connection.get_engine_async(connection_id),
     }
 
 
@@ -281,56 +234,3 @@ async def estimate_backup_by_connection(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{dbms_type}/state")
-async def get_database_state(
-    dbms_type: str,
-    repo: ConnectionRepository = Depends(get_connection_repo),
-):
-    """Legacy route: получить состояние БД по типу СУБД"""
-    resolved = await _resolve_connection_by_type(dbms_type, repo)
-    return await _build_database_state(resolved["connection_id"], repo)
-
-
-@router.post("/{dbms_type}/backup")
-async def create_backup(
-    dbms_type: str,
-    request: Optional[Dict[str, Any]] = None,
-    repo: ConnectionRepository = Depends(get_connection_repo),
-):
-    """Legacy route: создать backup по типу СУБД"""
-    backup_request = BackupRequest() if request is None else BackupRequest(**request)
-    resolved = await _resolve_connection_by_type(dbms_type, repo)
-    return await _create_backup_for_connection(resolved["connection_id"], backup_request, repo)
-
-
-@router.post("/{dbms_type}/restore")
-async def restore_backup(
-    dbms_type: str,
-    request: Optional[Dict[str, Any]] = None,
-    repo: ConnectionRepository = Depends(get_connection_repo),
-):
-    """Legacy route: восстановить backup по типу СУБД"""
-    restore_request = RestoreRequest() if request is None else RestoreRequest(**request)
-    resolved = await _resolve_connection_by_type(dbms_type, repo)
-    return await _restore_backup_for_connection(resolved["connection_id"], restore_request, repo)
-
-
-@router.post("/{dbms_type}/cleanup")
-async def cleanup_backups(
-    dbms_type: str,
-    repo: ConnectionRepository = Depends(get_connection_repo),
-):
-    """Legacy route: удалить backup-таблицы по типу СУБД"""
-    resolved = await _resolve_connection_by_type(dbms_type, repo)
-    return await _cleanup_backups_for_connection(resolved["connection_id"], repo)
-
-
-@router.get("/{dbms_type}/estimate")
-async def estimate_backup(
-    dbms_type: str,
-    tables: str,
-    repo: ConnectionRepository = Depends(get_connection_repo),
-):
-    """Legacy route: оценить backup по типу СУБД"""
-    resolved = await _resolve_connection_by_type(dbms_type, repo)
-    return await _estimate_backup_for_connection(resolved["connection_id"], tables, repo)
