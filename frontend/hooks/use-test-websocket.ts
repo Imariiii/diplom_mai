@@ -301,10 +301,3 @@ export function useTestWebSocket({
   }
 }
 
-// Hook для глобального WebSocket (все тесты)
-export function useGlobalWebSocket(options?: Omit<UseTestWebSocketOptions, "testId">) {
-  return useTestWebSocket({
-    testId: "global",
-    ...options,
-  })
-}

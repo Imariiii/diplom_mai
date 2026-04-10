@@ -8,6 +8,8 @@ from typing import Dict, List, Optional, Set
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy import text
 
+from backend.database.sql_utils import get_row_count
+
 
 @dataclass
 class TableFingerprint:
@@ -152,7 +154,7 @@ class StateVerifier:
         """Создать фингерпринт отдельной таблицы"""
         
         # Получаем количество строк
-        row_count = await self._get_row_count(engine, table, dbms_type)
+        row_count = await get_row_count(engine, table, dbms_type)
         
         # Вычисляем чексумму (только для маленьких таблиц)
         checksum = None
@@ -175,17 +177,6 @@ class StateVerifier:
             sequence_value=sequence_value,
             auto_increment_value=auto_increment_value
         )
-    
-    async def _get_row_count(self, engine: AsyncEngine, table: str, dbms_type: str) -> int:
-        """Получить количество строк в таблице"""
-        async with engine.connect() as conn:
-            if dbms_type == 'postgresql':
-                sql = f'SELECT COUNT(*) FROM "{table}"'
-            else:
-                sql = f'SELECT COUNT(*) FROM `{table}`'
-            
-            result = await conn.execute(text(sql))
-            return result.scalar()
     
     async def _compute_checksum(self, engine: AsyncEngine, table: str, dbms_type: str) -> str:
         """Вычислить чексумму данных таблицы"""

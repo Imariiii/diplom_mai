@@ -175,36 +175,3 @@ async def save_mysql_auto_increments(engine: AsyncEngine, tables: Set[str]) -> D
     
     return auto_increments
 
-
-async def get_row_count(engine: AsyncEngine, table: str, dbms_type: str) -> int:
-    """Получить количество строк в таблице"""
-    async with engine.connect() as conn:
-        if dbms_type == 'postgresql':
-            sql = f'SELECT COUNT(*) FROM "{table}"'
-        else:
-            sql = f'SELECT COUNT(*) FROM `{table}`'
-        
-        result = await conn.execute(text(sql))
-        return result.scalar()
-
-
-async def get_table_size(engine: AsyncEngine, table: str, dbms_type: str) -> int:
-    """Получить размер таблицы в байтах"""
-    async with engine.connect() as conn:
-        if dbms_type == 'postgresql':
-            sql = f"SELECT pg_total_relation_size('\"{table}\"')"
-            result = await conn.execute(text(sql))
-            return result.scalar() or 0
-        
-        elif dbms_type == 'mysql':
-            sql = """
-                SELECT DATA_LENGTH + INDEX_LENGTH 
-                FROM information_schema.TABLES
-                WHERE TABLE_SCHEMA = DATABASE() 
-                  AND TABLE_NAME = :table
-            """
-            result = await conn.execute(text(sql), {"table": table})
-            row = result.fetchone()
-            return row[0] if row else 0
-    
-    return 0

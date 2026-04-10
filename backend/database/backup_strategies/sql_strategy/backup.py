@@ -8,6 +8,7 @@ from sqlalchemy import text
 
 from .. import BackupInfo, SizeEstimate
 from .helpers import save_postgres_sequences, save_mysql_auto_increments
+from backend.database.sql_utils import get_row_count, get_table_size
 
 
 async def create_backup_logic(
@@ -184,39 +185,3 @@ async def estimate_size_logic(
         warnings=warnings
     )
 
-
-async def get_row_count(engine: AsyncEngine, table: str) -> int:
-    """Получить количество строк в таблице"""
-    async with engine.connect() as conn:
-        dbms_type = engine.dialect.name
-        if dbms_type == 'postgresql':
-            sql = f'SELECT COUNT(*) FROM "{table}"'
-        else:
-            sql = f'SELECT COUNT(*) FROM `{table}`'
-        
-        result = await conn.execute(text(sql))
-        return result.scalar()
-
-
-async def get_table_size(engine: AsyncEngine, table: str) -> int:
-    """Получить размер таблицы в байтах"""
-    dbms_type = engine.dialect.name
-    
-    async with engine.connect() as conn:
-        if dbms_type == 'postgresql':
-            sql = f"SELECT pg_total_relation_size('\"{table}\"')"
-            result = await conn.execute(text(sql))
-            return result.scalar() or 0
-        
-        elif dbms_type == 'mysql':
-            sql = """
-                SELECT DATA_LENGTH + INDEX_LENGTH 
-                FROM information_schema.TABLES 
-                WHERE TABLE_SCHEMA = DATABASE() 
-                AND TABLE_NAME = :table
-            """
-            result = await conn.execute(text(sql), {"table": table})
-            row = result.fetchone()
-            return row[0] if row else 0
-        
-        return 0

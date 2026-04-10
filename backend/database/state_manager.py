@@ -12,6 +12,7 @@ from sqlalchemy import text
 from backend.config import get_restore_config
 from backend.database.query_analyzer import QueryAnalyzer
 from backend.database.backup_strategies import BackupInfo, SizeEstimate, SqlBackupStrategy
+from backend.database.sql_utils import get_row_count
 from backend.database.state_verifier import StateVerifier, StateFingerprint, VerifyResult
 
 
@@ -108,17 +109,6 @@ class DatabaseStateManager:
             
             result = await conn.execute(text(sql))
             return {row[0] for row in result}
-    
-    async def _get_row_count(self, engine: AsyncEngine, table: str, dbms_type: str) -> int:
-        """Получить количество строк в таблице"""
-        async with engine.connect() as conn:
-            if dbms_type == 'postgresql':
-                sql = f'SELECT COUNT(*) FROM "{table}"'
-            else:
-                sql = f'SELECT COUNT(*) FROM `{table}`'
-            
-            result = await conn.execute(text(sql))
-            return result.scalar()
     
     def _get_lock(self, dbms_type: str) -> asyncio.Lock:
         """Получить блокировку для СУБД"""
@@ -451,7 +441,7 @@ class DatabaseStateManager:
             # Собираем информацию о каждой таблице
             tables_info = {}
             for table in all_tables:
-                row_count = await self._get_row_count(engine, table, dbms_type)
+                row_count = await get_row_count(engine, table, dbms_type)
                 tables_info[table] = {
                     "row_count": row_count,
                     "has_backup": table in original_tables
