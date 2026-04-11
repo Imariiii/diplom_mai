@@ -60,7 +60,7 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
 
       setStates(Object.fromEntries(stateEntries))
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch database states")
+      setError(err instanceof Error ? err.message : "Не удалось загрузить состояние баз данных")
     } finally {
       setLoading(false)
     }
@@ -91,7 +91,7 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
       }
       await fetchStates()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create backup")
+      setError(err instanceof Error ? err.message : "Не удалось создать резервную копию")
     } finally {
       setActionLoading((prev) => ({ ...prev, [key]: false }))
     }
@@ -109,7 +109,7 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
       })
       await fetchStates()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to restore database")
+      setError(err instanceof Error ? err.message : "Не удалось восстановить базу данных")
     } finally {
       setActionLoading((prev) => ({ ...prev, [key]: false }))
     }
@@ -122,7 +122,7 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
       await apiClient.cleanupBackups(connectionId)
       await fetchStates()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to cleanup backups")
+      setError(err instanceof Error ? err.message : "Не удалось очистить резервные копии")
     } finally {
       setActionLoading((prev) => ({ ...prev, [key]: false }))
     }
@@ -133,20 +133,35 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
       await apiClient.updateRestoreSettings(updates)
       await fetchStates()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update settings")
+      setError(err instanceof Error ? err.message : "Не удалось обновить настройки")
     }
   }
 
   const getStatusBadge = (status: DatabaseState["status"]) => {
     switch (status) {
       case "clean":
-        return <Badge variant="default" className="bg-green-500"><CheckCircle className="w-3 h-3 mr-1" /> Clean</Badge>
+        return (
+          <Badge variant="default" className="bg-green-500">
+            <CheckCircle className="w-3 h-3 mr-1" />
+            Чистая
+          </Badge>
+        )
       case "modified":
-        return <Badge variant="destructive"><AlertTriangle className="w-3 h-3 mr-1" /> Modified</Badge>
+        return (
+          <Badge variant="destructive">
+            <AlertTriangle className="w-3 h-3 mr-1" />
+            Изменена
+          </Badge>
+        )
       case "backup_exists":
-        return <Badge variant="secondary"><Database className="w-3 h-3 mr-1" /> Backup Exists</Badge>
+        return (
+          <Badge variant="secondary">
+            <Database className="w-3 h-3 mr-1" />
+            Есть резервная копия
+          </Badge>
+        )
       default:
-        return <Badge variant="outline">Unknown</Badge>
+        return <Badge variant="outline">Неизвестно</Badge>
     }
   }
 
@@ -164,13 +179,13 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
               <Database className="w-5 h-5 text-primary" />
               <div>
                 <CardTitle className="text-lg">{connection.name}</CardTitle>
-                <CardDescription>{connection.dbms_type} • {connection.database}</CardDescription>
+                <CardDescription>{connection.dbms_type} · {connection.database}</CardDescription>
               </div>
             </div>
             {getStatusBadge(state.status)}
           </div>
           <CardDescription>
-            {Object.keys(state.tables).length} tables • {totalRows.toLocaleString()} total rows
+            {Object.keys(state.tables).length} таблиц · {totalRows.toLocaleString()} строк всего
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -186,7 +201,7 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
               ) : (
                 <Database className="w-4 h-4 mr-2" />
               )}
-              Backup
+              Бэкап
             </Button>
             <Button
               variant="outline"
@@ -199,7 +214,7 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
               ) : (
                 <RefreshCw className="w-4 h-4 mr-2" />
               )}
-              Restore
+              Восстановить
             </Button>
             <Button
               variant="outline"
@@ -212,7 +227,7 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
               ) : (
                 <Trash2 className="w-4 h-4 mr-2" />
               )}
-              Cleanup
+              Очистить
             </Button>
           </div>
 
@@ -220,7 +235,7 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
             <Alert variant="default" className="bg-amber-50 border-amber-200">
               <AlertCircle className="h-4 w-4 text-amber-600" />
               <AlertDescription className="text-amber-700">
-                {state.backup_tables.length} backup table(s) pending
+                {state.backup_tables.length} резервных таблиц ожидают обработки
               </AlertDescription>
             </Alert>
           )}
@@ -232,7 +247,7 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
   const renderTables = (state: DatabaseState) => (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm">Tables</CardTitle>
+        <CardTitle className="text-sm">Таблицы</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-2 max-h-64 overflow-y-auto">
@@ -240,8 +255,12 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
             <div key={table} className="flex items-center justify-between py-1 border-b last:border-0">
               <span className="font-medium">{table}</span>
               <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                <span>{info.row_count.toLocaleString()} rows</span>
-                {info.has_backup && <Badge variant="outline" className="text-green-600">Backed up</Badge>}
+                <span>{info.row_count.toLocaleString()} строк</span>
+                {info.has_backup && (
+                  <Badge variant="outline" className="text-green-600">
+                    Есть бэкап
+                  </Badge>
+                )}
               </div>
             </div>
           ))}
@@ -260,34 +279,34 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Database className="w-6 h-6 text-primary" />
-            <CardTitle>Database State Management</CardTitle>
+            <CardTitle>Управление состоянием БД</CardTitle>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={fetchStates} disabled={loading}>
               <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
-              Refresh
+              Обновить
             </Button>
             <Dialog>
               <DialogTrigger asChild>
                 <Button variant="outline" size="sm">
                   <Settings className="w-4 h-4 mr-2" />
-                  Settings
+                  Настройки
                 </Button>
               </DialogTrigger>
               <DialogContent className="max-w-md">
                 <DialogHeader>
-                  <DialogTitle>Restore Settings</DialogTitle>
+                  <DialogTitle>Настройки восстановления</DialogTitle>
                   <DialogDescription>
-                    Configure automatic database restore behavior
+                    Настройте поведение автоматического восстановления базы данных
                   </DialogDescription>
                 </DialogHeader>
                 {settings && (
                   <div className="space-y-4 py-4">
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5">
-                        <Label htmlFor="auto-restore">Auto-restore after tests</Label>
+                        <Label htmlFor="auto-restore">Авто-восстановление после тестов</Label>
                         <p className="text-sm text-muted-foreground">
-                          Automatically restore database after write tests
+                          Автоматически восстанавливать БД после тестов с записью
                         </p>
                       </div>
                       <Switch
@@ -299,9 +318,9 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
                     <Separator />
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5">
-                        <Label htmlFor="verify-restore">Verify after restore</Label>
+                        <Label htmlFor="verify-restore">Проверка после восстановления</Label>
                         <p className="text-sm text-muted-foreground">
-                          Verify data integrity after restoration
+                          Проверять целостность данных после восстановления
                         </p>
                       </div>
                       <Switch
@@ -312,15 +331,15 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
                     </div>
                     <Separator />
                     <div className="space-y-2">
-                      <Label>Backup Strategy</Label>
+                      <Label>Стратегия резервного копирования</Label>
                       <p className="text-sm text-muted-foreground">
-                        Current: <span className="font-medium">{settings.strategy}</span>
+                        Текущая: <span className="font-medium">{settings.strategy}</span>
                       </p>
                     </div>
                     <div className="space-y-2">
-                      <Label>Warning Threshold</Label>
+                      <Label>Порог предупреждения</Label>
                       <p className="text-sm text-muted-foreground">
-                        {settings.large_table_warning_threshold.toLocaleString()} rows
+                        {settings.large_table_warning_threshold.toLocaleString()} строк
                       </p>
                     </div>
                   </div>
@@ -330,7 +349,7 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
           </div>
         </div>
         <CardDescription>
-          Manage database backups and automatic restore after tests
+          Управление резервными копиями и автоматическим восстановлением после тестов
         </CardDescription>
       </CardHeader>
 
@@ -344,7 +363,7 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 bg-transparent p-0">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="overview">Обзор</TabsTrigger>
             {connections.map((connection) => (
               <TabsTrigger key={connection.id} value={connection.id}>
                 {connection.name}
@@ -370,7 +389,7 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
               <div className="grid gap-4 md:grid-cols-3">
                 <Card>
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium">Auto-restore</CardTitle>
+                    <CardTitle className="text-sm font-medium">Авто-восстановление</CardTitle>
                   </CardHeader>
                   <CardContent>
                     <div className="flex items-center gap-2">
@@ -380,7 +399,7 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
                         <AlertCircle className="w-5 h-5 text-amber-500" />
                       )}
                       <span className={settings.auto_restore ? "text-green-600" : "text-amber-600"}>
-                        {settings.auto_restore ? "Enabled" : "Disabled"}
+                        {settings.auto_restore ? "Включено" : "Отключено"}
                       </span>
                     </div>
                   </CardContent>
@@ -388,7 +407,7 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
 
                 <Card>
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium">Verify restore</CardTitle>
+                    <CardTitle className="text-sm font-medium">Проверка восстановления</CardTitle>
                   </CardHeader>
                   <CardContent>
                     <div className="flex items-center gap-2">
@@ -398,7 +417,7 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
                         <AlertCircle className="w-5 h-5 text-amber-500" />
                       )}
                       <span className={settings.verify_after_restore ? "text-green-600" : "text-amber-600"}>
-                        {settings.verify_after_restore ? "Enabled" : "Disabled"}
+                        {settings.verify_after_restore ? "Включено" : "Отключено"}
                       </span>
                     </div>
                   </CardContent>
@@ -406,7 +425,7 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
 
                 <Card>
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium">Strategy</CardTitle>
+                    <CardTitle className="text-sm font-medium">Стратегия</CardTitle>
                   </CardHeader>
                   <CardContent>
                     <Badge variant="secondary" className="uppercase">

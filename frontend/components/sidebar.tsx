@@ -1,6 +1,6 @@
 "use client"
 
-import { X, Home, Settings, BarChart3, FileText, History, Database, Plug } from "lucide-react"
+import { X, Home, Settings, BarChart3, FileText, History, Database, Plug, HardDrive } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/lib/store"
 import { cn } from "@/lib/utils"
@@ -14,6 +14,7 @@ const navItems = [
   { id: "reports", label: "Отчёты", icon: FileText },
   { id: "history", label: "История тестов", icon: History },
   { id: "comparison", label: "Сравнение тестов", icon: BarChart3 },
+  { id: "database-state", label: "Состояние БД", icon: HardDrive },
 ] as const
 
 export function Sidebar() {

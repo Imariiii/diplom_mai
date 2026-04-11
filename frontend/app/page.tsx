@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/sidebar"
 import { HomePage } from "@/components/pages/home-page"
 import { ConnectionsPage } from "@/components/pages/connections-page"
 import { ConfigPage } from "@/components/pages/config-page"
+import { DatabaseStatePage } from "@/components/pages/database-state-page"
 import { ScenariosPage } from "@/components/pages/scenarios-page"
 import { DashboardsPage } from "@/components/pages/dashboards-page"
 import { ReportsPage } from "@/components/pages/reports-page"
@@ -28,6 +29,7 @@ export default function Page() {
         {currentPage === "reports" && <ReportsPage />}
         {currentPage === "history" && <HistoryPage />}
         {currentPage === "comparison" && <ComparisonPage />}
+        {currentPage === "database-state" && <DatabaseStatePage />}
       </main>
     </div>
   )

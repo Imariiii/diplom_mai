@@ -13,7 +13,6 @@ import type {
   LogicalDatabaseWithConnections,
   LogicalDatabaseDetail,
 } from "@/lib/types"
-import { DatabaseStatePanel } from "@/components/database-state-panel"
 import { LogicalDbSelectorCard } from "./config/logical-db-selector-card"
 import { ConnectionStatusCard } from "./config/connection-status-card"
 import { DatabaseSelectionCard } from "./config/database-selection-card"
@@ -399,8 +398,6 @@ export function ConfigPage() {
         description="Период прогрева перед началом сбора метрик"
         onValueChange={(v) => setTestConfig({ warmupTime: v })}
       />
-
-      <DatabaseStatePanel />
 
       <ConfigSummaryCard
         selectedDatabases={testConfig.databases}
