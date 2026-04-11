@@ -26,11 +26,11 @@ Brazilian E-Commerce Public Dataset by Olist~\cite{olist_dataset} --- публи
 
 Сравнительные характеристики тестовых наборов данных приведены в таблице~\ref{tab:test_databases}.
 
-\begin{table}
+\begin{table}[htbp]
     \centering
     \caption{Характеристики тестовых наборов данных}
     \label{tab:test_databases}
-    \begin{tabularx}{\textwidth}{l l X l l}
+    \begin{tabularx}{\textwidth}{|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|}
         \hline
         Набор данных & Профиль & Предметная область & Таблиц & Тип ПК \\
         \hline
@@ -60,11 +60,11 @@ Brazilian E-Commerce Public Dataset by Olist~\cite{olist_dataset} --- публи
 
 Метрики производительности для базовой конфигурации приведены в таблице~\ref{tab:sakila_baseline}. При данном уровне нагрузки все три СУБД продемонстрировали сопоставимые средние латентности в диапазоне от 16,85 до 17,83~мс. Наилучшую пропускную способность обеспечил MySQL~--- 980~зап/с, наименьшую значение p99 (хвостовая задержка) показала MariaDB~--- 33,61~мс, что указывает на более предсказуемое распределение времён отклика по сравнению с MySQL (p99\,=\,76,82~мс) и PostgreSQL (p99\,=\,96,52~мс).
 
-\begin{table}
+\begin{table}[htbp]
     \centering
     \caption{Метрики производительности при базовой нагрузке (Sakila, VU\,=\,20, итераций\,=\,121)}
     \label{tab:sakila_baseline}
-    \begin{tabularx}{\textwidth}{l X X X X X}
+    \begin{tabularx}{\textwidth}{|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|}
         \hline
         СУБД & Среднее, мс & Медиана, мс & p95, мс & p99, мс & TPS \\
         \hline
@@ -79,11 +79,11 @@ Brazilian E-Commerce Public Dataset by Olist~\cite{olist_dataset} --- публи
 
 При увеличении числа VU до~50 (при фиксированных 121 итерации) все три СУБД показали существенную деградацию средней латентности, однако степень деградации принципиально различалась между СУБД, что отражено в таблице~\ref{tab:sakila_vu50}.
 
-\begin{table}
+\begin{table}[htbp]
     \centering
     \caption{Метрики производительности при повышенной нагрузке (Sakila, VU\,=\,50, итераций\,=\,121)}
     \label{tab:sakila_vu50}
-    \begin{tabularx}{\textwidth}{l X X X X X}
+    \begin{tabularx}{\textwidth}{|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|}
         \hline
         СУБД & Среднее, мс & Медиана, мс & p95, мс & p99, мс & TPS \\
         \hline
@@ -108,11 +108,11 @@ Brazilian E-Commerce Public Dataset by Olist~\cite{olist_dataset} --- публи
 
 Итоговые результаты попарных статистических сравнений по латентности для эксперимента на схеме Sakila сведены в таблицу~\ref{tab:sakila_pairwise}.
 
-\begin{table}
+\begin{table}[htbp]
     \centering
     \caption{Результаты попарных статистических сравнений латентности (Sakila)}
     \label{tab:sakila_pairwise}
-    \begin{tabularx}{\textwidth}{l l X l l l}
+    \begin{tabularx}{\textwidth}{|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|}
         \hline
         СУБД & Сравнение & Δ латентность, \% & p-знач. & $d$ (ES) & Эффект \\
         \hline
@@ -134,11 +134,11 @@ Brazilian E-Commerce Public Dataset by Olist~\cite{olist_dataset} --- публи
 
 Второй эксперимент проводился на наборе данных Olist с пакетом запросов \texttt{read\_only::Brazilian~E-Commerce~PostgreSQL::canonical}. Базовым прогоном служила конфигурация с VU\,=\,10 и 161~итерацией. Метрики производительности при базовой нагрузке приведены в таблице~\ref{tab:olist_baseline}.
 
-\begin{table}
+\begin{table}[htbp]
     \centering
     \caption{Метрики производительности при базовой нагрузке (Olist, VU\,=\,10, итераций\,=\,161)}
     \label{tab:olist_baseline}
-    \begin{tabularx}{\textwidth}{l X X X X X}
+    \begin{tabularx}{\textwidth}{|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|}
         \hline
         СУБД & Среднее, мс & Медиана, мс & p95, мс & p99, мс & TPS \\
         \hline
@@ -157,11 +157,11 @@ Brazilian E-Commerce Public Dataset by Olist~\cite{olist_dataset} --- публи
 
 При увеличении числа VU с~10 до~25 все три СУБД показали статистически значимое увеличение средней латентности с большим размером эффекта, как показано в таблице~\ref{tab:olist_vu25}.
 
-\begin{table}
+\begin{table}[htbp]
     \centering
     \caption{Метрики производительности при повышенной нагрузке (Olist, VU\,=\,25, итераций\,=\,161)}
     \label{tab:olist_vu25}
-    \begin{tabularx}{\textwidth}{l X X X X X}
+    \begin{tabularx}{\textwidth}{|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|}
         \hline
         СУБД & Среднее, мс & Медиана, мс & p95, мс & p99, мс & TPS \\
         \hline
@@ -186,11 +186,11 @@ Brazilian E-Commerce Public Dataset by Olist~\cite{olist_dataset} --- публи
 
 Результаты попарных статистических сравнений по латентности для набора Olist приведены в таблице~\ref{tab:olist_pairwise}.
 
-\begin{table}
+\begin{table}[htbp]
     \centering
     \caption{Результаты попарных статистических сравнений латентности (Olist)}
     \label{tab:olist_pairwise}
-    \begin{tabularx}{\textwidth}{l l X l l l}
+    \begin{tabularx}{\textwidth}{|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|}
         \hline
         СУБД & Сравнение & Δ латентность, \% & p-знач. & $d$ (ES) & Эффект \\
         \hline
