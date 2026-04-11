@@ -204,6 +204,7 @@ export function ConfigPage() {
         use_indexes: testConfig.testMode === "scenario" ? testConfig.useIndexes : false,
         warmup_time: testConfig.warmupTime,
         test_name: testName,
+        logical_database_id: selectedLogicalDbId ?? undefined,
       })
 
       const testRun: TestRun = {

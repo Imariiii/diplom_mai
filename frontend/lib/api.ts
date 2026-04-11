@@ -41,6 +41,8 @@ export type {
   BoxPlotPoint,
   ThroughputSeriesPoint,
   ComparisonChartsData,
+  ParameterImpact,
+  ParameterImpactSummary,
 } from "./api/comparison"
 
 // Функции - реэкспорт из модулей

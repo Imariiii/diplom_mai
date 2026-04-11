@@ -10,24 +10,31 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class DatabaseSettings(BaseSettings):
     """Настройки подключения к базам данных"""
 
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
     # History database
     history_db_url: Optional[str] = Field(default=None, alias="HISTORY_DATABASE_URL")
-    
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
 
 
 class RestoreSettings(BaseSettings):
     """Настройки восстановления баз данных"""
-    
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
     # Стратегия по умолчанию: "sql" или "native"
     default_strategy: str = Field(default="sql")
     
@@ -57,43 +64,46 @@ class RestoreSettings(BaseSettings):
     
     # Максимальный размер таблицы для чексуммы (строк)
     checksum_max_rows: int = Field(default=100_000)
-    
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
 
 
 class PathSettings(BaseSettings):
     """Настройки путей"""
-    
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
     # Директория для snapshots/дампов
     snapshots_dir: str = Field(default="./snapshots")
     
     # Директория для логов
     logs_dir: str = Field(default="./logs")
-    
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
 
 
 class APISettings(BaseSettings):
     """Настройки API"""
-    
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
     api_port: int = Field(default=8000, alias="API_PORT")
-    
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
 
 
 class TestSettings(BaseSettings):
     """Настройки тестирования"""
-    
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
     default_users: int = Field(default=10)
     default_spawn_rate: int = Field(default=2)
     default_duration: int = Field(default=60)
@@ -105,11 +115,6 @@ class TestSettings(BaseSettings):
         "SELECT COUNT(*) FROM rental",
         "SELECT customer_id, COUNT(*) FROM rental GROUP BY customer_id"
     ])
-    
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
 
 
 class Settings(BaseSettings):
@@ -125,20 +130,21 @@ class Settings(BaseSettings):
         print(settings.history_db_url)
         print(settings.auto_restore)    # True
     """
-    
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_nested_delimiter="__",
+        extra="ignore",
+    )
+
     # Подгружаем вложенные настройки
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     restore: RestoreSettings = Field(default_factory=RestoreSettings)
     paths: PathSettings = Field(default_factory=PathSettings)
     api: APISettings = Field(default_factory=APISettings)
     test: TestSettings = Field(default_factory=TestSettings)
-    
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        env_nested_delimiter = "__"
-        extra = "ignore"
-    
+
     # Прокси- свойства для обратной совместимости
     
     @property

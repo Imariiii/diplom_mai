@@ -48,6 +48,8 @@ export interface ComparisonTestInfo {
   finished_at?: string | null
   scenario_info?: ScenarioInfo | null
   connections: ConnectionInfo[]
+  logical_database_id?: string | null
+  use_indexes?: boolean | null
 }
 
 export interface DescriptiveStats {
@@ -60,6 +62,8 @@ export interface DescriptiveStats {
   p50: number
   p95: number
   p99: number
+  cv: number
+  iqr: number
 }
 
 export interface MetricStatsBundle {
@@ -98,6 +102,10 @@ export interface PairwiseComparison {
   is_significant: boolean
   interpretation: string
   warning?: string | null
+  effect_size?: number | null
+  effect_size_label?: string | null
+  ci_lower?: number | null
+  ci_upper?: number | null
 }
 
 export interface BarChartPoint {
@@ -157,6 +165,22 @@ export interface AnalysisReportConfig {
   include_hypotheses: boolean
 }
 
+export interface ParameterImpact {
+  parameter: string
+  baseline_value?: any
+  compared_value?: any
+  change_description: string
+  effects: string[]
+}
+
+export interface ParameterImpactSummary {
+  test_id: string
+  test_name: string
+  vs_baseline: string
+  impacts: ParameterImpact[]
+  summary_text: string
+}
+
 export interface ComparisonResult {
   tests: ComparisonTestInfo[]
   baseline_id: string
@@ -168,6 +192,7 @@ export interface ComparisonResult {
   charts_data: ComparisonChartsData
   analysis_report?: AnalysisReport | null
   db_key_labels: Record<string, string>
+  parameter_impacts: ParameterImpactSummary[]
 }
 
 export async function analyzeComparison(request: ComparisonRequest): Promise<ComparisonResult> {

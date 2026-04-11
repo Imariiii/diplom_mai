@@ -39,14 +39,34 @@ class ComparisonReportGenerator:
         hypotheses = self.generate_hypotheses(result) if report_config.include_hypotheses else []
 
         sections = []
+
+        executive_summary = self._generate_executive_summary(result)
+        if executive_summary:
+            sections.append(AnalysisSection(title="Краткое резюме", items=executive_summary))
+
         if report_config.include_verdict:
             sections.append(AnalysisSection(title="Основной вердикт", items=[verdict]))
+
+        if result.parameter_impacts:
+            param_items = self._generate_parameter_impact_section(result)
+            if param_items:
+                sections.append(AnalysisSection(title="Влияние параметров конфигурации", items=param_items))
+
         if report_config.include_patterns:
             sections.append(AnalysisSection(title="Выявленные паттерны", items=patterns))
+
+        effect_insights = self._generate_effect_size_insights(result)
+        if effect_insights:
+            sections.append(AnalysisSection(title="Практическая значимость различий", items=effect_insights))
+
         if report_config.include_recommendations:
             sections.append(AnalysisSection(title="Рекомендации", items=recommendations))
         if report_config.include_hypotheses:
             sections.append(AnalysisSection(title="Возможные причины различий", items=hypotheses))
+
+        conclusion = self._generate_conclusion(result)
+        if conclusion:
+            sections.append(AnalysisSection(title="Заключение", items=conclusion))
 
         return AnalysisReport(
             verdict=verdict,
@@ -740,6 +760,142 @@ class ComparisonReportGenerator:
             if str(test.id) == target_id:
                 return test.name
         return target_id
+
+    def _generate_executive_summary(self, result: ComparisonResult) -> List[str]:
+        """Сгенерировать краткое резюме с ключевыми цифрами"""
+        items = []
+
+        test_count = len(result.tests)
+        sig_count = sum(1 for p in result.pairwise_comparisons if p.is_significant)
+        total_comparisons = len(result.pairwise_comparisons)
+
+        type_labels = {
+            ComparisonType.CROSS_DATABASE: "сравнение СУБД",
+            ComparisonType.SCALABILITY: "анализ масштабируемости",
+            ComparisonType.MIXED: "смешанное сравнение",
+            ComparisonType.TEMPORAL: "временной анализ",
+        }
+        type_label = type_labels.get(result.comparison_type, "сравнение")
+
+        items.append(
+            f"Выполнено {type_label} по {test_count} тестам. "
+            f"Из {total_comparisons} попарных сравнений {sig_count} показали статистически значимые различия."
+        )
+
+        best_throughput_test = None
+        best_throughput_val = -1.0
+        best_latency_test = None
+        best_latency_val = float("inf")
+
+        for test in result.tests:
+            bundles = result.descriptive_stats.get(str(test.id), {})
+            for db_key, bundle in bundles.items():
+                if bundle.throughput and bundle.throughput.mean > best_throughput_val:
+                    best_throughput_val = bundle.throughput.mean
+                    best_throughput_test = test.name
+                if bundle.latency_ms and bundle.latency_ms.mean < best_latency_val:
+                    best_latency_val = bundle.latency_ms.mean
+                    best_latency_test = test.name
+
+        if best_throughput_test:
+            items.append(
+                f"Лучший throughput: «{best_throughput_test}» — {best_throughput_val:.1f} req/s."
+            )
+        if best_latency_test:
+            items.append(
+                f"Лучшая latency: «{best_latency_test}» — {best_latency_val:.2f} мс (среднее)."
+            )
+
+        large_effects = [
+            p for p in result.pairwise_comparisons
+            if p.effect_size_label in ("large", "medium") and p.is_significant
+        ]
+        if large_effects:
+            best = max(large_effects, key=lambda p: abs(p.effect_size or 0))
+            baseline_name = self._get_test_name(result, best.baseline_test_id)
+            compared_name = self._get_test_name(result, best.compared_test_id)
+            metric_label = "latency" if best.metric == "latency_ms" else best.metric
+            items.append(
+                f"Наиболее выраженное различие по {metric_label} между «{baseline_name}» и «{compared_name}»: "
+                f"Cohen's d = {abs(best.effect_size or 0):.2f} ({best.effect_size_label}), "
+                f"разница {abs(best.pct_difference or 0):.1f}%."
+            )
+
+        return items
+
+    def _generate_parameter_impact_section(self, result: ComparisonResult) -> List[str]:
+        """Сгенерировать секцию влияния параметров из parameter_impacts"""
+        items = []
+        for impact_summary in result.parameter_impacts:
+            if impact_summary.summary_text:
+                items.append(impact_summary.summary_text)
+        return items
+
+    def _generate_effect_size_insights(self, result: ComparisonResult) -> List[str]:
+        """Сгенерировать описания практической значимости на основе effect size и CI"""
+        insights = []
+
+        for p in result.pairwise_comparisons:
+            if not p.is_significant or p.effect_size is None:
+                continue
+
+            baseline_name = self._get_test_name(result, p.baseline_test_id)
+            compared_name = self._get_test_name(result, p.compared_test_id)
+            metric_label = "latency" if p.metric == "latency_ms" else p.metric
+            db_label = p.db_key
+
+            if p.effect_size_label == "large":
+                ci_text = ""
+                if p.ci_lower is not None and p.ci_upper is not None:
+                    unit = "мс" if p.metric == "latency_ms" else "req/s"
+                    ci_text = f" С 95% уверенностью разница составляет от {p.ci_lower:.2f} до {p.ci_upper:.2f} {unit}."
+                insights.append(
+                    f"{db_label} · {metric_label}: различие между «{compared_name}» и «{baseline_name}» "
+                    f"практически существенно (Cohen's d = {abs(p.effect_size):.2f}, большой эффект).{ci_text}"
+                )
+            elif p.effect_size_label == "medium":
+                insights.append(
+                    f"{db_label} · {metric_label}: различие между «{compared_name}» и «{baseline_name}» "
+                    f"имеет средний размер эффекта (Cohen's d = {abs(p.effect_size):.2f})."
+                )
+            elif p.effect_size_label == "negligible":
+                insights.append(
+                    f"{db_label} · {metric_label}: несмотря на статистическую значимость (p={p.p_value:.4f}), "
+                    f"практический эффект пренебрежимо мал (Cohen's d = {abs(p.effect_size):.2f})."
+                )
+
+        return self._deduplicate(insights)
+
+    def _generate_conclusion(self, result: ComparisonResult) -> List[str]:
+        """Сгенерировать итоговое заключение"""
+        items = []
+
+        sig_items = [p for p in result.pairwise_comparisons if p.is_significant]
+        large_items = [p for p in sig_items if p.effect_size_label in ("large", "medium")]
+
+        if not sig_items:
+            items.append(
+                "Статистически значимых различий между тестами не обнаружено. "
+                "Рекомендуется увеличить количество итераций или повторить тесты для повышения надёжности результатов."
+            )
+        elif large_items:
+            items.append(
+                f"Обнаружено {len(large_items)} практически значимых различий из {len(sig_items)} статистически значимых. "
+                "Результаты достаточно надёжны для принятия решения о выборе конфигурации."
+            )
+        else:
+            items.append(
+                "Статистически значимые различия обнаружены, но их практический размер мал. "
+                "Рекомендуется обратить внимание на другие факторы выбора: стабильность, масштабируемость, стоимость."
+            )
+
+        if result.warnings:
+            items.append(
+                f"В процессе анализа было получено {len(result.warnings)} предупреждений — "
+                "при принятии решения учитывайте возможные ограничения данных."
+            )
+
+        return items
 
     def _deduplicate(self, items: List[str]) -> List[str]:
         """Удалить дубликаты с сохранением порядка"""

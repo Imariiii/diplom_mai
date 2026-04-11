@@ -17,6 +17,8 @@ from backend.comparison.schemas import (
     ConnectionInfo,
     MetricStatsBundle,
     NormalizedMetrics,
+    ParameterImpact,
+    ParameterImpactSummary,
     ScenarioInfo,
     ScenarioQueryInfo,
     ThroughputSeriesPoint,
@@ -139,6 +141,12 @@ class ComparisonService:
         test_infos = [await self._build_test_info(test_data) for test_data in tests]
         db_key_labels = self._build_db_key_labels(tests)
 
+        parameter_impacts = self._build_parameter_impact_analysis(
+            tests=tests,
+            baseline_id=baseline_uuid,
+            descriptive_stats=descriptive_stats,
+        )
+
         comparison_result = ComparisonResult(
             tests=test_infos,
             baseline_id=baseline_uuid,
@@ -149,6 +157,7 @@ class ComparisonService:
             pairwise_comparisons=pairwise_comparisons,
             charts_data=charts_data,
             db_key_labels=db_key_labels,
+            parameter_impacts=parameter_impacts,
         )
         comparison_result.analysis_report = self.report_generator.generate(comparison_result, report_config)
         if comparison_result.analysis_report and db_key_labels:
@@ -198,6 +207,30 @@ class ComparisonService:
         for test_data in tests:
             if test_data.get("status") != "completed":
                 raise ValueError(f"Тест {test_data.get('id')} не завершён и не может быть использован для сравнения")
+
+        logical_db_ids = set()
+        for test_data in tests:
+            ldb_id = test_data.get("logical_database_id")
+            if ldb_id:
+                logical_db_ids.add(str(ldb_id))
+        if len(logical_db_ids) > 1:
+            raise ValueError(
+                "Все сравниваемые тесты должны принадлежать одной логической базе данных"
+            )
+
+        scenario_templates = set()
+        for test_data in tests:
+            config = test_data.get("config", {}) or {}
+            template = (
+                config.get("scenario_template_id")
+                or config.get("scenario")
+            )
+            if template:
+                scenario_templates.add(str(template))
+        if len(scenario_templates) > 1:
+            raise ValueError(
+                "Все сравниваемые тесты должны использовать один и тот же сценарий тестирования"
+            )
 
     def _build_workload_signature(self, test_data: Dict[str, Any]) -> Dict[str, Any]:
         """Построить сигнатуру нагрузки для валидации сравнения"""
@@ -960,6 +993,8 @@ class ComparisonService:
             finished_at=test_data.get("finished_at"),
             scenario_info=scenario_info,
             connections=connections,
+            logical_database_id=test_data.get("logical_database_id"),
+            use_indexes=config.get("use_indexes"),
         )
 
     async def _resolve_scenario_info(self, config: Dict[str, Any]) -> Optional[ScenarioInfo]:
@@ -1061,6 +1096,189 @@ class ComparisonService:
         for section in report.sections:
             section.title = _replace_text(section.title)
             section.items = [_replace_text(item) for item in section.items]
+
+    def _build_parameter_impact_analysis(
+        self,
+        tests: List[Dict[str, Any]],
+        baseline_id: UUID,
+        descriptive_stats: Dict[str, Dict[str, MetricStatsBundle]],
+    ) -> List[ParameterImpactSummary]:
+        """Построить анализ влияния параметров конфигурации на результаты"""
+        baseline_test = None
+        for test_data in tests:
+            if UUID(str(test_data["id"])) == baseline_id:
+                baseline_test = test_data
+                break
+        if not baseline_test:
+            return []
+
+        baseline_config = baseline_test.get("config", {}) or {}
+        baseline_key = str(baseline_id)
+        baseline_stats = descriptive_stats.get(baseline_key, {})
+
+        summaries: List[ParameterImpactSummary] = []
+
+        tracked_params = [
+            ("virtual_users", "Виртуальные пользователи"),
+            ("iterations", "Итерации"),
+            ("use_indexes", "Индексы"),
+            ("warmup_time", "Прогрев"),
+        ]
+
+        for test_data in tests:
+            compared_id = UUID(str(test_data["id"]))
+            if compared_id == baseline_id:
+                continue
+
+            compared_config = test_data.get("config", {}) or {}
+            compared_key = str(compared_id)
+            compared_stats = descriptive_stats.get(compared_key, {})
+
+            impacts: List[ParameterImpact] = []
+
+            for param_key, param_label in tracked_params:
+                baseline_val = baseline_config.get(param_key)
+                compared_val = compared_config.get(param_key)
+
+                if baseline_val == compared_val:
+                    continue
+
+                change_desc = self._format_param_change(param_key, baseline_val, compared_val)
+                effects = self._compute_param_effects(
+                    param_key, baseline_val, compared_val,
+                    baseline_stats, compared_stats,
+                )
+
+                impacts.append(ParameterImpact(
+                    parameter=param_key,
+                    baseline_value=baseline_val,
+                    compared_value=compared_val,
+                    change_description=change_desc,
+                    effects=effects,
+                ))
+
+            summary_text = self._format_impact_summary(
+                test_data.get("name", ""),
+                baseline_test.get("name", ""),
+                impacts,
+            )
+
+            summaries.append(ParameterImpactSummary(
+                test_id=compared_id,
+                test_name=test_data.get("name", ""),
+                vs_baseline=baseline_test.get("name", ""),
+                impacts=impacts,
+                summary_text=summary_text,
+            ))
+
+        return summaries
+
+    def _format_param_change(self, param_key: str, baseline_val, compared_val) -> str:
+        """Форматировать описание изменения параметра"""
+        if param_key == "use_indexes":
+            base_label = "с индексами" if baseline_val else "без индексов"
+            comp_label = "с индексами" if compared_val else "без индексов"
+            return f"{base_label} → {comp_label}"
+
+        try:
+            base_num = float(baseline_val or 0)
+            comp_num = float(compared_val or 0)
+        except (TypeError, ValueError):
+            return f"{baseline_val} → {compared_val}"
+
+        if base_num != 0:
+            pct = ((comp_num - base_num) / base_num) * 100
+            return f"{int(base_num)} → {int(comp_num)} ({pct:+.0f}%)"
+        return f"{int(base_num)} → {int(comp_num)}"
+
+    def _compute_param_effects(
+        self,
+        param_key: str,
+        baseline_val,
+        compared_val,
+        baseline_stats: Dict[str, MetricStatsBundle],
+        compared_stats: Dict[str, MetricStatsBundle],
+    ) -> List[str]:
+        """Вычислить эффекты изменения параметра на метрики"""
+        effects = []
+        common_db_keys = set(baseline_stats.keys()) & set(compared_stats.keys())
+
+        for db_key in sorted(common_db_keys):
+            b_bundle = baseline_stats[db_key]
+            c_bundle = compared_stats[db_key]
+
+            if b_bundle.throughput and c_bundle.throughput:
+                b_tp = b_bundle.throughput.mean
+                c_tp = c_bundle.throughput.mean
+                if b_tp > 0:
+                    pct = ((c_tp - b_tp) / b_tp) * 100
+                    direction = "рост" if pct > 0 else "снижение"
+                    effects.append(
+                        f"Throughput: {direction} на {abs(pct):.1f}% ({b_tp:.1f} → {c_tp:.1f} req/s)"
+                    )
+
+            if b_bundle.latency_ms and c_bundle.latency_ms:
+                b_lat = b_bundle.latency_ms.mean
+                c_lat = c_bundle.latency_ms.mean
+                if b_lat > 0:
+                    pct = ((c_lat - b_lat) / b_lat) * 100
+                    direction = "рост" if pct > 0 else "снижение"
+                    effects.append(
+                        f"Latency mean: {direction} на {abs(pct):.1f}% ({b_lat:.2f} → {c_lat:.2f} мс)"
+                    )
+
+                b_p99 = b_bundle.latency_ms.p99
+                c_p99 = c_bundle.latency_ms.p99
+                if b_p99 > 0:
+                    pct99 = ((c_p99 - b_p99) / b_p99) * 100
+                    direction99 = "рост" if pct99 > 0 else "снижение"
+                    effects.append(
+                        f"Latency p99: {direction99} на {abs(pct99):.1f}% ({b_p99:.2f} → {c_p99:.2f} мс)"
+                    )
+
+                b_cv = b_bundle.latency_ms.cv
+                c_cv = c_bundle.latency_ms.cv
+                if b_cv > 0 and c_cv > 0:
+                    if c_cv > b_cv * 1.2:
+                        effects.append(f"Стабильность снизилась (CV: {b_cv:.2f} → {c_cv:.2f})")
+                    elif c_cv < b_cv * 0.8:
+                        effects.append(f"Стабильность повысилась (CV: {b_cv:.2f} → {c_cv:.2f})")
+
+        return effects
+
+    def _format_impact_summary(
+        self,
+        test_name: str,
+        baseline_name: str,
+        impacts: List[ParameterImpact],
+    ) -> str:
+        """Сформировать текстовое резюме влияния параметров"""
+        if not impacts:
+            return f"Конфигурация теста «{test_name}» совпадает с baseline «{baseline_name}»"
+
+        parts = []
+        for impact in impacts:
+            param_labels = {
+                "virtual_users": "числа виртуальных пользователей",
+                "iterations": "числа итераций",
+                "use_indexes": "использования индексов",
+                "warmup_time": "времени прогрева",
+            }
+            label = param_labels.get(impact.parameter, impact.parameter)
+            parts.append(f"изменение {label} ({impact.change_description})")
+
+        summary = f"В тесте «{test_name}» относительно baseline «{baseline_name}»: {', '.join(parts)}."
+
+        all_effects = []
+        for impact in impacts:
+            all_effects.extend(impact.effects)
+        if all_effects:
+            summary += " Результаты: " + "; ".join(all_effects[:4])
+            if len(all_effects) > 4:
+                summary += f" и ещё {len(all_effects) - 4} изменений"
+            summary += "."
+
+        return summary
 
     def _build_db_key_labels(self, tests: List[Dict[str, Any]]) -> Dict[str, str]:
         """Построить маппинг db_key -> человекочитаемое имя из результатов тестов"""

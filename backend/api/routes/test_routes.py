@@ -74,7 +74,8 @@ async def run_async_test(request: AsyncTestRequest, background_tasks: Background
                 name=test_name,
                 config=request.model_dump(),
                 status='pending',
-                test_run_id=test_id
+                test_run_id=test_id,
+                logical_database_id=request.logical_database_id,
             )
         except Exception as e:
             print(f"[HISTORY_DB] ❌ Ошибка создания записи в БД истории: {e}")

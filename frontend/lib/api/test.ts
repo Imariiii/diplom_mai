@@ -16,6 +16,7 @@ export interface TestRequest {
   use_indexes?: boolean
   warmup_time?: number
   test_name?: string
+  logical_database_id?: string | null
 }
 
 export interface TestStats {
@@ -105,6 +106,7 @@ export interface HistoryTestRun {
     total_duration?: number
   } | null
   created_at: string | null
+  logical_database_id: string | null
 }
 
 export interface HistoryTestResult {

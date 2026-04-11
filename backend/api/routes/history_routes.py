@@ -1,7 +1,7 @@
 """
 API роуты для истории тестирования
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 
 router = APIRouter(prefix="/history", tags=["history"])
@@ -23,11 +23,25 @@ async def history_status():
 
 
 @router.get("/tests")
-async def get_history_tests(limit: int = 50, offset: int = 0, status: Optional[str] = None):
+async def get_history_tests(
+    limit: int = 50,
+    offset: int = 0,
+    status: Optional[str] = None,
+    logical_database_id: Optional[str] = Query(None),
+):
     """Получить историю тестов из БД"""
     repo = get_test_repository()
-    tests = await repo.get_all_test_runs(limit=limit, offset=offset, status=status)
-    return {"tests": tests, "total": len(tests)}
+    tests = await repo.get_all_test_runs(
+        limit=limit,
+        offset=offset,
+        status=status,
+        logical_database_id=logical_database_id,
+    )
+    total = await repo.count_test_runs(
+        status=status,
+        logical_database_id=logical_database_id,
+    )
+    return {"tests": tests, "total": total}
 
 
 @router.get("/tests/{test_id}")

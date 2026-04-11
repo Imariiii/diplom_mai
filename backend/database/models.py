@@ -9,8 +9,7 @@ from sqlalchemy import (
     Text, JSON, BigInteger, Index, create_engine, text
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, sessionmaker
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 Base = declarative_base()
 
@@ -174,6 +173,13 @@ class TestRun(Base):
     time_series = relationship("TimeSeries", back_populates="test_run", cascade="all, delete-orphan")
     metric_samples = relationship("MetricSample", back_populates="test_run", cascade="all, delete-orphan")
     
+    # Привязка к логической базе данных
+    logical_database_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('logical_databases.id', ondelete='SET NULL'),
+        nullable=True,
+    )
+
     # Restore-related fields
     has_write_operations = Column(String(1), nullable=False, default='f')  # 't' - есть write-операции
     affected_tables = Column(JSON, nullable=True)  # ["film", "customer"]
@@ -193,6 +199,7 @@ class TestRun(Base):
             'config': self.config,
             'summary': self.summary,
             'created_at': self.created_at.isoformat() if self.created_at else None,
+            'logical_database_id': str(self.logical_database_id) if self.logical_database_id else None,
             # Restore fields
             'has_write_operations': self.has_write_operations == 't',
             'affected_tables': self.affected_tables,

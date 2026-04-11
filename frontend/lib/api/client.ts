@@ -114,12 +114,14 @@ class ApiClient {
     limit?: number
     offset?: number
     status?: string
+    logical_database_id?: string
   }): Promise<{ tests: any[]; total: number }> {
     const queryParams = new URLSearchParams()
     if (params?.limit) queryParams.set('limit', params.limit.toString())
     if (params?.offset) queryParams.set('offset', params.offset.toString())
     if (params?.status) queryParams.set('status', params.status)
-    
+    if (params?.logical_database_id) queryParams.set('logical_database_id', params.logical_database_id)
+
     const queryString = queryParams.toString()
     return this.request(`/history/tests${queryString ? `?${queryString}` : ''}`)
   }

@@ -37,16 +37,26 @@ class TestRepository(BaseRepository):
         name: str,
         config: Dict[str, Any],
         status: str = 'pending',
-        test_run_id: Optional[str] = None
+        test_run_id: Optional[str] = None,
+        logical_database_id: Optional[str] = None,
     ) -> TestRun:
         """Создать новый тестовый прогон"""
+        import uuid as _uuid
+        logical_db_uuid = None
+        if logical_database_id:
+            try:
+                logical_db_uuid = _uuid.UUID(logical_database_id)
+            except (ValueError, AttributeError):
+                pass
+
         async with self.SessionLocal() as session:
             test_run = TestRun(
                 id=uuid.UUID(test_run_id) if test_run_id else uuid.uuid4(),
                 name=name,
                 status=status,
                 config=config,
-                started_at=get_local_now()
+                started_at=get_local_now(),
+                logical_database_id=logical_db_uuid,
             )
             session.add(test_run)
             await session.commit()
@@ -82,19 +92,52 @@ class TestRepository(BaseRepository):
         self,
         limit: int = 50,
         offset: int = 0,
-        status: Optional[str] = None
+        status: Optional[str] = None,
+        logical_database_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Получить список всех тестовых прогонов"""
+        import uuid as _uuid
         async with self.SessionLocal() as session:
             query = select(TestRun).order_by(desc(TestRun.created_at))
 
             if status:
                 query = query.where(TestRun.status == status)
 
+            if logical_database_id:
+                try:
+                    logical_db_uuid = _uuid.UUID(logical_database_id)
+                    query = query.where(TestRun.logical_database_id == logical_db_uuid)
+                except (ValueError, AttributeError):
+                    pass
+
             query = query.offset(offset).limit(limit)
             result = await session.execute(query)
             test_runs = result.scalars().all()
             return [tr.to_dict() for tr in test_runs]
+
+    async def count_test_runs(
+        self,
+        status: Optional[str] = None,
+        logical_database_id: Optional[str] = None,
+    ) -> int:
+        """Получить общее количество тестовых прогонов с учётом фильтров."""
+        import uuid as _uuid
+
+        async with self.SessionLocal() as session:
+            query = select(func.count()).select_from(TestRun)
+
+            if status:
+                query = query.where(TestRun.status == status)
+
+            if logical_database_id:
+                try:
+                    logical_db_uuid = _uuid.UUID(logical_database_id)
+                    query = query.where(TestRun.logical_database_id == logical_db_uuid)
+                except (ValueError, AttributeError):
+                    pass
+
+            result = await session.execute(query)
+            return int(result.scalar() or 0)
 
     async def update_test_run_status(
         self,

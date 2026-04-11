@@ -12,6 +12,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { ExecutiveSummary } from "@/components/comparison/executive-summary"
+import { ParameterImpact } from "@/components/comparison/parameter-impact"
 import { ComparisonTable } from "@/components/comparison/comparison-table"
 import { ComparisonCharts } from "@/components/comparison/comparison-charts"
 import { StatisticalSummary } from "@/components/comparison/statistical-summary"
@@ -52,7 +54,6 @@ export function ComparisonPage() {
         const response = await analyzeComparison({
           test_ids: comparisonTestIds,
           baseline_id: comparisonBaselineId || comparisonTestIds[0],
-          report_config: reportConfig,
         })
 
         if (!cancelled) {
@@ -76,7 +77,7 @@ export function ComparisonPage() {
     return () => {
       cancelled = true
     }
-  }, [comparisonTestIds, comparisonBaselineId, reportConfig])
+  }, [comparisonTestIds, comparisonBaselineId])
 
   const toggleReportConfig = (key: keyof AnalysisReportConfig, checked: boolean) => {
     setReportConfig((current) => ({
@@ -124,17 +125,18 @@ export function ComparisonPage() {
     )
   }
 
-  const baselineTest = result.tests.find((t) => t.id === result.baseline_id)
-
   return (
     <div className="p-6 space-y-6">
+      {/* 1. Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold">
             <Scale className="h-6 w-6 text-primary" />
             Сравнение тестов
           </h1>
-          <p className="text-muted-foreground">Метрики, статистическая значимость и графики по выбранным прогонам</p>
+          <p className="text-muted-foreground">
+            Метрики, статистическая значимость и графики по выбранным прогонам
+          </p>
         </div>
         <div className="flex gap-2">
           <Button variant="ghost" onClick={() => setCurrentPage("history")}>
@@ -148,97 +150,131 @@ export function ComparisonPage() {
         </div>
       </div>
 
-      <Card className="bg-card border-border">
-        <CardHeader>
-          <CardTitle>Выбранные тесты</CardTitle>
-          <CardDescription>
-            {result.tests.map((test) => test.name).join(" · ")}
-            {baselineTest && <span className="ml-2 text-xs">(baseline: {baselineTest.name})</span>}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap gap-2">
-            <Badge variant="secondary">{getComparisonTypeLabel(result.comparison_type)}</Badge>
-            {supportsNormalizedView && (
-              <Badge variant="outline">Нормализация доступна</Badge>
-            )}
-          </div>
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-            {result.tests.map((test) => (
-              <TestInfoCard
-                key={test.id}
-                test={test}
-                isBaseline={test.id === result.baseline_id}
-              />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      {/* 2. Executive Summary */}
+      <ExecutiveSummary result={result} />
 
+      {/* 3. Test configuration cards */}
+      <TestConfigSection result={result} />
+
+      {/* 4. Parameter Impact */}
+      <ParameterImpact result={result} />
+
+      {/* 5. View controls */}
       <Card className="bg-card border-border">
-        <CardHeader>
-          <CardTitle>Конфигурация отчёта</CardTitle>
-          <CardDescription>Управление rule-based секциями аналитического отчёта</CardDescription>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <div className="flex items-center justify-between rounded-lg border border-border p-3">
-            <Label htmlFor="report-verdict">Вердикт</Label>
-            <Switch
-              id="report-verdict"
-              checked={reportConfig.include_verdict}
-              onCheckedChange={(checked) => toggleReportConfig("include_verdict", checked)}
-            />
-          </div>
-          <div className="flex items-center justify-between rounded-lg border border-border p-3">
-            <Label htmlFor="report-patterns">Паттерны</Label>
-            <Switch
-              id="report-patterns"
-              checked={reportConfig.include_patterns}
-              onCheckedChange={(checked) => toggleReportConfig("include_patterns", checked)}
-            />
-          </div>
-          <div className="flex items-center justify-between rounded-lg border border-border p-3">
-            <Label htmlFor="report-recommendations">Рекомендации</Label>
-            <Switch
-              id="report-recommendations"
-              checked={reportConfig.include_recommendations}
-              onCheckedChange={(checked) => toggleReportConfig("include_recommendations", checked)}
-            />
-          </div>
-          <div className="flex items-center justify-between rounded-lg border border-border p-3">
-            <Label htmlFor="report-hypotheses">Гипотезы</Label>
-            <Switch
-              id="report-hypotheses"
-              checked={reportConfig.include_hypotheses}
-              onCheckedChange={(checked) => toggleReportConfig("include_hypotheses", checked)}
-            />
-          </div>
+        <CardContent className="flex flex-wrap items-center gap-4 py-3">
           {supportsNormalizedView && (
-            <div className="flex items-center justify-between rounded-lg border border-border p-3">
-              <Label htmlFor="normalized-view">Normalized view</Label>
+            <div className="flex items-center gap-2">
               <Switch
                 id="normalized-view"
                 checked={useNormalizedView}
                 onCheckedChange={setUseNormalizedView}
               />
+              <Label htmlFor="normalized-view" className="text-sm">Нормализованный вид</Label>
             </div>
           )}
+          <div className="flex items-center gap-2">
+            <Switch
+              id="report-verdict"
+              checked={reportConfig.include_verdict}
+              onCheckedChange={(checked) => toggleReportConfig("include_verdict", checked)}
+            />
+            <Label htmlFor="report-verdict" className="text-sm">Вердикт</Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch
+              id="report-patterns"
+              checked={reportConfig.include_patterns}
+              onCheckedChange={(checked) => toggleReportConfig("include_patterns", checked)}
+            />
+            <Label htmlFor="report-patterns" className="text-sm">Паттерны</Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch
+              id="report-recommendations"
+              checked={reportConfig.include_recommendations}
+              onCheckedChange={(checked) => toggleReportConfig("include_recommendations", checked)}
+            />
+            <Label htmlFor="report-recommendations" className="text-sm">Рекомендации</Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch
+              id="report-hypotheses"
+              checked={reportConfig.include_hypotheses}
+              onCheckedChange={(checked) => toggleReportConfig("include_hypotheses", checked)}
+            />
+            <Label htmlFor="report-hypotheses" className="text-sm">Гипотезы</Label>
+          </div>
         </CardContent>
       </Card>
 
-      <StatisticalSummary result={result} />
-      <AnalysisReport report={result.analysis_report} config={reportConfig} comparisonType={result.comparison_type} />
-      <ComparisonTable result={result} useNormalized={supportsNormalizedView && useNormalizedView} />
+      {/* 6. Charts */}
       <ComparisonCharts result={result} useNormalized={supportsNormalizedView && useNormalizedView} />
+
+      {/* 7. Detailed metrics table */}
+      <ComparisonTable result={result} useNormalized={supportsNormalizedView && useNormalizedView} />
+
+      {/* 8. Statistical tests */}
+      <StatisticalSummary result={result} />
+
+      {/* 9. Analysis report */}
+      <AnalysisReport report={result.analysis_report} config={reportConfig} comparisonType={result.comparison_type} />
     </div>
   )
 }
 
-function TestInfoCard({ test, isBaseline }: { test: ComparisonTestInfo; isBaseline: boolean }) {
+function TestConfigSection({ result }: { result: ComparisonResult }) {
+  const [isOpen, setIsOpen] = useState(false)
+  const baselineTest = result.tests.find((t) => t.id === result.baseline_id)
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <Card className="bg-card border-border">
+        <CardHeader className="pb-3">
+          <CollapsibleTrigger asChild>
+            <button className="flex items-center justify-between w-full hover:opacity-80 transition-opacity">
+              <CardTitle className="text-base">Конфигурация тестов</CardTitle>
+              <div className="flex gap-2 items-center">
+                <Badge variant="secondary">{getComparisonTypeLabel(result.comparison_type)}</Badge>
+                <Badge variant="outline">{isOpen ? "Свернуть" : "Развернуть"}</Badge>
+              </div>
+            </button>
+          </CollapsibleTrigger>
+          <CardDescription>
+            {result.tests.map((t) => t.name).join(" · ")}
+            {baselineTest && <span className="ml-2 text-xs">(baseline: {baselineTest.name})</span>}
+          </CardDescription>
+        </CardHeader>
+        <CollapsibleContent>
+          <CardContent>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+              {result.tests.map((test) => (
+                <TestInfoCard
+                  key={test.id}
+                  test={test}
+                  isBaseline={test.id === result.baseline_id}
+                  baselineConfig={baselineTest?.config}
+                />
+              ))}
+            </div>
+          </CardContent>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
+  )
+}
+
+function TestInfoCard({
+  test,
+  isBaseline,
+  baselineConfig,
+}: {
+  test: ComparisonTestInfo
+  isBaseline: boolean
+  baselineConfig?: Record<string, any>
+}) {
   const [queriesOpen, setQueriesOpen] = useState(false)
   const config = test.config || {}
   const scenarioName = test.scenario_info?.name || config.scenario || "-"
-  const scenarioType = test.scenario_info?.scenario_type
   const queries = test.scenario_info?.queries || []
 
   const formatDate = (dateStr?: string | null) => {
@@ -251,6 +287,11 @@ function TestInfoCard({ test, isBaseline }: { test: ComparisonTestInfo; isBaseli
     } catch {
       return dateStr
     }
+  }
+
+  const diffHighlight = (key: string, value: any) => {
+    if (isBaseline || !baselineConfig) return false
+    return baselineConfig[key] !== value
   }
 
   return (
@@ -272,11 +313,21 @@ function TestInfoCard({ test, isBaseline }: { test: ComparisonTestInfo; isBaseli
         </div>
         <div className="grid grid-cols-2 gap-x-4 gap-y-1 pl-5.5 text-sm">
           <span className="text-muted-foreground">Потоки:</span>
-          <span className="font-mono">{config.virtual_users ?? config.threads ?? "-"}</span>
+          <span className={`font-mono ${diffHighlight("virtual_users", config.virtual_users) ? "text-primary font-bold" : ""}`}>
+            {config.virtual_users ?? config.threads ?? "-"}
+          </span>
           <span className="text-muted-foreground">Итерации:</span>
-          <span className="font-mono">{config.iterations ?? "-"}</span>
+          <span className={`font-mono ${diffHighlight("iterations", config.iterations) ? "text-primary font-bold" : ""}`}>
+            {config.iterations ?? "-"}
+          </span>
           <span className="text-muted-foreground">Прогрев:</span>
-          <span className="font-mono">{config.warmup_time != null ? `${config.warmup_time} с` : "-"}</span>
+          <span className={`font-mono ${diffHighlight("warmup_time", config.warmup_time) ? "text-primary font-bold" : ""}`}>
+            {config.warmup_time != null ? `${config.warmup_time} с` : "-"}
+          </span>
+          <span className="text-muted-foreground">Индексы:</span>
+          <span className={`font-mono ${diffHighlight("use_indexes", config.use_indexes) ? "text-primary font-bold" : ""}`}>
+            {config.use_indexes ? "Да" : "Нет"}
+          </span>
         </div>
       </div>
 
@@ -286,9 +337,6 @@ function TestInfoCard({ test, isBaseline }: { test: ComparisonTestInfo; isBaseli
           <span className="text-muted-foreground">Сценарий:</span>
           <span className="font-medium">{scenarioName}</span>
         </div>
-        {scenarioType && scenarioType !== scenarioName && (
-          <p className="pl-5.5 text-xs text-muted-foreground">Тип: {scenarioType}</p>
-        )}
         {test.scenario_info?.description && (
           <p className="pl-5.5 text-xs text-muted-foreground">{test.scenario_info.description}</p>
         )}

@@ -17,6 +17,7 @@ class TestRequest(BaseModel):
     use_indexes: Optional[bool] = False
     warmup_time: Optional[int] = 5
     test_name: Optional[str] = None
+    logical_database_id: Optional[str] = None  # ID логической базы данных
 
 
 class AsyncTestRequest(BaseModel):
@@ -31,3 +32,4 @@ class AsyncTestRequest(BaseModel):
     use_indexes: Optional[bool] = False
     warmup_time: Optional[int] = 5
     test_name: Optional[str] = None
+    logical_database_id: Optional[str] = None  # ID логической базы данных

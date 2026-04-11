@@ -68,6 +68,8 @@ class ComparisonTestInfo(BaseModel):
     finished_at: Optional[str] = None
     scenario_info: Optional[ScenarioInfo] = None
     connections: List[ConnectionInfo] = Field(default_factory=list)
+    logical_database_id: Optional[str] = None
+    use_indexes: Optional[bool] = None
 
 
 class DescriptiveStats(BaseModel):
@@ -82,6 +84,8 @@ class DescriptiveStats(BaseModel):
     p50: float
     p95: float
     p99: float
+    cv: float = 0.0
+    iqr: float = 0.0
 
 
 class MetricStatsBundle(BaseModel):
@@ -127,6 +131,10 @@ class PairwiseComparison(BaseModel):
     is_significant: bool = False
     interpretation: str
     warning: Optional[str] = None
+    effect_size: Optional[float] = None
+    effect_size_label: Optional[str] = None
+    ci_lower: Optional[float] = None
+    ci_upper: Optional[float] = None
 
 
 class BarChartPoint(BaseModel):
@@ -200,6 +208,26 @@ class AnalysisReportConfig(BaseModel):
     include_hypotheses: bool = True
 
 
+class ParameterImpact(BaseModel):
+    """Влияние одного параметра конфигурации на результаты"""
+
+    parameter: str
+    baseline_value: Optional[Any] = None
+    compared_value: Optional[Any] = None
+    change_description: str
+    effects: List[str] = Field(default_factory=list)
+
+
+class ParameterImpactSummary(BaseModel):
+    """Сводка влияния параметров для одного теста относительно baseline"""
+
+    test_id: UUID
+    test_name: str
+    vs_baseline: str
+    impacts: List[ParameterImpact] = Field(default_factory=list)
+    summary_text: str = ""
+
+
 class ComparisonResult(BaseModel):
     """Полный результат сравнительного анализа"""
 
@@ -213,6 +241,7 @@ class ComparisonResult(BaseModel):
     charts_data: ComparisonChartsData = Field(default_factory=ComparisonChartsData)
     analysis_report: Optional[AnalysisReport] = None
     db_key_labels: Dict[str, str] = Field(default_factory=dict, description="Маппинг db_key (UUID) -> человекочитаемое имя")
+    parameter_impacts: List[ParameterImpactSummary] = Field(default_factory=list)
 
 
 ComparisonRequest.model_rebuild()
