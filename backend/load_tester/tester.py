@@ -790,17 +790,26 @@ class LoadTester:
         """Запуск теста на основе сценария с автовосстановлением БД"""
         import random
 
+        conn_name = self.db_connection.get_connection_name(db_key)
+        scenario_name = scenario.get('name', 'unknown')
+
         queries = scenario.get('queries', [])
         scenario_indexes = scenario.get('indexes', [])
         if not queries:
+            print(f"[SCENARIO] ⚠ Нет запросов в сценарии {scenario_name!r} для {conn_name}")
             return {
-                'scenario': scenario.get('name', 'unknown'),
+                'scenario': scenario_name,
                 'db_key': db_key,
                 'db_type': self.db_connection.get_dbms_type(db_key),
                 'error': 'No queries in scenario',
                 'successful': 0,
                 'failed': 0
             }
+
+        print(
+            f"[SCENARIO] Старт {conn_name} | сценарий={scenario_name!r} | "
+            f"{iterations} итер. x {virtual_users} VU | restore={auto_restore} | indexes={use_indexes}"
+        )
 
         sql_queries = [q['sql_template'] for q in queries]
         
@@ -834,6 +843,7 @@ class LoadTester:
                 db_type = self.db_connection.get_dbms_type(db_key)
                 engine = await self.db_connection.get_engine_async(db_key)
 
+                print(f"[SCENARIO] Создание {len(scenario_indexes)} индексов для {conn_name}...")
                 await self._emit_backup_status("index_creation_started", {
                     "dbms_type": db_type,
                     "indexes_count": len(scenario_indexes),
@@ -867,29 +877,38 @@ class LoadTester:
                 })
 
                 if not index_creation_result.success:
+                    print(f"[SCENARIO] Ошибка создания индексов для {conn_name}: {index_creation_result.errors}")
                     raise RuntimeError(
                         "Не удалось создать индексы: " + "; ".join(index_creation_result.errors)
                     )
 
+                print(
+                    f"[SCENARIO] Индексы созданы для {conn_name} "
+                    f"за {index_creation_result.total_time_ms:.0f}ms"
+                )
+
             await self._prime_random_value_cache(db_key, queries)
 
             if warmup_time > 0:
+                warmup_iterations = max(1, min(5, max(1, iterations // 10)))
+                print(f"[SCENARIO] Прогрев {conn_name}: {warmup_iterations} итер. + {warmup_time}s пауза...")
                 await self._emit_status(
                     "running",
-                    f"Прогрев сценария {scenario.get('name', 'unknown')} ({warmup_time} сек)..."
+                    f"Прогрев сценария {scenario_name} ({warmup_time} сек)..."
                 )
-                warmup_iterations = max(1, min(5, max(1, iterations // 10)))
                 for _ in range(warmup_iterations):
                     q = random.choice(weighted_queries)
                     await self.execute_scenario_query(
                         db_key,
                         q['sql_template'],
                         q.get('params', []),
-                        scenario.get('name', 'unknown')
+                        scenario_name
                     )
                     await asyncio.sleep(0.1)
                 await asyncio.sleep(warmup_time)
+                print(f"[SCENARIO] Прогрев {conn_name} завершён")
 
+            print(f"[SCENARIO] Запуск нагрузки {conn_name}: {iterations} итераций x {virtual_users} VU...")
             start_time = time.perf_counter()
 
             async def _make_scenario_query():
@@ -898,7 +917,7 @@ class LoadTester:
                     db_key,
                     q['sql_template'],
                     q.get('params', []),
-                    scenario.get('name', 'unknown')
+                    scenario_name
                 )
             
             results = await self._run_workers(
@@ -910,9 +929,11 @@ class LoadTester:
 
             end_time = time.perf_counter()
             total_test_time = end_time - start_time
+            print(f"[SCENARIO] Нагрузка {conn_name} завершена за {total_test_time:.2f}с")
             
         finally:
             if created_indexes:
+                print(f"[SCENARIO] Удаление {len(created_indexes)} индексов для {conn_name}...")
                 try:
                     db_type = self.db_connection.get_dbms_type(db_key)
                     engine = await self.db_connection.get_engine_async(db_key)
@@ -936,7 +957,12 @@ class LoadTester:
                         "details": index_info['drop_details'],
                         "errors": index_drop_result.errors,
                     })
+                    print(
+                        f"[SCENARIO] Индексы удалены для {conn_name} "
+                        f"за {index_drop_result.total_time_ms:.0f}ms"
+                    )
                 except Exception as e:
+                    print(f"[SCENARIO] Ошибка удаления индексов для {conn_name}: {e}")
                     index_info['drop_errors'].append(str(e))
                     await self._emit_backup_status("index_drop_failed", {
                         "dbms_type": self.db_connection.get_dbms_type(db_key),
@@ -986,7 +1012,13 @@ class LoadTester:
         stats['raw_samples'] = self.build_metric_samples(
             results,
             db_key,
-            query_id=f"scenario:{scenario.get('name', 'unknown')}"
+            query_id=f"scenario:{scenario_name}"
+        )
+
+        print(
+            f"[SCENARIO] ✓ {conn_name}: успешно={successful_count}, ошиб.={failed_count}, "
+            f"avg={stats['avg_time_ms']:.1f}ms, p95={stats['p95_time_ms']:.1f}ms, "
+            f"TPS={stats['tps']:.1f}"
         )
         return stats
 
@@ -1005,6 +1037,12 @@ class LoadTester:
 
         all_results = []
 
+        queries_count = len(scenario.get('queries', []))
+        print(
+            f"[TEST] Сценарий: {scenario['name']!r} | БД: {len(db_types)} | "
+            f"итераций: {iterations} | VU: {virtual_users} | запросов в сценарии: {queries_count}"
+        )
+
         # Устанавливаем количество БД для прогресса
         if self._metrics_callback:
             self._metrics_callback.set_total_queries(len(db_types))
@@ -1012,7 +1050,13 @@ class LoadTester:
 
         # Запуск тестов для каждой БД
         for idx, db_key in enumerate(db_types):
-            print(f"Тестирование {db_key} со сценарием {scenario['name']}...")
+            conn_name = self.db_connection.get_connection_name(db_key)
+            print(f"Тестирование {db_key} ({conn_name}) со сценарием {scenario['name']}... ({idx + 1}/{len(db_types)})")
+            queries_in_scenario = scenario.get('queries', [])
+            for q in queries_in_scenario:
+                q_type = q.get('query_type', '—')
+                q_sql = q.get('sql_template', '').strip().replace('\n', ' ')
+                print(f"  [SQL] {q_type}: {q_sql}")
 
             if self._metrics_callback:
                 self._metrics_callback.set_current_query(idx + 1)
@@ -1032,6 +1076,16 @@ class LoadTester:
                 use_indexes=use_indexes,
             )
 
+            successful = stats.get('successful', 0)
+            failed = stats.get('failed', 0)
+            total = successful + failed
+            avg_ms = stats.get('avg_time_ms', 0)
+            tps = stats.get('tps', 0)
+            print(
+                f"[TEST] ✓ {conn_name}: {successful}/{total} успешно, "
+                f"avg={avg_ms:.1f}ms, TPS={tps:.1f}"
+            )
+
             all_results.append({
                 'db_key': db_key,
                 'db_type': stats.get('db_type'),
@@ -1040,11 +1094,13 @@ class LoadTester:
             })
 
         # Уведомляем о завершении
+        total_transactions = sum(
+            result.get('stats', {}).get('successful', 0)
+            for result in all_results
+        )
+        print(f"[TEST] Все БД протестированы. Итого успешных транзакций: {total_transactions}")
+
         if self._metrics_callback:
-            total_transactions = sum(
-                result.get('stats', {}).get('successful', 0)
-                for result in all_results
-            )
             summary = {
                 'total_transactions': total_transactions,
                 'overall_tps': total_transactions / len(db_types) if db_types else 0,
@@ -1076,9 +1132,11 @@ class LoadTester:
         Returns:
             Dict с результатами подготовки
         """
+        conn_name = self.db_connection.get_connection_name(db_key)
         needs_restore = self.state_manager.needs_restore(queries)
         
         if not needs_restore:
+            print(f"[DB] {conn_name}: backup не нужен (нет write-запросов)")
             return {
                 "needs_restore": False,
                 "affected_tables": [],
@@ -1086,6 +1144,7 @@ class LoadTester:
             }
         
         affected_tables = self.state_manager.get_affected_tables(queries)
+        print(f"[DB] {conn_name}: backup запущен, таблицы: {sorted(affected_tables)}")
         
         # Отправляем статус
         await self._emit_backup_status("backup_started", {
@@ -1108,6 +1167,7 @@ class LoadTester:
                 "row_counts": prepare_result.backup_info.row_counts if prepare_result.backup_info else {},
                 "warnings": prepare_result.warnings
             })
+            print(f"[DB] {conn_name}: backup завершён")
             
             return {
                 "needs_restore": True,
@@ -1116,6 +1176,7 @@ class LoadTester:
             }
             
         except Exception as e:
+            print(f"[DB] {conn_name}: backup завершился с ошибкой: {e}")
             await self._emit_backup_status("backup_failed", {
                 "dbms_type": self.db_connection.get_dbms_type(db_key),
                 "error": str(e)
@@ -1139,12 +1200,23 @@ class LoadTester:
         Returns:
             Dict с результатами восстановления
         """
-        if not prepare_result.get("needs_restore") or not auto_restore:
+        conn_name = self.db_connection.get_connection_name(db_key)
+
+        if not prepare_result.get("needs_restore"):
+            print(f"[DB] {conn_name}: восстановление пропущено (backup не создавался)")
+            return {
+                "restored": False,
+                "reason": "No restore needed or auto_restore disabled"
+            }
+
+        if not auto_restore:
+            print(f"[DB] {conn_name}: восстановление пропущено (auto_restore=False)")
             return {
                 "restored": False,
                 "reason": "No restore needed or auto_restore disabled"
             }
         
+        print(f"[DB] {conn_name}: восстановление запущено...")
         await self._emit_backup_status("restore_started", {
             "dbms_type": self.db_connection.get_dbms_type(db_key),
             "tables": prepare_result.get("affected_tables", [])
@@ -1164,6 +1236,10 @@ class LoadTester:
                 "verified": restore_result.verified,
                 "errors": restore_result.errors
             })
+            print(
+                f"[DB] {conn_name}: восстановление завершено за {restore_result.duration_ms:.0f}ms"
+                + (f", verified={restore_result.verified}" if restore_result.verified is not None else "")
+            )
             
             return {
                 "restored": restore_result.success,
@@ -1173,6 +1249,7 @@ class LoadTester:
             }
             
         except Exception as e:
+            print(f"[DB] {conn_name}: ошибка восстановления: {e}")
             await self._emit_backup_status("restore_failed", {
                 "dbms_type": self.db_connection.get_dbms_type(db_key),
                 "error": str(e)

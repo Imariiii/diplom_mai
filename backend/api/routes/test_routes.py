@@ -174,6 +174,10 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         return
     
     print(f"[TEST] Запуск теста с db_keys={db_keys}, connection_names={connection_names}")
+    print(
+        f"[TEST] Параметры: итераций={request.iterations}, VU={request.virtual_users}, "
+        f"warmup={request.warmup_time}s, индексы={request.use_indexes}"
+    )
     
     try:
         active_tests[test_id]["status"] = "running"
@@ -185,6 +189,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
             if not connection_ids or not connection_repository or not scenario_bundle_repository:
                 raise ValueError("Scenario bundle требует connection_ids и доступного bundle repository")
 
+            print(f"[TEST] Разрешение сценария: bundle_id={request.bundle_id!r}, scenario={scenario!r}")
             bundle_resolver = ScenarioBundleResolver(
                 connection_repository=connection_repository,
                 bundle_repository=scenario_bundle_repository,
@@ -195,6 +200,11 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                 bundle_id=request.bundle_id,
             )
             resolved_bundle = resolved["bundle"]
+            queries_count = len(resolved_bundle.get("queries", []))
+            print(
+                f"[TEST] Разрешён bundle: {resolved_bundle['name']!r} "
+                f"(профиль: {resolved['schema_profile_name']!r}), запросов: {queries_count}"
+            )
             resolved_config = dict(active_tests[test_id]["config"])
             resolved_config.update({
                 "scenario": resolved["scenario_template_id"],
@@ -224,6 +234,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                 use_indexes=request.use_indexes,
             )
         else:
+            print(f"[TEST] Запуск полного набора тестов (legacy-режим), сценарий={scenario!r}")
             results = await test_tester.run_full_test_suite(
                 db_types=db_keys,
                 iterations=request.iterations,
@@ -258,6 +269,10 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
             'overall_tps': total_transactions / actual_duration if actual_duration > 0 else 0,
             'total_duration': actual_duration
         }
+        print(
+            f"[TEST] Тест {test_id} завершён за {actual_duration:.1f}с. "
+            f"Транзакций: {total_transactions}, TPS: {summary['overall_tps']:.1f}"
+        )
         
         if HISTORY_ENABLED and test_repository:
             try:
@@ -341,7 +356,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         await streaming_callback.on_test_complete(summary)
         
     except Exception as e:
-        print(f"Ошибка выполнения теста {test_id}: {e}")
+        print(f"[TEST] Ошибка выполнения теста {test_id}: {e}")
         import traceback
         traceback.print_exc()
         active_tests[test_id]["status"] = "failed"
