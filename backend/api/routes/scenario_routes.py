@@ -3,6 +3,7 @@ API роуты для управления сценариями тестиров
 """
 from fastapi import APIRouter, HTTPException
 from typing import Optional
+from backend.api.schemas import GenerateScenariosRequest
 
 router = APIRouter(prefix="/scenarios", tags=["scenarios"])
 
@@ -15,12 +16,22 @@ def get_scenario_repository():
     return scenario_repository
 
 
+def get_connection_repository():
+    """Получить репозиторий подключений."""
+    from backend.initialize import connection_repository
+    if not connection_repository:
+        raise HTTPException(status_code=503, detail="Репозиторий подключений не настроен")
+    return connection_repository
+
+
 @router.get("")
 async def get_scenarios(
     limit: int = 100,
     offset: int = 0,
     scenario_type: Optional[str] = None,
-    include_builtin: bool = True
+    include_builtin: bool = True,
+    target_connection_id: Optional[str] = None,
+    include_global: bool = True,
 ):
     """Получить список всех сценариев тестирования"""
     repo = get_scenario_repository()
@@ -28,9 +39,35 @@ async def get_scenarios(
         limit=limit,
         offset=offset,
         scenario_type=scenario_type,
-        include_builtin=include_builtin
+        include_builtin=include_builtin,
+        target_connection_id=target_connection_id,
+        include_global=include_global,
     )
     return {"scenarios": scenarios, "total": len(scenarios)}
+
+
+@router.post("/generate")
+async def generate_scenarios(request: GenerateScenariosRequest):
+    """Сгенерировать сценарии на основе схемы подключённой БД."""
+    from backend.database.scenario_generator import ScenarioGenerator
+
+    repo = get_scenario_repository()
+    connection_repo = get_connection_repository()
+
+    generator = ScenarioGenerator(
+        scenario_repository=repo,
+        connection_repo=connection_repo,
+    )
+
+    scenarios = await generator.generate_scenarios(
+        connection_id=request.connection_id,
+        scenario_types=request.scenario_types,
+        replace_existing=request.replace_existing,
+    )
+    return {
+        "scenarios": scenarios,
+        "generated_count": len(scenarios),
+    }
 
 
 @router.get("/{scenario_id}")
@@ -60,7 +97,8 @@ async def create_scenario(request):
         name=request.name,
         description=request.description,
         scenario_type=request.scenario_type,
-        is_builtin=False
+        is_builtin=False,
+        target_connection_id=request.target_connection_id,
     )
 
     # Добавляем запросы к сценарию
@@ -121,6 +159,7 @@ async def update_scenario(scenario_id: str, request):
         name=request.name,
         description=request.description,
         scenario_type=request.scenario_type,
+        target_connection_id=request.target_connection_id,
         is_active=request.is_active
     )
 

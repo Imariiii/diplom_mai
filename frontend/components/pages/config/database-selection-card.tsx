@@ -59,6 +59,9 @@ export function DatabaseSelectionCard({ connections, selectedDatabases, healthSt
                   <div className="text-xs text-muted-foreground">
                     {conn.dbms_type} · {conn.host}:{conn.port}
                   </div>
+                  <div className="text-xs text-muted-foreground">
+                    Профиль: {conn.schema_profile_name || conn.detected_profile_name || "не назначен"}
+                  </div>
                 </div>
               </label>
             )

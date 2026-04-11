@@ -21,6 +21,20 @@ from backend.api.schemas.scenario_schemas import (
     TestScenarioResponse,
     TestScenarioListResponse,
     CloneScenarioRequest,
+    GenerateScenariosRequest,
+    GenerateScenariosResponse,
+)
+from backend.api.schemas.connection_schemas import ConnectionSchemaResponse
+from backend.api.schemas.profile_schemas import (
+    ScenarioTemplateResponse,
+    ConnectionProfileAssignRequest,
+    SchemaProfileCreateRequest,
+    ScenarioBundleSummaryResponse,
+    ProfileBundleGenerateRequest,
+    SchemaProfileDetailResponse,
+    ScenarioTemplateListResponse,
+    SchemaProfileListResponse,
+    SchemaProfileBundlesResponse,
 )
 from backend.api.schemas.backup_schemas import (
     BackupRequest,
@@ -56,6 +70,18 @@ __all__ = [
     "TestScenarioResponse",
     "TestScenarioListResponse",
     "CloneScenarioRequest",
+    "GenerateScenariosRequest",
+    "GenerateScenariosResponse",
+    "ConnectionSchemaResponse",
+    "ScenarioTemplateResponse",
+    "ConnectionProfileAssignRequest",
+    "SchemaProfileCreateRequest",
+    "ScenarioBundleSummaryResponse",
+    "ProfileBundleGenerateRequest",
+    "SchemaProfileDetailResponse",
+    "ScenarioTemplateListResponse",
+    "SchemaProfileListResponse",
+    "SchemaProfileBundlesResponse",
     # Backup schemas
     "BackupRequest",
     "BackupResponse",

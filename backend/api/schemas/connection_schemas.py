@@ -42,6 +42,11 @@ class ConnectionResponse(BaseModel):
     user: str
     database: str
     group: Optional[str] = None
+    schema_profile_id: Optional[str] = None
+    schema_profile_name: Optional[str] = None
+    detected_profile_name: Optional[str] = None
+    profile_confidence: Optional[float] = None
+    profile_source: Optional[str] = None
     is_active: bool
     extra_params: Optional[Dict[str, Any]] = None
     created_at: Optional[str] = None
@@ -75,3 +80,70 @@ class ConnectionListResponse(BaseModel):
 class ConnectionGroupsResponse(BaseModel):
     """Список групп подключений"""
     groups: list[str]
+
+
+class SchemaColumnResponse(BaseModel):
+    """Колонка в preview схемы."""
+    name: str
+    data_type: str
+    is_nullable: bool
+    is_primary_key: bool
+    is_unique: bool
+    column_default: Optional[str] = None
+    category: str
+
+
+class SchemaForeignKeyResponse(BaseModel):
+    """Связь foreign key в preview схемы."""
+    constraint_name: str
+    from_table: str
+    from_column: str
+    to_table: str
+    to_column: str
+
+
+class SchemaTableResponse(BaseModel):
+    """Информация по таблице в preview схемы."""
+    name: str
+    columns: list[SchemaColumnResponse]
+    primary_key: list[str]
+    row_count: int
+    foreign_keys_out: list[SchemaForeignKeyResponse]
+    foreign_keys_in: list[SchemaForeignKeyResponse]
+    unique_columns: list[str]
+    capabilities: list[str]
+
+
+class SchemaProfileSummaryResponse(BaseModel):
+    """Краткая информация о профиле данных."""
+    id: str
+    name: str
+    description: Optional[str] = None
+    detection_mode: Optional[str] = None
+    reference_connection_id: Optional[str] = None
+    is_builtin: bool
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class SchemaProfileSuggestionResponse(BaseModel):
+    """Автоматически предложенный профиль схемы."""
+    name: str
+    description: str
+    confidence: float
+    reason: str
+    existing_profile_id: Optional[str] = None
+    is_existing: bool = False
+
+
+class ConnectionSchemaResponse(BaseModel):
+    """Preview схемы подключённой БД."""
+    connection_id: str
+    connection_name: str
+    dbms_type: str
+    total_tables: int
+    tables: list[SchemaTableResponse]
+    current_profile: Optional[SchemaProfileSummaryResponse] = None
+    suggested_profile: Optional[SchemaProfileSuggestionResponse] = None
+    available_scenario_types: list[str] = []
+    matching_templates: Dict[str, list[str]] = {}

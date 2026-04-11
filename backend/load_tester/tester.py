@@ -1022,6 +1022,28 @@ class LoadTester:
         if not scenario:
             raise ValueError(f"Scenario {scenario_id} not found")
 
+        return await self.run_resolved_scenario_test_suite(
+            scenario=scenario,
+            db_types=db_types,
+            iterations=iterations,
+            virtual_users=virtual_users,
+            warmup_time=warmup_time,
+            use_indexes=use_indexes,
+        )
+
+    async def run_resolved_scenario_test_suite(
+        self,
+        scenario: Dict,
+        db_types: List[str] = None,
+        iterations: int = 100,
+        virtual_users: int = 10,
+        warmup_time: int = 5,
+        use_indexes: bool = False,
+    ) -> List[Dict]:
+        """Запуск полного теста на основе уже разрешённого SQL-bundle/сценария."""
+        if db_types is None:
+            db_types = ['mysql', 'postgresql']
+
         all_results = []
 
         # Устанавливаем количество БД для прогресса

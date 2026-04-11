@@ -24,7 +24,7 @@ from backend.websocket_manager import manager, TestStreamingCallback
 from backend.database.state_manager import DatabaseStateManager
 
 # Импорт роутов из api модуля
-from backend.api.routes import test_routes, scenario_routes, database_state_routes, history_routes, settings_routes, connection_routes, comparison_routes
+from backend.api.routes import test_routes, scenario_routes, database_state_routes, history_routes, settings_routes, connection_routes, comparison_routes, profile_routes
 
 # Используем централизованную инициализацию
 from backend import initialize
@@ -46,6 +46,17 @@ async def lifespan(app: FastAPI):
             alembic_cfg.set_main_option("sqlalchemy.url", db_url.replace("+asyncpg", "+psycopg2"))
             alembic_command.upgrade(alembic_cfg, "head")
             print("[STARTUP] Миграции Alembic применены")
+
+            if initialize.connection_repository and initialize.profile_repository and initialize.scenario_bundle_repository:
+                from backend.database.logical_scenario_bootstrap import LogicalScenarioBootstrap
+
+                bootstrap = LogicalScenarioBootstrap(
+                    connection_repository=initialize.connection_repository,
+                    profile_repository=initialize.profile_repository,
+                    bundle_repository=initialize.scenario_bundle_repository,
+                )
+                await bootstrap.bootstrap()
+                print("[STARTUP] Logical scenario bootstrap завершён")
         except Exception as e:
             print(f"[STARTUP] ⚠ Миграции завершились с ошибкой: {e}")
             import traceback
@@ -84,6 +95,8 @@ initialize.init()
 test_repository = initialize.test_repository
 scenario_repository = initialize.scenario_repository
 connection_repository = initialize.connection_repository
+profile_repository = initialize.profile_repository
+scenario_bundle_repository = initialize.scenario_bundle_repository
 HISTORY_ENABLED = initialize.HISTORY_ENABLED
 SCENARIOS_ENABLED = initialize.SCENARIOS_ENABLED
 
@@ -176,6 +189,9 @@ app.include_router(settings_routes.router)
 
 # Роуты управления подключениями
 app.include_router(connection_routes.router)
+
+# Роуты профилей схемы и logical templates
+app.include_router(profile_routes.router)
 
 # Роуты сравнительного анализа
 app.include_router(comparison_routes.router)

@@ -10,8 +10,18 @@ import type {
   ConnectionTestResponse,
   ConnectionListResponse,
   ConnectionGroupsResponse,
+  ConnectionSchemaPreview,
+  ConnectionProfileAssignRequest,
+  GenerateScenariosRequest,
+  GenerateScenariosResponse,
   CreateScenarioIndexRequest,
   ScenarioIndex,
+  ScenarioTemplateListResponse,
+  SchemaProfileListResponse,
+  SchemaProfileDetail,
+  ProfileBundleGenerateRequest,
+  ProfileBundleGenerateResponse,
+  SchemaProfileSummary,
 } from '@/lib/types'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
@@ -126,8 +136,17 @@ class ApiClient {
 
   // ==================== Сценарии тестирования ====================
 
-  async getScenarios(): Promise<{ scenarios: any[] }> {
-    return this.request('/scenarios')
+  async getScenarios(params?: {
+    targetConnectionId?: string
+    includeGlobal?: boolean
+    includeBuiltin?: boolean
+  }): Promise<{ scenarios: any[] }> {
+    const queryParams = new URLSearchParams()
+    if (params?.targetConnectionId) queryParams.set('target_connection_id', params.targetConnectionId)
+    if (params?.includeGlobal !== undefined) queryParams.set('include_global', String(params.includeGlobal))
+    if (params?.includeBuiltin !== undefined) queryParams.set('include_builtin', String(params.includeBuiltin))
+    const queryString = queryParams.toString()
+    return this.request(`/scenarios${queryString ? `?${queryString}` : ''}`)
   }
 
   async getScenario(id: string): Promise<any> {
@@ -160,6 +179,13 @@ class ApiClient {
     return this.request(`/scenarios/${id}/clone`, {
       method: 'POST',
       body: JSON.stringify({ new_name: newName }),
+    })
+  }
+
+  async generateScenarios(data: GenerateScenariosRequest): Promise<GenerateScenariosResponse> {
+    return this.request<GenerateScenariosResponse>('/scenarios/generate', {
+      method: 'POST',
+      body: JSON.stringify(data),
     })
   }
 
@@ -293,6 +319,17 @@ class ApiClient {
     return this.request<DatabaseConnection>(`/api/connections/${id}`)
   }
 
+  async getConnectionSchema(id: string): Promise<ConnectionSchemaPreview> {
+    return this.request<ConnectionSchemaPreview>(`/api/connections/${id}/schema`)
+  }
+
+  async assignConnectionProfile(id: string, data: ConnectionProfileAssignRequest): Promise<DatabaseConnection> {
+    return this.request<DatabaseConnection>(`/api/connections/${id}/profile`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
   async createConnection(data: ConnectionCreateRequest): Promise<DatabaseConnection> {
     return this.request<DatabaseConnection>('/api/connections', {
       method: 'POST',
@@ -323,6 +360,41 @@ class ApiClient {
   async testSavedConnection(id: string): Promise<ConnectionTestResponse> {
     return this.request<ConnectionTestResponse>(`/api/connections/${id}/test`, {
       method: 'POST',
+    })
+  }
+
+  // ==================== Логические сценарии и профили схем ====================
+
+  async getScenarioTemplates(): Promise<ScenarioTemplateListResponse> {
+    return this.request<ScenarioTemplateListResponse>('/api/schema-profiles/templates')
+  }
+
+  async getSchemaProfiles(): Promise<SchemaProfileListResponse> {
+    return this.request<SchemaProfileListResponse>('/api/schema-profiles')
+  }
+
+  async getSchemaProfile(profileId: string): Promise<SchemaProfileDetail> {
+    return this.request<SchemaProfileDetail>(`/api/schema-profiles/${profileId}`)
+  }
+
+  async createSchemaProfile(data: {
+    name: string
+    description?: string
+    reference_connection_id?: string
+  }): Promise<SchemaProfileSummary> {
+    return this.request<SchemaProfileSummary>('/api/schema-profiles', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async generateProfileBundles(
+    profileId: string,
+    data: ProfileBundleGenerateRequest
+  ): Promise<ProfileBundleGenerateResponse> {
+    return this.request<ProfileBundleGenerateResponse>(`/api/schema-profiles/${profileId}/bundles/generate`, {
+      method: 'POST',
+      body: JSON.stringify(data),
     })
   }
 }

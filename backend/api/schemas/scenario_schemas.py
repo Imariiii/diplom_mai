@@ -113,6 +113,7 @@ class TestScenarioCreate(BaseModel):
     name: str
     description: Optional[str] = None
     scenario_type: str  # read_only, write_only, mixed_light, mixed_heavy, oltp, olap, custom
+    target_connection_id: Optional[str] = None
     queries: List[ScenarioQueryCreate] = []
 
 
@@ -120,6 +121,7 @@ class TestScenarioUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     scenario_type: Optional[str] = None
+    target_connection_id: Optional[str] = None
     is_active: Optional[bool] = None
 
 
@@ -128,6 +130,7 @@ class TestScenarioResponse(BaseModel):
     name: str
     description: Optional[str]
     scenario_type: str
+    target_connection_id: Optional[str]
     is_builtin: bool
     is_active: bool
     created_at: str
@@ -141,6 +144,7 @@ class TestScenarioListResponse(BaseModel):
     name: str
     description: Optional[str]
     scenario_type: str
+    target_connection_id: Optional[str]
     is_builtin: bool
     is_active: bool
     created_at: str
@@ -148,3 +152,14 @@ class TestScenarioListResponse(BaseModel):
 
 class CloneScenarioRequest(BaseModel):
     new_name: str
+
+
+class GenerateScenariosRequest(BaseModel):
+    connection_id: str
+    scenario_types: Optional[List[str]] = None
+    replace_existing: bool = True
+
+
+class GenerateScenariosResponse(BaseModel):
+    scenarios: List[TestScenarioResponse]
+    generated_count: int

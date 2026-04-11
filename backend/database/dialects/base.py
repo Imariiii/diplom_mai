@@ -56,6 +56,22 @@ class DbmsDialect(ABC):
     def get_list_tables_sql(self) -> str:
         """SQL для получения списка BASE TABLE текущей базы."""
 
+    @abstractmethod
+    def get_columns_sql(self) -> str:
+        """SQL для чтения колонок таблиц текущей базы."""
+
+    @abstractmethod
+    def get_primary_keys_sql(self) -> str:
+        """SQL для чтения primary key таблиц текущей базы."""
+
+    @abstractmethod
+    def get_foreign_keys_detailed_sql(self) -> str:
+        """SQL для чтения детальной информации о foreign key."""
+
+    @abstractmethod
+    def get_unique_constraints_sql(self) -> str:
+        """SQL для чтения уникальных ограничений таблиц."""
+
     def get_row_count_sql(self, table: str) -> str:
         """SQL для подсчёта строк в таблице."""
         return f"SELECT COUNT(*) FROM {self.quote_identifier(table)}"

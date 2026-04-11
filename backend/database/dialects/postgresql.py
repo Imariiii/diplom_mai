@@ -31,8 +31,75 @@ class PostgreSQLDialect(DbmsDialect):
         return """
             SELECT table_name
             FROM information_schema.tables
-            WHERE table_schema = 'public'
+            WHERE table_schema = current_schema()
               AND table_type = 'BASE TABLE'
+        """
+
+    def get_columns_sql(self) -> str:
+        return """
+            SELECT
+                table_name,
+                column_name,
+                data_type,
+                is_nullable,
+                column_default,
+                ordinal_position
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+            ORDER BY table_name, ordinal_position
+        """
+
+    def get_primary_keys_sql(self) -> str:
+        return """
+            SELECT
+                tc.table_name,
+                kcu.column_name,
+                kcu.ordinal_position
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+                ON tc.constraint_name = kcu.constraint_name
+               AND tc.table_schema = kcu.table_schema
+               AND tc.table_name = kcu.table_name
+            WHERE tc.constraint_type = 'PRIMARY KEY'
+              AND tc.table_schema = current_schema()
+            ORDER BY tc.table_name, kcu.ordinal_position
+        """
+
+    def get_foreign_keys_detailed_sql(self) -> str:
+        return """
+            SELECT
+                tc.constraint_name,
+                tc.table_name,
+                kcu.column_name,
+                ccu.table_name AS referenced_table_name,
+                ccu.column_name AS referenced_column_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+                ON tc.constraint_name = kcu.constraint_name
+               AND tc.table_schema = kcu.table_schema
+               AND tc.table_name = kcu.table_name
+            JOIN information_schema.constraint_column_usage ccu
+                ON tc.constraint_name = ccu.constraint_name
+               AND tc.table_schema = ccu.table_schema
+            WHERE tc.constraint_type = 'FOREIGN KEY'
+              AND tc.table_schema = current_schema()
+            ORDER BY tc.table_name, tc.constraint_name, kcu.ordinal_position
+        """
+
+    def get_unique_constraints_sql(self) -> str:
+        return """
+            SELECT
+                tc.table_name,
+                kcu.column_name,
+                tc.constraint_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+                ON tc.constraint_name = kcu.constraint_name
+               AND tc.table_schema = kcu.table_schema
+               AND tc.table_name = kcu.table_name
+            WHERE tc.constraint_type = 'UNIQUE'
+              AND tc.table_schema = current_schema()
+            ORDER BY tc.table_name, tc.constraint_name, kcu.ordinal_position
         """
 
     def get_table_size_sql(self, table: str) -> str:
@@ -62,7 +129,7 @@ class PostgreSQLDialect(DbmsDialect):
             JOIN information_schema.constraint_column_usage ccu
                 ON tc.constraint_name = ccu.constraint_name
             WHERE tc.constraint_type = 'FOREIGN KEY'
-              AND tc.table_schema = 'public'
+              AND tc.table_schema = current_schema()
         """
 
     def get_checksum_sql(self, table: str) -> str:
@@ -79,7 +146,7 @@ class PostgreSQLDialect(DbmsDialect):
             SELECT column_name, pg_get_serial_sequence(:table, column_name) as seq_name
             FROM information_schema.columns
             WHERE table_name = :table
-              AND table_schema = 'public'
+              AND table_schema = current_schema()
               AND data_type IN ('integer', 'bigint')
               AND column_default LIKE 'nextval%'
         """
@@ -98,7 +165,7 @@ class PostgreSQLDialect(DbmsDialect):
                    pg_get_serial_sequence(:table, column_name) as seq_name
             FROM information_schema.columns
             WHERE table_name = :table
-              AND table_schema = 'public'
+              AND table_schema = current_schema()
               AND data_type IN ('integer', 'bigint')
               AND column_default LIKE 'nextval%'
         """

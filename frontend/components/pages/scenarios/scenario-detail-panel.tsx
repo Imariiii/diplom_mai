@@ -230,6 +230,11 @@ export function ScenarioDetailPanel({
           {selectedScenario.description}
         </p>
       )}
+      {selectedScenario.target_connection_id && (
+        <p className="text-xs text-muted-foreground mt-2">
+          Сценарий привязан к подключению: <code>{selectedScenario.target_connection_id}</code>
+        </p>
+      )}
 
       <Tabs defaultValue="queries" className="mt-4">
         <TabsList>

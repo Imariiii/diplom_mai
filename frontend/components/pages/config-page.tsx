@@ -1,13 +1,12 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Play, Database, Users, Clock, FileCode, AlertCircle, Gauge, Layers, Code, Edit3 } from "lucide-react"
+import { Play, Users, Clock, Gauge } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Slider } from "@/components/ui/slider"
 import { useAppStore } from "@/lib/store"
 import { apiClient, type Query } from "@/lib/api"
 import { toast } from "sonner"
-import type { TestRun, TestScenario, ScenarioConfig, TestMode, Scenario, DatabaseConnection } from "@/lib/types"
+import type { TestRun, ScenarioTemplate, DatabaseConnection, SchemaProfileDetail } from "@/lib/types"
 import { DatabaseStatePanel } from "@/components/database-state-panel"
 import { ConnectionManager } from "./config/connection-manager"
 import { ConnectionStatusCard } from "./config/connection-status-card"
@@ -28,9 +27,10 @@ export function ConfigPage() {
   } = useAppStore()
   const [isRunning, setIsRunning] = useState(false)
   const [queries, setQueries] = useState<Query[]>([])
-  const [scenarios, setScenarios] = useState<Scenario[]>([])
+  const [scenarios, setScenarios] = useState<ScenarioTemplate[]>([])
   const [scenariosLoading, setScenariosLoading] = useState(true)
   const [connections, setConnections] = useState<DatabaseConnection[]>([])
+  const [selectedProfileDetail, setSelectedProfileDetail] = useState<SchemaProfileDetail | null>(null)
   const [healthStatus, setHealthStatus] = useState<Record<string, boolean>>({})
   const [useCustomSql, setUseCustomSql] = useState(false)
 
@@ -49,9 +49,9 @@ export function ConfigPage() {
       })
 
     apiClient
-      .getEnabledScenarios()
+      .getScenarioTemplates()
       .then((response) => {
-        const scenariosList = response?.scenarios || []
+        const scenariosList = response?.templates || []
         setScenarios(scenariosList)
         setScenariosLoading(false)
         if (scenariosList.length > 0 && !testConfig.scenario) {
@@ -64,6 +64,29 @@ export function ConfigPage() {
         setScenariosLoading(false)
       })
   }, [])
+
+  useEffect(() => {
+    const selectedConnections = connections.filter((connection) =>
+      testConfig.databases.includes(connection.id)
+    )
+    const profileIds = Array.from(
+      new Set(
+        selectedConnections
+          .map((connection) => connection.schema_profile_id)
+          .filter((value): value is string => Boolean(value))
+      )
+    )
+
+    if (profileIds.length !== 1 || selectedConnections.some((connection) => !connection.schema_profile_id)) {
+      setSelectedProfileDetail(null)
+      return
+    }
+
+    apiClient
+      .getSchemaProfile(profileIds[0])
+      .then((profile) => setSelectedProfileDetail(profile))
+      .catch(() => setSelectedProfileDetail(null))
+  }, [connections, testConfig.databases])
 
   const handleConnectionsChange = (newConnections: DatabaseConnection[]) => {
     setConnections(newConnections)
@@ -84,6 +107,25 @@ export function ConfigPage() {
   const validateConfig = (): boolean => {
     if (testConfig.databases.length === 0) {
       toast.error("Выберите хотя бы одну базу данных")
+      return false
+    }
+
+    const selectedConnections = connections.filter((connection) =>
+      testConfig.databases.includes(connection.id)
+    )
+    const missingProfiles = selectedConnections.filter((connection) => !connection.schema_profile_id)
+    if (missingProfiles.length > 0) {
+      toast.error("Для выбранных БД сначала подтвердите schema profile")
+      return false
+    }
+
+    const distinctProfiles = new Set(
+      selectedConnections
+        .map((connection) => connection.schema_profile_id)
+        .filter((value): value is string => Boolean(value))
+    )
+    if (distinctProfiles.size > 1) {
+      toast.error("Нельзя запускать тест сразу для БД разных профилей модели данных")
       return false
     }
 
@@ -179,9 +221,25 @@ export function ConfigPage() {
 
   const selectedScenario = scenarios?.find(s => s.id === testConfig.scenario)
   const selectedQuery = queries?.find(q => q.id === testConfig.selectedQueryId)
+  const selectedConnections = connections.filter((connection) =>
+    testConfig.databases.includes(connection.id)
+  )
+  const selectedProfileIds = Array.from(
+    new Set(
+      selectedConnections
+        .map((connection) => connection.schema_profile_id)
+        .filter((value): value is string => Boolean(value))
+    )
+  )
+  const hasMissingProfiles = selectedConnections.some((connection) => !connection.schema_profile_id)
+  const hasMixedProfiles = selectedProfileIds.length > 1
+  const selectedBundle = selectedProfileDetail?.bundles.find(
+    (bundle) => bundle.scenario_template_id === testConfig.scenario
+  )
 
   const canRunTest = () => {
     if (testConfig.databases.length === 0) return false
+    if (hasMissingProfiles || hasMixedProfiles) return false
     if (testConfig.testMode === "custom_query") {
       if (useCustomSql) {
         return testConfig.customSql.trim().length > 0
@@ -209,6 +267,18 @@ export function ConfigPage() {
         onToggle={handleDatabaseToggle}
       />
 
+      {testConfig.databases.length > 0 && hasMissingProfiles && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-700">
+          Для части выбранных БД ещё не подтверждён `schema_profile`. Откройте управление подключениями и назначьте профиль.
+        </div>
+      )}
+
+      {testConfig.databases.length > 0 && hasMixedProfiles && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700">
+          Запуск заблокирован: выбраны БД разных профилей модели данных. Оставьте только подключения одного `schema_profile`.
+        </div>
+      )}
+
       <TestModeSelectorCard
         testMode={testConfig.testMode}
         onModeChange={(mode) => setTestConfig({ testMode: mode })}
@@ -219,11 +289,15 @@ export function ConfigPage() {
           scenarios={scenarios}
           selectedScenarioId={testConfig.scenario}
           useIndexes={testConfig.useIndexes}
+          selectedProfileName={selectedProfileDetail?.name || null}
+          selectedBundleName={selectedBundle?.name || null}
+          indexesCount={selectedBundle?.indexes?.length ?? 0}
           onScenarioChange={(id) => {
-            const nextScenario = scenarios.find((scenario) => scenario.id === id)
             setTestConfig({
               scenario: id,
-              useIndexes: (nextScenario?.indexes?.length ?? 0) > 0 ? testConfig.useIndexes : false,
+              useIndexes: (
+                selectedProfileDetail?.bundles.find((bundle) => bundle.scenario_template_id === id)?.indexes?.length ?? 0
+              ) > 0 ? testConfig.useIndexes : false,
             })
           }}
           onUseIndexesChange={(value) => setTestConfig({ useIndexes: value })}
@@ -291,6 +365,9 @@ export function ConfigPage() {
         virtualUsers={testConfig.virtualUsers}
         iterations={testConfig.iterations}
         warmupTime={testConfig.warmupTime}
+        connections={connections}
+        selectedProfileName={hasMixedProfiles ? null : (selectedProfileDetail?.name || selectedConnections[0]?.schema_profile_name || null)}
+        selectedBundleName={selectedBundle?.name || null}
       />
 
       <Button

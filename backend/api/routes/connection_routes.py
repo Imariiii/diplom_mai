@@ -17,7 +17,10 @@ from backend.api.schemas.connection_schemas import (
     ConnectionTestResponse,
     ConnectionListResponse,
     ConnectionGroupsResponse,
+    ConnectionSchemaResponse,
+    SchemaProfileSummaryResponse,
 )
+from backend.api.schemas.profile_schemas import ConnectionProfileAssignRequest
 from backend.core.docker import resolve_host
 from backend import initialize
 
@@ -29,6 +32,13 @@ def get_connection_repo() -> ConnectionRepository:
     if not hasattr(initialize, 'connection_repository') or initialize.connection_repository is None:
         raise HTTPException(status_code=500, detail="ConnectionRepository не инициализирован")
     return initialize.connection_repository
+
+
+def get_profile_repo():
+    """Получить репозиторий профилей схемы."""
+    if not hasattr(initialize, 'profile_repository') or initialize.profile_repository is None:
+        raise HTTPException(status_code=500, detail="ProfileRepository не инициализирован")
+    return initialize.profile_repository
 
 
 def _connection_to_response(config) -> ConnectionResponse:
@@ -90,6 +100,46 @@ async def list_groups(
     except Exception as e:
         print(f"[CONNECTIONS] Ошибка получения групп: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка получения групп: {e}")
+
+
+@router.get("/{connection_id}/schema", response_model=ConnectionSchemaResponse)
+async def get_connection_schema(
+    connection_id: str,
+    repo: ConnectionRepository = Depends(get_connection_repo),
+):
+    """Получить preview схемы и предложенный профиль подключённой БД."""
+    try:
+        config = await repo.get_connection_by_id(connection_id)
+        if not config:
+            raise HTTPException(status_code=404, detail="Подключение не найдено")
+
+        from backend.database.scenario_generator import ScenarioGenerator
+        from backend.database.schema_profile_resolver import SchemaProfileResolver
+
+        generator = ScenarioGenerator(
+            scenario_repository=None,
+            connection_repo=repo,
+        )
+        resolver = SchemaProfileResolver(
+            connection_repo=repo,
+            profile_repository=get_profile_repo(),
+        )
+        preview = await generator.build_generation_preview(connection_id)
+        suggestion = await resolver.suggest_profile(
+            await resolver.schema_analyzer.analyze_connection(connection_id)
+        )
+        current_profile = (
+            SchemaProfileSummaryResponse(**config.schema_profile.to_dict())
+            if getattr(config, "schema_profile", None) else None
+        )
+        preview["current_profile"] = current_profile.model_dump() if current_profile else None
+        preview["suggested_profile"] = suggestion
+        return ConnectionSchemaResponse(**preview)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[CONNECTIONS] Ошибка чтения схемы подключения: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка чтения схемы подключения: {e}")
 
 
 @router.get("/{connection_id}", response_model=ConnectionResponse)
@@ -171,6 +221,64 @@ async def update_connection(
     except Exception as e:
         print(f"[CONNECTIONS] Ошибка обновления подключения: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка обновления подключения: {e}")
+
+
+@router.put("/{connection_id}/profile", response_model=ConnectionResponse)
+async def assign_connection_profile(
+    connection_id: str,
+    data: ConnectionProfileAssignRequest,
+    repo: ConnectionRepository = Depends(get_connection_repo),
+):
+    """Подтвердить или переопределить профиль схемы для подключения."""
+    try:
+        config = await repo.get_connection_by_id(connection_id)
+        if not config:
+            raise HTTPException(status_code=404, detail="Подключение не найдено")
+
+        profile_repo = get_profile_repo()
+        profile = None
+
+        if data.schema_profile_id:
+            profile = await profile_repo.get_profile_by_id(data.schema_profile_id)
+            if not profile:
+                raise HTTPException(status_code=404, detail="Профиль схемы не найден")
+        elif data.profile_name:
+            profile = await profile_repo.get_profile_by_name(data.profile_name)
+            if not profile:
+                profile = await profile_repo.create_profile(
+                    name=data.profile_name,
+                    description=data.description,
+                    reference_connection_id=data.reference_connection_id,
+                    is_builtin=False,
+                )
+        else:
+            raise HTTPException(status_code=400, detail="Нужно указать schema_profile_id или profile_name")
+
+        reference_connection_id = data.reference_connection_id or (
+            str(profile.reference_connection_id) if profile.reference_connection_id else None
+        )
+        if reference_connection_id != (str(profile.reference_connection_id) if profile.reference_connection_id else None):
+            await profile_repo.update_profile(
+                profile_id=str(profile.id),
+                description=data.description if data.description is not None else profile.description,
+                reference_connection_id=reference_connection_id,
+            )
+
+        updated = await repo.assign_profile(
+            connection_id=connection_id,
+            schema_profile_id=str(profile.id),
+            detected_profile_name=profile.name,
+            profile_source=data.profile_source,
+        )
+        if not updated:
+            raise HTTPException(status_code=404, detail="Подключение не найдено")
+        refreshed = await repo.get_connection_by_id(connection_id)
+        return _connection_to_response(refreshed)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[CONNECTIONS] Ошибка назначения профиля: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка назначения профиля: {e}")
 
 
 @router.delete("/{connection_id}")

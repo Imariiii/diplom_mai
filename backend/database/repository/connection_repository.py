@@ -78,9 +78,9 @@ class ConnectionRepository(BaseRepository):
 
         async with self.SessionLocal() as session:
             result = await session.execute(
-                select(DatabaseConnectionConfig).where(
-                    DatabaseConnectionConfig.id == connection_uuid
-                )
+                select(DatabaseConnectionConfig)
+                .options(joinedload(DatabaseConnectionConfig.schema_profile))
+                .where(DatabaseConnectionConfig.id == connection_uuid)
             )
             return result.scalar_one_or_none()
 
@@ -88,9 +88,9 @@ class ConnectionRepository(BaseRepository):
         """Получить подключение по имени"""
         async with self.SessionLocal() as session:
             result = await session.execute(
-                select(DatabaseConnectionConfig).where(
-                    DatabaseConnectionConfig.name == name
-                )
+                select(DatabaseConnectionConfig)
+                .options(joinedload(DatabaseConnectionConfig.schema_profile))
+                .where(DatabaseConnectionConfig.name == name)
             )
             return result.scalar_one_or_none()
 
@@ -105,7 +105,11 @@ class ConnectionRepository(BaseRepository):
             Список подключений
         """
         async with self.SessionLocal() as session:
-            query = select(DatabaseConnectionConfig).order_by(DatabaseConnectionConfig.name)
+            query = (
+                select(DatabaseConnectionConfig)
+                .options(joinedload(DatabaseConnectionConfig.schema_profile))
+                .order_by(DatabaseConnectionConfig.name)
+            )
             if group:
                 query = query.where(DatabaseConnectionConfig.group == group)
             result = await session.execute(query)
@@ -122,9 +126,12 @@ class ConnectionRepository(BaseRepository):
             Список активных подключений
         """
         async with self.SessionLocal() as session:
-            query = select(DatabaseConnectionConfig).where(
-                DatabaseConnectionConfig.is_active == 't'
-            ).order_by(DatabaseConnectionConfig.name)
+            query = (
+                select(DatabaseConnectionConfig)
+                .options(joinedload(DatabaseConnectionConfig.schema_profile))
+                .where(DatabaseConnectionConfig.is_active == 't')
+                .order_by(DatabaseConnectionConfig.name)
+            )
             if group:
                 query = query.where(DatabaseConnectionConfig.group == group)
             result = await session.execute(query)
@@ -143,6 +150,10 @@ class ConnectionRepository(BaseRepository):
         group: Optional[str] = None,
         is_active: Optional[bool] = None,
         extra_params: Optional[Dict[str, Any]] = None,
+        schema_profile_id: Optional[str] = None,
+        detected_profile_name: Optional[str] = None,
+        profile_confidence: Optional[float] = None,
+        profile_source: Optional[str] = None,
     ) -> Optional[DatabaseConnectionConfig]:
         """
         Обновить подключение
@@ -184,12 +195,58 @@ class ConnectionRepository(BaseRepository):
                 config.is_active = 't' if is_active else 'f'
             if extra_params is not None:
                 config.extra_params = extra_params
+            if schema_profile_id is not None:
+                config.schema_profile_id = uuid.UUID(schema_profile_id) if schema_profile_id else None
+            if detected_profile_name is not None:
+                config.detected_profile_name = detected_profile_name
+            if profile_confidence is not None:
+                config.profile_confidence = profile_confidence
+            if profile_source is not None:
+                config.profile_source = profile_source
 
             config.updated_at = get_local_now()
 
             await session.commit()
             await session.refresh(config)
             return config
+
+    async def bulk_get_connections(self, connection_ids: List[str]) -> List[DatabaseConnectionConfig]:
+        """Получить набор подключений по списку id."""
+        normalized_ids = []
+        for connection_id in connection_ids:
+            try:
+                normalized_ids.append(uuid.UUID(connection_id))
+            except (ValueError, TypeError, AttributeError):
+                continue
+
+        if not normalized_ids:
+            return []
+
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(DatabaseConnectionConfig)
+                .options(joinedload(DatabaseConnectionConfig.schema_profile))
+                .where(DatabaseConnectionConfig.id.in_(normalized_ids))
+                .order_by(DatabaseConnectionConfig.name)
+            )
+            return list(result.scalars().all())
+
+    async def assign_profile(
+        self,
+        connection_id: str,
+        schema_profile_id: Optional[str],
+        detected_profile_name: Optional[str] = None,
+        profile_confidence: Optional[float] = None,
+        profile_source: str = 'manual',
+    ) -> Optional[DatabaseConnectionConfig]:
+        """Назначить профилю подключения и зафиксировать источник назначения."""
+        return await self.update_connection(
+            connection_id=connection_id,
+            schema_profile_id=schema_profile_id,
+            detected_profile_name=detected_profile_name,
+            profile_confidence=profile_confidence,
+            profile_source=profile_source,
+        )
 
     async def delete_connection(self, connection_id: str) -> bool:
         """

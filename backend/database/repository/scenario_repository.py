@@ -26,7 +26,8 @@ class ScenarioRepository(BaseRepository):
         name: str,
         description: Optional[str],
         scenario_type: str,
-        is_builtin: bool = False
+        is_builtin: bool = False,
+        target_connection_id: Optional[str] = None,
     ) -> TestScenario:
         """Создать новый сценарий"""
         async with self.SessionLocal() as session:
@@ -35,6 +36,7 @@ class ScenarioRepository(BaseRepository):
                 name=name,
                 description=description,
                 scenario_type=scenario_type,
+                target_connection_id=uuid.UUID(target_connection_id) if target_connection_id else None,
                 is_builtin='t' if is_builtin else 'f',
                 is_active='t'
             )
@@ -70,7 +72,9 @@ class ScenarioRepository(BaseRepository):
         limit: int = 100,
         offset: int = 0,
         scenario_type: Optional[str] = None,
-        include_builtin: bool = True
+        include_builtin: bool = True,
+        target_connection_id: Optional[str] = None,
+        include_global: bool = True,
     ) -> List[Dict[str, Any]]:
         """Получить список всех сценариев"""
         async with self.SessionLocal() as session:
@@ -85,6 +89,16 @@ class ScenarioRepository(BaseRepository):
             if not include_builtin:
                 query = query.where(TestScenario.is_builtin == 'f')
 
+            if target_connection_id:
+                target_uuid = uuid.UUID(target_connection_id)
+                if include_global:
+                    query = query.where(
+                        (TestScenario.target_connection_id == target_uuid) |
+                        (TestScenario.target_connection_id.is_(None))
+                    )
+                else:
+                    query = query.where(TestScenario.target_connection_id == target_uuid)
+
             query = query.order_by(desc(TestScenario.created_at)).offset(offset).limit(limit)
             result = await session.execute(query)
             scenarios = result.unique().scalars().all()
@@ -96,7 +110,8 @@ class ScenarioRepository(BaseRepository):
         name: Optional[str] = None,
         description: Optional[str] = None,
         scenario_type: Optional[str] = None,
-        is_active: Optional[bool] = None
+        is_active: Optional[bool] = None,
+        target_connection_id: Optional[str] = None,
     ) -> Optional[TestScenario]:
         """Обновить сценарий"""
         async with self.SessionLocal() as session:
@@ -114,6 +129,10 @@ class ScenarioRepository(BaseRepository):
                     scenario.scenario_type = scenario_type
                 if is_active is not None:
                     scenario.is_active = 't' if is_active else 'f'
+                if target_connection_id is not None:
+                    scenario.target_connection_id = (
+                        uuid.UUID(target_connection_id) if target_connection_id else None
+                    )
 
                 await session.commit()
                 await session.refresh(scenario)
@@ -155,6 +174,7 @@ class ScenarioRepository(BaseRepository):
                 name=new_name,
                 description=f"Копия: {original.description}" if original.description else None,
                 scenario_type=original.scenario_type,
+                target_connection_id=original.target_connection_id,
                 is_builtin='f',
                 is_active='t'
             )
@@ -208,6 +228,29 @@ class ScenarioRepository(BaseRepository):
             await session.commit()
             await session.refresh(cloned)
             return cloned
+
+    async def delete_generated_scenarios_for_connection(
+        self,
+        connection_id: str,
+        scenario_types: Optional[List[str]] = None,
+    ) -> int:
+        """Удалить ранее сгенерированные сценарии для подключения."""
+        deleted = 0
+        async with self.SessionLocal() as session:
+            query = select(TestScenario).where(
+                TestScenario.target_connection_id == uuid.UUID(connection_id),
+                TestScenario.name.startswith("auto::"),
+            )
+            if scenario_types:
+                query = query.where(TestScenario.scenario_type.in_(scenario_types))
+            result = await session.execute(query)
+            scenarios = result.scalars().all()
+            for scenario in scenarios:
+                await session.delete(scenario)
+                deleted += 1
+            if deleted:
+                await session.commit()
+        return deleted
 
     # ==================== ScenarioQuery CRUD ====================
 
@@ -565,8 +608,12 @@ class ScenarioRepository(BaseRepository):
                                 'param_type': p.param_type,
                                 'min_value': p.min_value,
                                 'max_value': p.max_value,
+                                'string_pattern': p.string_pattern,
+                                'string_length': p.string_length,
                                 'table_ref': p.table_ref,
                                 'column_ref': p.column_ref,
+                                'current_value': p.current_value,
+                                'step': p.step,
                             }
                             for p in q.params
                         ]

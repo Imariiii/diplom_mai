@@ -15,6 +15,7 @@ import { ScenarioFormDialog } from "./scenarios/scenario-form-dialog"
 import { AddQueryDialog } from "./scenarios/add-query-dialog"
 import { AddParamDialog } from "./scenarios/add-param-dialog"
 import { AddIndexDialog } from "./scenarios/add-index-dialog"
+import { LogicalScenariosBrowser } from "./scenarios/logical-scenarios-browser"
 
 const SCENARIO_TYPES = [
   { value: "read_only", label: "Только чтение (100% SELECT)" },
@@ -37,6 +38,10 @@ const PARAM_TYPES = [
 ]
 
 export function ScenariosPage() {
+  return <LogicalScenariosBrowser />
+}
+
+function LegacyScenariosPage() {
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedScenario, setSelectedScenario] = useState<Scenario | null>(null)

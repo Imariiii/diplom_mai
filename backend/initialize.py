@@ -14,6 +14,8 @@ backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 test_repository = None
 scenario_repository = None
 connection_repository = None
+profile_repository = None
+scenario_bundle_repository = None
 HISTORY_ENABLED = False
 SCENARIOS_ENABLED = False
 
@@ -30,7 +32,13 @@ def get_history_db_url():
 
 def initialize_repositories():
     """Инициализировать репозитории"""
-    global test_repository, scenario_repository, connection_repository, HISTORY_ENABLED, SCENARIOS_ENABLED
+    global test_repository
+    global scenario_repository
+    global connection_repository
+    global profile_repository
+    global scenario_bundle_repository
+    global HISTORY_ENABLED
+    global SCENARIOS_ENABLED
 
     print("[HISTORY_DB] === ИНИЦИАЛИЗАЦИЯ БД ИСТОРИИ ===")
     try:
@@ -81,6 +89,34 @@ def initialize_repositories():
     except Exception as e:
         print(f"[CONNECTION_REPO] ❌ Ошибка инициализации: {e}")
         connection_repository = None
+
+    print("[PROFILE_REPO] Инициализация ProfileRepository...")
+    try:
+        from backend.database.repository import ProfileRepository
+        history_db_url = get_history_db_url()
+        if history_db_url:
+            profile_repository = ProfileRepository(history_db_url)
+            print("[PROFILE_REPO] ✅ ProfileRepository инициализирован")
+        else:
+            profile_repository = None
+            print("[PROFILE_REPO] ⚠️ ProfileRepository не инициализирован (нет URL)")
+    except Exception as e:
+        print(f"[PROFILE_REPO] ❌ Ошибка инициализации: {e}")
+        profile_repository = None
+
+    print("[BUNDLE_REPO] Инициализация ScenarioBundleRepository...")
+    try:
+        from backend.database.repository import ScenarioBundleRepository
+        history_db_url = get_history_db_url()
+        if history_db_url:
+            scenario_bundle_repository = ScenarioBundleRepository(history_db_url)
+            print("[BUNDLE_REPO] ✅ ScenarioBundleRepository инициализирован")
+        else:
+            scenario_bundle_repository = None
+            print("[BUNDLE_REPO] ⚠️ ScenarioBundleRepository не инициализирован (нет URL)")
+    except Exception as e:
+        print(f"[BUNDLE_REPO] ❌ Ошибка инициализации: {e}")
+        scenario_bundle_repository = None
 
 
 # Инициализация при импорте модуля (вызывается явно из main.py)

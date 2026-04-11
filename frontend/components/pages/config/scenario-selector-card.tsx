@@ -5,12 +5,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Layers } from "lucide-react"
-import type { Scenario } from "@/lib/types"
+import type { ScenarioTemplate } from "@/lib/types"
 
 interface ScenarioSelectorCardProps {
-  scenarios: Scenario[]
+  scenarios: ScenarioTemplate[]
   selectedScenarioId: string | undefined
   useIndexes: boolean
+  selectedProfileName: string | null
+  selectedBundleName: string | null
+  indexesCount: number
   onScenarioChange: (id: string) => void
   onUseIndexesChange: (value: boolean) => void
 }
@@ -19,11 +22,13 @@ export function ScenarioSelectorCard({
   scenarios,
   selectedScenarioId,
   useIndexes,
+  selectedProfileName,
+  selectedBundleName,
+  indexesCount,
   onScenarioChange,
   onUseIndexesChange,
 }: ScenarioSelectorCardProps) {
   const selectedScenario = scenarios?.find(s => s.id === selectedScenarioId)
-  const indexesCount = selectedScenario?.indexes?.length ?? 0
 
   return (
     <Card className="bg-card border-border">
@@ -68,20 +73,20 @@ export function ScenarioSelectorCard({
             <div className="flex gap-4 text-sm flex-wrap">
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-                <span>Запросов: {selectedScenario.queries_count ?? selectedScenario.queries?.length ?? 0}</span>
+                <span>Шаблон: {selectedScenario.id}</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-purple-500 rounded-full"></div>
-                <span>Тип: {selectedScenario.scenario_type || 'custom'}</span>
+                <span>Профиль: {selectedProfileName || "не выбран"}</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-amber-500 rounded-full"></div>
                 <span>Индексов: {indexesCount}</span>
               </div>
-              {selectedScenario.is_builtin && (
+              {selectedBundleName && (
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                  <span>Системный</span>
+                  <span>Bundle: {selectedBundleName}</span>
                 </div>
               )}
             </div>

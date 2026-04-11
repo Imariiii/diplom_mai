@@ -2,25 +2,22 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import type { Query } from "@/lib/api"
-import type { Scenario } from "@/lib/types"
+import type { DatabaseConnection, ScenarioTemplate } from "@/lib/types"
 
 interface ConfigSummaryCardProps {
   selectedDatabases: string[]
   testMode: string
-  selectedScenario?: Scenario
+  selectedScenario?: ScenarioTemplate
   selectedQuery?: Query
   useCustomSql: boolean
   useIndexes: boolean
   virtualUsers: number
   iterations: number
   warmupTime: number
+  connections: DatabaseConnection[]
+  selectedProfileName: string | null
+  selectedBundleName: string | null
 }
-
-const databases = [
-  { id: "mysql", name: "MySQL (Sakila)" },
-  { id: "mariadb", name: "MariaDB (Sakila)" },
-  { id: "postgresql", name: "PostgreSQL (Pagila)" },
-]
 
 export function ConfigSummaryCard({
   selectedDatabases,
@@ -32,6 +29,9 @@ export function ConfigSummaryCard({
   virtualUsers,
   iterations,
   warmupTime,
+  connections,
+  selectedProfileName,
+  selectedBundleName,
 }: ConfigSummaryCardProps) {
   return (
     <Card className="bg-card border-border">
@@ -44,7 +44,7 @@ export function ConfigSummaryCard({
             <span className="text-muted-foreground">СУБД:</span>
             <span className="ml-2 font-medium">
               {selectedDatabases.length > 0
-                ? selectedDatabases.map(d => databases.find(db => db.id === d)?.name || d).join(", ")
+                ? selectedDatabases.map((id) => connections.find((connection) => connection.id === id)?.name || id).join(", ")
                 : "Не выбрано"}
             </span>
           </div>
@@ -63,6 +63,14 @@ export function ConfigSummaryCard({
               <div>
                 <span className="text-muted-foreground">Индексы:</span>
                 <span className="ml-2 font-medium">{useIndexes ? "Включены" : "Выключены"}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Профиль:</span>
+                <span className="ml-2 font-medium">{selectedProfileName || "Не определён"}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Bundle:</span>
+                <span className="ml-2 font-medium">{selectedBundleName || "Не разрешён"}</span>
               </div>
             </>
           ) : (

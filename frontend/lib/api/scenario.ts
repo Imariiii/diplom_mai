@@ -9,14 +9,20 @@ import type {
   CreateScenarioRequest,
   CreateScenarioQueryRequest,
   CreateScenarioParamRequest,
+  GenerateScenariosRequest,
+  GenerateScenariosResponse,
 } from "../types"
 
 import { apiClient } from "./client"
 
 // ==================== Сценарии тестирования ====================
 
-export async function getScenarios(): Promise<{ scenarios: Scenario[] }> {
-  return apiClient.getScenarios()
+export async function getScenarios(params?: {
+  targetConnectionId?: string
+  includeGlobal?: boolean
+  includeBuiltin?: boolean
+}): Promise<{ scenarios: Scenario[] }> {
+  return apiClient.getScenarios(params)
 }
 
 export async function getScenario(id: string): Promise<Scenario> {
@@ -41,6 +47,10 @@ export async function deleteScenario(id: string): Promise<{ deleted: boolean; sc
 
 export async function cloneScenario(id: string, newName?: string): Promise<Scenario> {
   return apiClient.cloneScenario(id, newName)
+}
+
+export async function generateScenarios(request: GenerateScenariosRequest): Promise<GenerateScenariosResponse> {
+  return apiClient.generateScenarios(request)
 }
 
 // Запросы сценария

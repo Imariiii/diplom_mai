@@ -35,6 +35,66 @@ class MySQLDialect(DbmsDialect):
               AND table_type = 'BASE TABLE'
         """
 
+    def get_columns_sql(self) -> str:
+        return """
+            SELECT
+                table_name,
+                column_name,
+                data_type,
+                is_nullable,
+                column_default,
+                ordinal_position
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+            ORDER BY table_name, ordinal_position
+        """
+
+    def get_primary_keys_sql(self) -> str:
+        return """
+            SELECT
+                tc.table_name,
+                kcu.column_name,
+                kcu.ordinal_position
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+                ON tc.constraint_name = kcu.constraint_name
+               AND tc.table_schema = kcu.table_schema
+               AND tc.table_name = kcu.table_name
+            WHERE tc.constraint_type = 'PRIMARY KEY'
+              AND tc.table_schema = DATABASE()
+            ORDER BY tc.table_name, kcu.ordinal_position
+        """
+
+    def get_foreign_keys_detailed_sql(self) -> str:
+        return """
+            SELECT
+                constraint_name,
+                table_name,
+                column_name,
+                referenced_table_name,
+                referenced_column_name
+            FROM information_schema.key_column_usage
+            WHERE referenced_table_name IS NOT NULL
+              AND table_schema = DATABASE()
+            ORDER BY table_name, constraint_name, ordinal_position
+        """
+
+    def get_unique_constraints_sql(self) -> str:
+        return """
+            SELECT
+                tc.table_name,
+                kcu.column_name,
+                tc.constraint_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+                ON tc.constraint_name = kcu.constraint_name
+               AND tc.table_schema = kcu.table_schema
+               AND tc.table_name = kcu.table_name
+            WHERE tc.constraint_type = 'UNIQUE'
+              AND tc.table_schema = DATABASE()
+            ORDER BY tc.table_name, tc.constraint_name, kcu.ordinal_position
+        """
+
     def get_table_size_sql(self, table: str) -> str:
         return f"""
             SELECT DATA_LENGTH + INDEX_LENGTH

@@ -45,6 +45,9 @@ export function ScenarioListPanel({ scenarios, selectedScenario, onSelect }: Sce
                   {scenario.is_builtin === 't' && (
                     <Badge variant="secondary" className="text-xs">built-in</Badge>
                   )}
+                  {scenario.target_connection_id && (
+                    <Badge variant="outline" className="text-xs">auto</Badge>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
                   {getScenarioTypeLabel(scenario.scenario_type)}

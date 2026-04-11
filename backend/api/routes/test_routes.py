@@ -7,6 +7,8 @@ import uuid
 import asyncio
 
 from backend.api.schemas import AsyncTestRequest
+from backend.database.logical_scenarios import LOGICAL_SCENARIO_TEMPLATE_IDS
+from backend.database.scenario_bundle_resolver import ScenarioBundleResolver
 from backend.load_tester.tester import LoadTester
 from backend.websocket_manager import manager, TestStreamingCallback
 
@@ -87,6 +89,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         test_repository, 
         scenario_repository,
         connection_repository,
+        scenario_bundle_repository,
     )
     
     active_tests = get_active_tests()
@@ -179,6 +182,28 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                 warmup_time=request.warmup_time,
                 use_indexes=request.use_indexes,
                 scenario_repository=scenario_repository
+            )
+        elif scenario in LOGICAL_SCENARIO_TEMPLATE_IDS:
+            if not connection_ids or not connection_repository or not scenario_bundle_repository:
+                raise ValueError("Logical scenario требует connection_ids и доступного bundle repository")
+
+            bundle_resolver = ScenarioBundleResolver(
+                connection_repository=connection_repository,
+                bundle_repository=scenario_bundle_repository,
+            )
+            resolved = await bundle_resolver.resolve_for_connections(
+                connection_ids=connection_ids,
+                scenario_template_id=scenario,
+            )
+            active_tests[test_id]["resolved_profile"] = resolved["schema_profile_name"]
+            active_tests[test_id]["resolved_bundle_id"] = resolved["bundle"]["id"]
+            results = await test_tester.run_resolved_scenario_test_suite(
+                scenario=resolved["bundle"],
+                db_types=db_keys,
+                iterations=request.iterations,
+                virtual_users=request.virtual_users,
+                warmup_time=request.warmup_time,
+                use_indexes=request.use_indexes,
             )
         else:
             results = await test_tester.run_full_test_suite(

@@ -153,6 +153,7 @@ export interface Scenario {
   name: string
   description: string | null
   scenario_type: string
+  target_connection_id?: string | null
   is_builtin: boolean | 't' | 'f'
   is_active?: boolean
   created_at: string
@@ -227,6 +228,7 @@ export interface CreateScenarioRequest {
   name: string
   description?: string
   scenario_type: string
+  target_connection_id?: string
 }
 
 export interface CreateScenarioQueryRequest {
@@ -297,6 +299,11 @@ export interface DatabaseConnection {
   user: string
   database: string
   group: string | null
+  schema_profile_id?: string | null
+  schema_profile_name?: string | null
+  detected_profile_name?: string | null
+  profile_confidence?: number | null
+  profile_source?: string | null
   is_active: boolean
   extra_params: Record<string, unknown> | null
   created_at: string | null
@@ -351,4 +358,131 @@ export interface ConnectionListResponse {
 
 export interface ConnectionGroupsResponse {
   groups: string[]
+}
+
+export interface SchemaColumn {
+  name: string
+  data_type: string
+  is_nullable: boolean
+  is_primary_key: boolean
+  is_unique: boolean
+  column_default: string | null
+  category: string
+}
+
+export interface SchemaForeignKey {
+  constraint_name: string
+  from_table: string
+  from_column: string
+  to_table: string
+  to_column: string
+}
+
+export interface SchemaTable {
+  name: string
+  columns: SchemaColumn[]
+  primary_key: string[]
+  row_count: number
+  foreign_keys_out: SchemaForeignKey[]
+  foreign_keys_in: SchemaForeignKey[]
+  unique_columns: string[]
+  capabilities: string[]
+}
+
+export interface ConnectionSchemaPreview {
+  connection_id: string
+  connection_name: string
+  dbms_type: SupportedDbmsType
+  total_tables: number
+  tables: SchemaTable[]
+  current_profile?: SchemaProfileSummary | null
+  suggested_profile?: SchemaProfileSuggestion | null
+  available_scenario_types: string[]
+  matching_templates: Record<string, string[]>
+}
+
+export interface GenerateScenariosRequest {
+  connection_id: string
+  scenario_types?: string[]
+  replace_existing?: boolean
+}
+
+export interface GenerateScenariosResponse {
+  scenarios: Scenario[]
+  generated_count: number
+}
+
+export interface ScenarioTemplate {
+  id: TestScenario
+  name: string
+  description: string | null
+  is_builtin: boolean
+  created_at?: string | null
+}
+
+export interface ScenarioTemplateListResponse {
+  templates: ScenarioTemplate[]
+}
+
+export interface SchemaProfileSummary {
+  id: string
+  name: string
+  description: string | null
+  detection_mode?: string | null
+  reference_connection_id?: string | null
+  is_builtin: boolean
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface SchemaProfileSuggestion {
+  name: string
+  description: string
+  confidence: number
+  reason: string
+  existing_profile_id?: string | null
+  is_existing: boolean
+}
+
+export interface ConnectionProfileAssignRequest {
+  schema_profile_id?: string
+  profile_name?: string
+  description?: string
+  reference_connection_id?: string
+  profile_source?: string
+}
+
+export interface SchemaProfileListResponse {
+  profiles: SchemaProfileSummary[]
+}
+
+export interface ScenarioBundleSummary {
+  id: string
+  schema_profile_id: string
+  schema_profile_name?: string | null
+  scenario_template_id: string
+  scenario_template_name?: string | null
+  name: string
+  generation_source: string
+  is_active: boolean
+  generated_from_connection_id?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  queries: ScenarioQuery[]
+  indexes: ScenarioIndex[]
+}
+
+export interface SchemaProfileDetail extends SchemaProfileSummary {
+  bundles: ScenarioBundleSummary[]
+}
+
+export interface ProfileBundleGenerateRequest {
+  reference_connection_id?: string
+  scenario_template_ids?: string[]
+}
+
+export interface ProfileBundleGenerateResponse {
+  profile: SchemaProfileSummary
+  bundles: ScenarioBundleSummary[]
+  generated_count: number
 }
