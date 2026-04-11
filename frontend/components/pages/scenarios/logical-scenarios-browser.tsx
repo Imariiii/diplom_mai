@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import {
   Check,
+  ChevronDown,
   Copy,
   Database,
   FileCode2,
@@ -13,6 +14,7 @@ import {
   Save,
   Trash2,
   WandSparkles,
+  AlertCircle,
 } from "lucide-react"
 
 import { apiClient } from "@/lib/api"
@@ -27,15 +29,18 @@ import type {
   SchemaProfileDetail,
   SchemaProfileSummary,
 } from "@/lib/types"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+
+// ==================== Helpers ====================
 
 function cloneParams(params: ScenarioParam[] = []): ScenarioParam[] {
   return params.map((param) => ({
@@ -88,6 +93,8 @@ function bundleToDraft(bundle: ScenarioBundleSummary): ScenarioBundleSaveRequest
   }
 }
 
+// ==================== Component ====================
+
 export function LogicalScenariosBrowser() {
   const [templates, setTemplates] = useState<ScenarioTemplate[]>([])
   const [profiles, setProfiles] = useState<SchemaProfileSummary[]>([])
@@ -101,32 +108,28 @@ export function LogicalScenariosBrowser() {
   const [loading, setLoading] = useState(true)
   const [loadingProfile, setLoadingProfile] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [expandedQueries, setExpandedQueries] = useState<Set<number>>(new Set())
 
   const selectedTemplate = useMemo(
-    () => templates.find((template) => template.id === selectedTemplateId) || null,
+    () => templates.find((t) => t.id === selectedTemplateId) || null,
     [templates, selectedTemplateId]
   )
 
   const selectedLogicalDatabase = useMemo(
-    () => logicalDatabases.find((database) => database.id === selectedLogicalDbId) || null,
+    () => logicalDatabases.find((db) => db.id === selectedLogicalDbId) || null,
     [logicalDatabases, selectedLogicalDbId]
   )
 
   const variants = useMemo(() => {
     if (!selectedProfileDetail || !selectedTemplateId) return []
-    return selectedProfileDetail.bundles.filter(
-      (bundle) => bundle.scenario_template_id === selectedTemplateId
-    )
+    return selectedProfileDetail.bundles.filter((b) => b.scenario_template_id === selectedTemplateId)
   }, [selectedProfileDetail, selectedTemplateId])
 
-  const activeVariant = useMemo(
-    () => variants.find((bundle) => bundle.is_active) || null,
-    [variants]
-  )
+  const activeVariant = useMemo(() => variants.find((b) => b.is_active) || null, [variants])
 
   const selectedBundle: ScenarioBundleSummary | null = useMemo(() => {
     if (!variants.length || selectedBundleId === "new") return null
-    return variants.find((bundle) => bundle.id === selectedBundleId) || null
+    return variants.find((b) => b.id === selectedBundleId) || null
   }, [variants, selectedBundleId])
 
   const buildEmptyDraft = (
@@ -137,13 +140,16 @@ export function LogicalScenariosBrowser() {
     scenario_template_id: templateId,
     name: sourceBundle
       ? `${sourceBundle.name} (копия)`
-      : `${templates.find((template) => template.id === templateId)?.name || templateId} variant`,
+      : `${templates.find((t) => t.id === templateId)?.name || templateId} variant`,
     description: sourceBundle?.description ?? "",
     generation_source: "manual_variant",
-    generated_from_connection_id: sourceBundle?.generated_from_connection_id ?? profileDetail?.reference_connection_id ?? undefined,
+    generated_from_connection_id:
+      sourceBundle?.generated_from_connection_id ??
+      profileDetail?.reference_connection_id ??
+      undefined,
     is_active: !(
       profileDetail?.bundles.some(
-        (bundle) => bundle.scenario_template_id === templateId && bundle.is_active
+        (b) => b.scenario_template_id === templateId && b.is_active
       ) ?? false
     ),
     queries: cloneQueries(sourceBundle?.queries || []),
@@ -160,21 +166,18 @@ export function LogicalScenariosBrowser() {
       setDraftBundle(null)
       return
     }
-
     const templateVariants = profileDetail.bundles.filter(
-      (bundle) => bundle.scenario_template_id === templateId
+      (b) => b.scenario_template_id === templateId
     )
     if (templateVariants.length === 0) {
       setSelectedBundleId("new")
       setDraftBundle(buildEmptyDraft(templateId, profileDetail))
       return
     }
-
     const nextBundle =
-      templateVariants.find((bundle) => bundle.id === preferredBundleId) ||
-      templateVariants.find((bundle) => bundle.is_active) ||
+      templateVariants.find((b) => b.id === preferredBundleId) ||
+      templateVariants.find((b) => b.is_active) ||
       templateVariants[0]
-
     setSelectedBundleId(nextBundle.id)
     setDraftBundle(bundleToDraft(nextBundle))
   }
@@ -189,8 +192,7 @@ export function LogicalScenariosBrowser() {
       const profile = await apiClient.getSchemaProfile(profileId)
       setSelectedProfileDetail(profile)
       syncEditorState(profile, templateId, preferredBundleId)
-    } catch (error) {
-      console.error("Ошибка загрузки profile bundles:", error)
+    } catch {
       toast.error("Не удалось загрузить bundle'ы выбранного профиля")
       setSelectedProfileDetail(null)
       setDraftBundle(null)
@@ -207,24 +209,22 @@ export function LogicalScenariosBrowser() {
   ) => {
     setLoading(true)
     try {
-      const [templatesResponse, profilesResponse, logicalDatabasesResponse] = await Promise.all([
+      const [templatesResp, profilesResp, logicalDbResp] = await Promise.all([
         apiClient.getScenarioTemplates(),
         apiClient.getSchemaProfiles(),
         apiClient.getLogicalDatabases(),
       ])
-      const nextTemplates = templatesResponse.templates
-      const nextProfiles = profilesResponse.profiles
-      const nextLogicalDatabases = logicalDatabasesResponse.databases
+      const nextTemplates = templatesResp.templates
+      const nextProfiles = profilesResp.profiles
+      const nextLogicalDbs = logicalDbResp.databases
       setTemplates(nextTemplates)
       setProfiles(nextProfiles)
-      setLogicalDatabases(nextLogicalDatabases)
+      setLogicalDatabases(nextLogicalDbs)
 
       const nextTemplateId = preferredTemplateId || nextTemplates[0]?.id || ""
       const nextLogicalDbId = preferredLogicalDbId ?? selectedLogicalDbId
-      const logicalDatabaseProfileId = nextLogicalDatabases.find(
-        (database) => database.id === nextLogicalDbId
-      )?.schema_profile_id
-      const nextProfileId = logicalDatabaseProfileId || preferredProfileId || nextProfiles[0]?.id || ""
+      const logicalDbProfileId = nextLogicalDbs.find((db) => db.id === nextLogicalDbId)?.schema_profile_id
+      const nextProfileId = logicalDbProfileId || preferredProfileId || nextProfiles[0]?.id || ""
       setSelectedTemplateId(nextTemplateId)
       setSelectedLogicalDbId(nextLogicalDbId)
       setSelectedProfileId(nextProfileId)
@@ -234,8 +234,7 @@ export function LogicalScenariosBrowser() {
         setSelectedProfileDetail(null)
         setDraftBundle(null)
       }
-    } catch (error) {
-      console.error("Ошибка загрузки logical templates:", error)
+    } catch {
       toast.error("Не удалось загрузить шаблоны сценариев и профили данных")
     } finally {
       setLoading(false)
@@ -246,8 +245,11 @@ export function LogicalScenariosBrowser() {
     void reloadAll()
   }, [])
 
+  // ==================== Handlers ====================
+
   const handleTemplateChange = async (templateId: string) => {
     setSelectedTemplateId(templateId)
+    setExpandedQueries(new Set())
     syncEditorState(selectedProfileDetail, templateId)
   }
 
@@ -257,173 +259,148 @@ export function LogicalScenariosBrowser() {
   }
 
   const handleLogicalDatabaseChange = async (logicalDbId: string) => {
-    const nextLogicalDbId = logicalDbId === "none" ? "" : logicalDbId
-    setSelectedLogicalDbId(nextLogicalDbId)
-
-    const logicalDatabase = logicalDatabases.find((database) => database.id === nextLogicalDbId)
-    const nextProfileId = logicalDatabase?.schema_profile_id || ""
+    const nextId = logicalDbId === "none" ? "" : logicalDbId
+    setSelectedLogicalDbId(nextId)
+    const db = logicalDatabases.find((d) => d.id === nextId)
+    const nextProfileId = db?.schema_profile_id || ""
     setSelectedProfileId(nextProfileId)
-
     if (nextProfileId) {
       await loadProfile(nextProfileId, selectedTemplateId)
-      return
+    } else {
+      setSelectedProfileDetail(null)
+      setDraftBundle(null)
     }
-
-    setSelectedProfileDetail(null)
-    setDraftBundle(null)
   }
 
   const handleVariantChange = (bundleId: string) => {
+    setExpandedQueries(new Set())
     if (bundleId === "new") {
       setSelectedBundleId("new")
       setDraftBundle(buildEmptyDraft(selectedTemplateId, selectedProfileDetail, activeVariant))
       return
     }
-    const bundle = variants.find((item) => item.id === bundleId)
+    const bundle = variants.find((b) => b.id === bundleId)
     if (!bundle) return
     setSelectedBundleId(bundle.id)
     setDraftBundle(bundleToDraft(bundle))
   }
 
-  const updateDraftBundle = (updater: (current: ScenarioBundleSaveRequest) => ScenarioBundleSaveRequest) => {
-    setDraftBundle((current) => (current ? updater(current) : current))
+  const updateDraftBundle = (updater: (cur: ScenarioBundleSaveRequest) => ScenarioBundleSaveRequest) => {
+    setDraftBundle((cur) => (cur ? updater(cur) : cur))
   }
 
-  const updateQuery = (queryIndex: number, patch: Partial<ScenarioQuery>) => {
-    updateDraftBundle((current) => ({
-      ...current,
-      queries: current.queries.map((query, index) => (
-        index === queryIndex ? { ...query, ...patch } : query
-      )),
+  const updateQuery = (qi: number, patch: Partial<ScenarioQuery>) => {
+    updateDraftBundle((cur) => ({
+      ...cur,
+      queries: cur.queries.map((q, i) => (i === qi ? { ...q, ...patch } : q)),
     }))
   }
 
   const addQuery = () => {
-    updateDraftBundle((current) => ({
-      ...current,
+    updateDraftBundle((cur) => ({
+      ...cur,
       queries: [
-        ...current.queries,
-        {
-          sql_template: "",
-          query_type: "select",
-          description: "",
-          weight: 1,
-          order_index: current.queries.length,
-          params: [],
-        },
+        ...cur.queries,
+        { sql_template: "", query_type: "select", description: "", weight: 1, order_index: cur.queries.length, params: [] },
       ],
     }))
+    setExpandedQueries((prev) => {
+      const next = new Set(prev)
+      next.add(draftBundle?.queries.length ?? 0)
+      return next
+    })
   }
 
-  const removeQuery = (queryIndex: number) => {
-    updateDraftBundle((current) => ({
-      ...current,
-      queries: current.queries
-        .filter((_, index) => index !== queryIndex)
-        .map((query, index) => ({ ...query, order_index: index })),
+  const removeQuery = (qi: number) => {
+    updateDraftBundle((cur) => ({
+      ...cur,
+      queries: cur.queries
+        .filter((_, i) => i !== qi)
+        .map((q, i) => ({ ...q, order_index: i })),
     }))
+    setExpandedQueries((prev) => {
+      const next = new Set<number>()
+      prev.forEach((idx) => { if (idx < qi) next.add(idx); else if (idx > qi) next.add(idx - 1) })
+      return next
+    })
   }
 
-  const addParam = (queryIndex: number) => {
-    updateDraftBundle((current) => ({
-      ...current,
-      queries: current.queries.map((query, index) => (
-        index === queryIndex
+  const addParam = (qi: number) => {
+    updateDraftBundle((cur) => ({
+      ...cur,
+      queries: cur.queries.map((q, i) =>
+        i === qi
           ? {
-              ...query,
+              ...q,
               params: [
-                ...(query.params || []),
-                {
-                  param_name: "",
-                  param_type: "random_int",
-                  min_value: 1,
-                  max_value: 1000,
-                  table_ref: null,
-                  column_ref: null,
-                  string_length: 16,
-                  current_value: 0,
-                  step: 1,
-                },
+                ...(q.params || []),
+                { param_name: "", param_type: "random_int", min_value: 1, max_value: 1000, table_ref: null, column_ref: null, string_length: 16, current_value: 0, step: 1 },
               ],
             }
-          : query
-      )),
+          : q
+      ),
     }))
   }
 
-  const updateParam = (queryIndex: number, paramIndex: number, patch: Partial<ScenarioParam>) => {
-    updateDraftBundle((current) => ({
-      ...current,
-      queries: current.queries.map((query, index) => (
-        index === queryIndex
-          ? {
-              ...query,
-              params: (query.params || []).map((param, idx) => (
-                idx === paramIndex ? { ...param, ...patch } : param
-              )),
-            }
-          : query
-      )),
+  const updateParam = (qi: number, pi: number, patch: Partial<ScenarioParam>) => {
+    updateDraftBundle((cur) => ({
+      ...cur,
+      queries: cur.queries.map((q, i) =>
+        i === qi
+          ? { ...q, params: (q.params || []).map((p, j) => (j === pi ? { ...p, ...patch } : p)) }
+          : q
+      ),
     }))
   }
 
-  const removeParam = (queryIndex: number, paramIndex: number) => {
-    updateDraftBundle((current) => ({
-      ...current,
-      queries: current.queries.map((query, index) => (
-        index === queryIndex
-          ? {
-              ...query,
-              params: (query.params || []).filter((_, idx) => idx !== paramIndex),
-            }
-          : query
-      )),
+  const removeParam = (qi: number, pi: number) => {
+    updateDraftBundle((cur) => ({
+      ...cur,
+      queries: cur.queries.map((q, i) =>
+        i === qi ? { ...q, params: (q.params || []).filter((_, j) => j !== pi) } : q
+      ),
     }))
   }
 
   const addIndex = () => {
-    updateDraftBundle((current) => ({
-      ...current,
+    updateDraftBundle((cur) => ({
+      ...cur,
       indexes: [
-        ...current.indexes,
-        {
-          table_name: "",
-          column_names: "",
-          index_type: "btree",
-          index_name: null,
-          is_unique: false,
-          condition: null,
-          description: "",
-        },
+        ...cur.indexes,
+        { table_name: "", column_names: "", index_type: "btree", index_name: null, is_unique: false, condition: null, description: "" },
       ],
     }))
   }
 
-  const updateIndex = (indexPosition: number, patch: Partial<ScenarioIndex>) => {
-    updateDraftBundle((current) => ({
-      ...current,
-      indexes: current.indexes.map((item, idx) => (
-        idx === indexPosition ? { ...item, ...patch } : item
-      )),
+  const updateIndex = (ip: number, patch: Partial<ScenarioIndex>) => {
+    updateDraftBundle((cur) => ({
+      ...cur,
+      indexes: cur.indexes.map((item, i) => (i === ip ? { ...item, ...patch } : item)),
     }))
   }
 
-  const removeIndex = (indexPosition: number) => {
-    updateDraftBundle((current) => ({
-      ...current,
-      indexes: current.indexes.filter((_, idx) => idx !== indexPosition),
+  const removeIndex = (ip: number) => {
+    updateDraftBundle((cur) => ({
+      ...cur,
+      indexes: cur.indexes.filter((_, i) => i !== ip),
     }))
+  }
+
+  const toggleQueryExpanded = (qi: number) => {
+    setExpandedQueries((prev) => {
+      const next = new Set(prev)
+      if (next.has(qi)) next.delete(qi)
+      else next.add(qi)
+      return next
+    })
   }
 
   const handleCreateTemplate = async () => {
-    const name = window.prompt("Название нового logical template")
+    const name = window.prompt("Название нового шаблона сценария")
     if (!name?.trim()) return
-    const description = window.prompt("Описание logical template", "") || ""
+    const description = window.prompt("Описание шаблона", "") || ""
     try {
-      const template = await apiClient.createScenarioTemplate({
-        name: name.trim(),
-        description,
-      }) as ScenarioTemplate
+      const template = await apiClient.createScenarioTemplate({ name: name.trim(), description }) as ScenarioTemplate
       toast.success("Шаблон создан")
       await reloadAll(template.id, selectedProfileId)
     } catch (error) {
@@ -433,9 +410,9 @@ export function LogicalScenariosBrowser() {
 
   const handleUpdateTemplate = async () => {
     if (!selectedTemplate || selectedTemplate.is_builtin) return
-    const name = window.prompt("Новое название logical template", selectedTemplate.name)
+    const name = window.prompt("Новое название шаблона", selectedTemplate.name)
     if (!name?.trim()) return
-    const description = window.prompt("Описание logical template", selectedTemplate.description || "") || ""
+    const description = window.prompt("Описание шаблона", selectedTemplate.description || "") || ""
     try {
       await apiClient.updateScenarioTemplate(selectedTemplate.id, { name: name.trim(), description })
       toast.success("Шаблон обновлён")
@@ -447,7 +424,7 @@ export function LogicalScenariosBrowser() {
 
   const handleDeleteTemplate = async () => {
     if (!selectedTemplate || selectedTemplate.is_builtin) return
-    if (!window.confirm(`Удалить custom template "${selectedTemplate.name}" и все его variants?`)) return
+    if (!window.confirm(`Удалить шаблон "${selectedTemplate.name}" и все его варианты?`)) return
     try {
       await apiClient.deleteScenarioTemplate(selectedTemplate.id)
       toast.success("Шаблон удалён")
@@ -460,9 +437,7 @@ export function LogicalScenariosBrowser() {
   const handleGenerateCanonical = async () => {
     if (!selectedProfileId || !selectedTemplateId || !selectedTemplate?.is_builtin) return
     try {
-      await apiClient.generateProfileBundles(selectedProfileId, {
-        scenario_template_ids: [selectedTemplateId],
-      })
+      await apiClient.generateProfileBundles(selectedProfileId, { scenario_template_ids: [selectedTemplateId] })
       toast.success("Канонический bundle обновлён")
       await loadProfile(selectedProfileId, selectedTemplateId)
     } catch (error) {
@@ -473,7 +448,7 @@ export function LogicalScenariosBrowser() {
   const handleSaveBundle = async () => {
     if (!draftBundle || !selectedProfileId) return
     if (draftBundle.queries.length === 0) {
-      toast.error("Добавьте хотя бы один SQL-запрос в bundle")
+      toast.error("Добавьте хотя бы один SQL-запрос")
       return
     }
     setSaving(true)
@@ -492,14 +467,14 @@ export function LogicalScenariosBrowser() {
 
   const handleCloneBundle = async () => {
     if (!selectedBundle || !selectedProfileId) return
-    const name = window.prompt("Название нового variant bundle", `${selectedBundle.name} (копия)`)
+    const name = window.prompt("Название нового варианта", `${selectedBundle.name} (копия)`)
     if (!name?.trim()) return
     try {
       const cloned = await apiClient.cloneBundleVariant(selectedProfileId, selectedBundle.id, { name: name.trim() })
-      toast.success("Variant склонирован")
+      toast.success("Вариант склонирован")
       await loadProfile(selectedProfileId, selectedTemplateId, cloned.id)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Не удалось клонировать bundle")
+      toast.error(error instanceof Error ? error.message : "Не удалось клонировать вариант")
     }
   }
 
@@ -507,24 +482,26 @@ export function LogicalScenariosBrowser() {
     if (!selectedBundle || !selectedProfileId || selectedBundle.is_active) return
     try {
       await apiClient.activateBundleVariant(selectedProfileId, selectedBundle.id)
-      toast.success("Variant активирован")
+      toast.success("Вариант активирован")
       await loadProfile(selectedProfileId, selectedTemplateId, selectedBundle.id)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Не удалось активировать bundle")
+      toast.error(error instanceof Error ? error.message : "Не удалось активировать вариант")
     }
   }
 
   const handleDeleteBundle = async () => {
     if (!selectedBundle || !selectedProfileId) return
-    if (!window.confirm(`Удалить variant "${selectedBundle.name}"?`)) return
+    if (!window.confirm(`Удалить вариант "${selectedBundle.name}"?`)) return
     try {
       await apiClient.deleteBundleVariant(selectedProfileId, selectedBundle.id)
-      toast.success("Variant удалён")
+      toast.success("Вариант удалён")
       await loadProfile(selectedProfileId, selectedTemplateId)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Не удалось удалить bundle")
+      toast.error(error instanceof Error ? error.message : "Не удалось удалить вариант")
     }
   }
+
+  // ==================== Render ====================
 
   if (loading) {
     return (
@@ -535,497 +512,605 @@ export function LogicalScenariosBrowser() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Сценарии тестирования</h1>
-        <p className="text-muted-foreground">
-          Управление logical templates и bundle variants по профилям модели данных
-        </p>
+    <div className="p-6 space-y-6">
+      {/* Заголовок */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Сценарии тестирования</h1>
+          <p className="text-muted-foreground">
+            Управление шаблонами сценариев и вариантами bundle по профилям модели данных
+          </p>
+        </div>
+        <Button onClick={handleCreateTemplate}>
+          <Plus className="mr-2 h-4 w-4" />
+          Новый шаблон
+        </Button>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Layers className="h-5 w-5" />
-            Выбор шаблона и профиля
-          </CardTitle>
-          <CardDescription>
-            Выберите logical template и профиль модели данных, затем редактируйте active variant или создавайте новый
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <div className="space-y-2">
-            <Label>Шаблон сценария</Label>
-            <Select value={selectedTemplateId} onValueChange={(value) => void handleTemplateChange(value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Выберите шаблон сценария" />
-              </SelectTrigger>
-              <SelectContent>
-                {templates.map((template) => (
-                  <SelectItem key={template.id} value={template.id}>
-                    {template.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {selectedTemplate?.description && (
-              <p className="text-sm text-muted-foreground">{selectedTemplate.description}</p>
-            )}
-            <div className="flex flex-wrap gap-2 pt-2">
-              <Button variant="outline" size="sm" onClick={handleCreateTemplate}>
-                <Plus className="mr-2 h-4 w-4" />
-                Новый template
-              </Button>
-              {!selectedTemplate?.is_builtin && (
-                <>
-                  <Button variant="outline" size="sm" onClick={handleUpdateTemplate}>
-                    <Pencil className="mr-2 h-4 w-4" />
-                    Редактировать template
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={handleDeleteTemplate}>
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Удалить template
-                  </Button>
-                </>
+      <Alert>
+        <AlertCircle className="h-4 w-4" />
+        <AlertDescription>
+          Встроенные шаблоны (отмечены значком{" "} <Badge variant="secondary" className="mx-1">builtin</Badge>) нельзя редактировать, но можно создавать собственные варианты bundle.
+        </AlertDescription>
+      </Alert>
+
+      {/* Основной контент: список + детали */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+
+        {/* Левая панель: список шаблонов */}
+        <Card className="lg:col-span-1">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Layers className="h-5 w-5" />
+              Шаблоны сценариев
+            </CardTitle>
+            <CardDescription>{templates.length} шаблонов</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-1">
+              {templates.map((template) => (
+                <button
+                  key={template.id}
+                  onClick={() => void handleTemplateChange(template.id)}
+                  className={cn(
+                    "w-full text-left p-3 rounded-lg border transition-colors",
+                    selectedTemplateId === template.id
+                      ? "border-primary bg-primary/10"
+                      : "border-border hover:border-muted-foreground"
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="font-medium text-sm leading-snug">{template.name}</span>
+                    {template.is_builtin && (
+                      <Badge variant="secondary" className="shrink-0 text-xs">builtin</Badge>
+                    )}
+                  </div>
+                  {template.description && (
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                      {template.description}
+                    </p>
+                  )}
+                </button>
+              ))}
+              {templates.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  Нет доступных шаблонов
+                </p>
               )}
             </div>
-          </div>
+          </CardContent>
+        </Card>
 
-          <div className="space-y-2">
-            <Label>База данных</Label>
-            <Select value={selectedLogicalDbId || "none"} onValueChange={(value) => void handleLogicalDatabaseChange(value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Выберите базу данных" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Без контекста базы данных</SelectItem>
-                {logicalDatabases.map((database) => (
-                  <SelectItem key={database.id} value={database.id}>
-                    {database.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {selectedLogicalDatabase && (
-              <p className="text-sm text-muted-foreground">
-                Профиль: {selectedLogicalDatabase.schema_profile_name || "не назначен"}
+        {/* Правая панель: детали шаблона */}
+        <Card className="lg:col-span-2">
+          {!selectedTemplate ? (
+            <div className="flex flex-col items-center justify-center h-[400px] text-center p-8">
+              <FileCode2 className="h-16 w-16 text-muted-foreground/40 mb-4" />
+              <h3 className="text-lg font-medium text-muted-foreground">Выберите шаблон сценария</h3>
+              <p className="text-sm text-muted-foreground mt-2 max-w-sm">
+                Шаблоны содержат варианты bundle с SQL-запросами и индексами для нагрузочного тестирования
               </p>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <Label>Профиль модели данных</Label>
-            <Select
-              value={selectedProfileId}
-              onValueChange={(value) => void handleProfileChange(value)}
-              disabled={Boolean(selectedLogicalDatabase?.schema_profile_id)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Выберите профиль данных" />
-              </SelectTrigger>
-              <SelectContent>
-                {profiles.map((profile) => (
-                  <SelectItem key={profile.id} value={profile.id}>
-                    {profile.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {selectedProfileDetail?.description && (
-              <p className="text-sm text-muted-foreground">{selectedProfileDetail.description}</p>
-            )}
-            {selectedLogicalDatabase?.schema_profile_id && (
-              <p className="text-xs text-muted-foreground">
-                Профиль зафиксирован выбранной базой данных
-              </p>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <FileCode2 className="h-5 w-5" />
-            Bundle variants
-          </CardTitle>
-          <CardDescription>
-            {selectedProfileDetail?.name || "—"} / {selectedTemplate?.id || "—"} / variants: {variants.length}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {loadingProfile ? (
-            <div className="flex items-center justify-center py-12 text-muted-foreground">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Загружаем bundle...
             </div>
-          ) : !draftBundle ? (
-            <div className="space-y-4">
-              <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-                Для выбранной пары профиль/шаблон variants пока нет. Создайте новый variant вручную или сгенерируйте канонический bundle.
-              </div>
-            </div>
-          ) : draftBundle ? (
-            <div className="space-y-4">
-              <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-                <div className="space-y-4">
+          ) : (
+            <>
+              <CardHeader className="pb-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <CardTitle className="flex flex-wrap items-center gap-2">
+                      <span className="break-words">{selectedTemplate.name}</span>
+                      {selectedTemplate.is_builtin && (
+                        <Badge variant="secondary">builtin</Badge>
+                      )}
+                    </CardTitle>
+                    {selectedTemplate.description && (
+                      <CardDescription className="mt-1">{selectedTemplate.description}</CardDescription>
+                    )}
+                  </div>
+                  {!selectedTemplate.is_builtin && (
+                    <div className="flex gap-2 shrink-0">
+                      <Button variant="outline" size="sm" onClick={handleUpdateTemplate}>
+                        <Pencil className="mr-2 h-3.5 w-3.5" />
+                        Редактировать
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={handleDeleteTemplate}>
+                        <Trash2 className="mr-2 h-3.5 w-3.5" />
+                        Удалить
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </CardHeader>
+
+              <CardContent className="space-y-6">
+                {/* Выбор контекста (БД / профиль) */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-lg border bg-muted/20">
                   <div className="space-y-2">
-                    <Label>Variant bundle</Label>
-                    <Select value={selectedBundleId} onValueChange={handleVariantChange}>
+                    <Label>База данных</Label>
+                    <Select
+                      value={selectedLogicalDbId || "none"}
+                      onValueChange={(v) => void handleLogicalDatabaseChange(v)}
+                    >
                       <SelectTrigger>
-                        <SelectValue placeholder="Выберите variant" />
+                        <SelectValue placeholder="Выберите базу данных" />
                       </SelectTrigger>
                       <SelectContent>
-                        {variants.map((bundle) => (
-                          <SelectItem key={bundle.id} value={bundle.id}>
-                            {bundle.name}{bundle.is_active ? " (active)" : ""}
-                          </SelectItem>
+                        <SelectItem value="none">Без контекста базы данных</SelectItem>
+                        {logicalDatabases.map((db) => (
+                          <SelectItem key={db.id} value={db.id}>{db.name}</SelectItem>
                         ))}
-                        <SelectItem value="new">Новый variant</SelectItem>
                       </SelectContent>
                     </Select>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    {selectedBundle && <Badge variant="secondary">{selectedBundle.name}</Badge>}
-                    {selectedBundle?.is_active && <Badge variant="outline">active</Badge>}
-                    {selectedBundle?.is_builtin && <Badge variant="outline">builtin</Badge>}
-                    <Badge variant="outline">queries: {draftBundle.queries.length}</Badge>
-                    <Badge variant="outline">indexes: {draftBundle.indexes.length}</Badge>
-                    <Badge variant="outline">source: {draftBundle.generation_source || "manual_variant"}</Badge>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" size="sm" onClick={() => handleVariantChange("new")}>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Новый variant
-                    </Button>
-                    <Button variant="outline" size="sm" disabled={!selectedBundle} onClick={handleCloneBundle}>
-                      <Copy className="mr-2 h-4 w-4" />
-                      Клонировать
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!selectedBundle || selectedBundle.is_active}
-                      onClick={handleActivateBundle}
-                    >
-                      <Check className="mr-2 h-4 w-4" />
-                      Сделать active
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!selectedTemplate?.is_builtin}
-                      onClick={handleGenerateCanonical}
-                    >
-                      <WandSparkles className="mr-2 h-4 w-4" />
-                      Generate canonical
-                    </Button>
-                    <Button size="sm" disabled={saving} onClick={handleSaveBundle}>
-                      {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                      Сохранить
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!selectedBundle || selectedBundle.is_builtin || selectedBundle.is_active}
-                      onClick={handleDeleteBundle}
-                    >
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      Удалить
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label>Название variant</Label>
-                      <Input
-                        value={draftBundle.name}
-                        onChange={(event) => updateDraftBundle((current) => ({
-                          ...current,
-                          name: event.target.value,
-                        }))}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Generation source</Label>
-                      <Input
-                        value={draftBundle.generation_source || "manual_variant"}
-                        onChange={(event) => updateDraftBundle((current) => ({
-                          ...current,
-                          generation_source: event.target.value,
-                        }))}
-                      />
-                    </div>
+                    {selectedLogicalDatabase && (
+                      <p className="text-xs text-muted-foreground">
+                        Профиль: {selectedLogicalDatabase.schema_profile_name || "не назначен"}
+                      </p>
+                    )}
                   </div>
 
                   <div className="space-y-2">
-                    <Label>Описание variant</Label>
-                    <Textarea
-                      value={draftBundle.description || ""}
-                      onChange={(event) => updateDraftBundle((current) => ({
-                        ...current,
-                        description: event.target.value,
-                      }))}
-                    />
+                    <Label>Профиль модели данных</Label>
+                    <Select
+                      value={selectedProfileId}
+                      onValueChange={(v) => void handleProfileChange(v)}
+                      disabled={Boolean(selectedLogicalDatabase?.schema_profile_id)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Выберите профиль данных" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {profiles.map((profile) => (
+                          <SelectItem key={profile.id} value={profile.id}>{profile.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {selectedLogicalDatabase?.schema_profile_id && (
+                      <p className="text-xs text-muted-foreground">
+                        Профиль зафиксирован выбранной базой данных
+                      </p>
+                    )}
+                    {selectedProfileDetail?.description && (
+                      <p className="text-xs text-muted-foreground">{selectedProfileDetail.description}</p>
+                    )}
                   </div>
                 </div>
-              </div>
 
-              <ScrollArea className="h-[520px] rounded-lg border">
-                <div className="space-y-3 p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-medium">SQL-запросы</div>
-                    <Button variant="outline" size="sm" onClick={addQuery}>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Добавить query
-                    </Button>
+                {/* Bundle варианты */}
+                {loadingProfile ? (
+                  <div className="flex items-center justify-center py-12 text-muted-foreground">
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Загружаем варианты...
                   </div>
-
-                  {draftBundle.queries.map((query, queryIndex) => (
-                    <div key={`query-${queryIndex}`} className="rounded-lg border p-3 space-y-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge>{queryIndex + 1}</Badge>
-                          <Badge variant="outline">{query.query_type}</Badge>
+                ) : !selectedProfileId ? (
+                  <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                    Выберите профиль модели данных для просмотра и редактирования вариантов bundle
+                  </div>
+                ) : !draftBundle ? (
+                  <div className="space-y-4">
+                    <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                      Для выбранной пары профиль / шаблон вариантов пока нет.
+                    </div>
+                    <div className="flex gap-2 justify-center">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleVariantChange("new")}
+                      >
+                        <Plus className="mr-2 h-4 w-4" />
+                        Создать вариант вручную
+                      </Button>
+                      {selectedTemplate.is_builtin && (
+                        <Button variant="outline" size="sm" onClick={handleGenerateCanonical}>
+                          <WandSparkles className="mr-2 h-4 w-4" />
+                          Сгенерировать canonical
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {/* Выбор варианта + действия */}
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex-1 min-w-[180px]">
+                          <Select value={selectedBundleId} onValueChange={handleVariantChange}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Выберите вариант" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {variants.map((bundle) => (
+                                <SelectItem key={bundle.id} value={bundle.id}>
+                                  {bundle.name}{bundle.is_active ? " (активный)" : ""}
+                                </SelectItem>
+                              ))}
+                              <SelectItem value="new">+ Новый вариант</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
-                        <Button variant="outline" size="sm" onClick={() => removeQuery(queryIndex)}>
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Удалить query
+
+                        <div className="flex flex-wrap gap-2">
+                          <Button variant="outline" size="sm" onClick={() => handleVariantChange("new")}>
+                            <Plus className="mr-1.5 h-3.5 w-3.5" />
+                            Новый
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={!selectedBundle}
+                            onClick={handleCloneBundle}
+                          >
+                            <Copy className="mr-1.5 h-3.5 w-3.5" />
+                            Клонировать
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={!selectedBundle || selectedBundle.is_active}
+                            onClick={handleActivateBundle}
+                          >
+                            <Check className="mr-1.5 h-3.5 w-3.5" />
+                            Активировать
+                          </Button>
+                          {selectedTemplate.is_builtin && (
+                            <Button variant="outline" size="sm" onClick={handleGenerateCanonical}>
+                              <WandSparkles className="mr-1.5 h-3.5 w-3.5" />
+                              Canonical
+                            </Button>
+                          )}
+                          <Button size="sm" disabled={saving} onClick={handleSaveBundle}>
+                            {saving
+                              ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                              : <Save className="mr-1.5 h-3.5 w-3.5" />
+                            }
+                            Сохранить
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={!selectedBundle || selectedBundle.is_builtin || selectedBundle.is_active}
+                            onClick={handleDeleteBundle}
+                          >
+                            <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                            Удалить
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        {selectedBundle?.is_active && <Badge variant="outline">активный</Badge>}
+                        {selectedBundle?.is_builtin && <Badge variant="outline">builtin</Badge>}
+                        <Badge variant="outline">запросов: {draftBundle.queries.length}</Badge>
+                        <Badge variant="outline">индексов: {draftBundle.indexes.length}</Badge>
+                      </div>
+                    </div>
+
+                    {/* Мета варианта */}
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Название варианта</Label>
+                        <Input
+                          value={draftBundle.name}
+                          onChange={(e) => updateDraftBundle((cur) => ({ ...cur, name: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Источник генерации</Label>
+                        <Input
+                          value={draftBundle.generation_source || "manual_variant"}
+                          onChange={(e) => updateDraftBundle((cur) => ({ ...cur, generation_source: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Описание варианта</Label>
+                      <Textarea
+                        value={draftBundle.description || ""}
+                        rows={2}
+                        onChange={(e) => updateDraftBundle((cur) => ({ ...cur, description: e.target.value }))}
+                      />
+                    </div>
+
+                    {/* SQL-запросы */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-medium flex items-center gap-2">
+                          <FileCode2 className="h-4 w-4" />
+                          SQL-запросы
+                          <Badge variant="outline">{draftBundle.queries.length}</Badge>
+                        </h3>
+                        <Button variant="outline" size="sm" onClick={addQuery}>
+                          <Plus className="mr-1.5 h-3.5 w-3.5" />
+                          Добавить запрос
                         </Button>
                       </div>
 
-                      <div className="grid gap-3 md:grid-cols-3">
-                        <div className="space-y-2">
-                          <Label>Тип</Label>
-                          <Input
-                            value={query.query_type}
-                            onChange={(event) => updateQuery(queryIndex, { query_type: event.target.value })}
-                          />
+                      {draftBundle.queries.length === 0 && (
+                        <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground text-center">
+                          Нет SQL-запросов. Добавьте хотя бы один для сохранения варианта.
                         </div>
-                        <div className="space-y-2">
-                          <Label>Вес</Label>
-                          <Input
-                            type="number"
-                            min={1}
-                            value={query.weight}
-                            onChange={(event) => updateQuery(queryIndex, { weight: Number(event.target.value) || 1 })}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Порядок</Label>
-                          <Input
-                            type="number"
-                            min={0}
-                            value={query.order_index}
-                            onChange={(event) => updateQuery(queryIndex, { order_index: Number(event.target.value) || 0 })}
-                          />
-                        </div>
-                      </div>
+                      )}
 
                       <div className="space-y-2">
-                        <Label>Описание query</Label>
-                        <Input
-                          value={query.description || ""}
-                          onChange={(event) => updateQuery(queryIndex, { description: event.target.value })}
-                        />
+                        {draftBundle.queries.map((query, qi) => {
+                          const isExpanded = expandedQueries.has(qi)
+                          const preview = query.description || (query.sql_template ? query.sql_template.slice(0, 60) : "")
+                          return (
+                            <div key={`q-${qi}`} className="rounded-lg border overflow-hidden">
+                              {/* Заголовок запроса (кликабельный) */}
+                              <button
+                                className="w-full flex items-center justify-between gap-2 p-3 hover:bg-muted/30 transition-colors text-left"
+                                onClick={() => toggleQueryExpanded(qi)}
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <Badge className="shrink-0">{qi + 1}</Badge>
+                                  <Badge variant="outline" className="shrink-0">{query.query_type}</Badge>
+                                  <span className="text-sm text-muted-foreground truncate">
+                                    {preview || "без описания"}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-3 shrink-0">
+                                  <span className="text-xs text-muted-foreground">вес: {query.weight}</span>
+                                  <ChevronDown
+                                    className={cn("h-4 w-4 text-muted-foreground transition-transform", isExpanded && "rotate-180")}
+                                  />
+                                </div>
+                              </button>
+
+                              {/* Раскрываемое содержимое */}
+                              {isExpanded && (
+                                <div className="border-t p-3 space-y-3">
+                                  <div className="grid gap-3 md:grid-cols-3">
+                                    <div className="space-y-1.5">
+                                      <Label className="text-xs">Тип запроса</Label>
+                                      <Input
+                                        value={query.query_type}
+                                        onChange={(e) => updateQuery(qi, { query_type: e.target.value })}
+                                      />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                      <Label className="text-xs">Вес</Label>
+                                      <Input
+                                        type="number"
+                                        min={1}
+                                        value={query.weight}
+                                        onChange={(e) => updateQuery(qi, { weight: Number(e.target.value) || 1 })}
+                                      />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                      <Label className="text-xs">Порядок</Label>
+                                      <Input
+                                        type="number"
+                                        min={0}
+                                        value={query.order_index}
+                                        onChange={(e) => updateQuery(qi, { order_index: Number(e.target.value) || 0 })}
+                                      />
+                                    </div>
+                                  </div>
+
+                                  <div className="space-y-1.5">
+                                    <Label className="text-xs">Описание</Label>
+                                    <Input
+                                      value={query.description || ""}
+                                      onChange={(e) => updateQuery(qi, { description: e.target.value })}
+                                    />
+                                  </div>
+
+                                  <div className="space-y-1.5">
+                                    <Label className="text-xs">SQL-шаблон</Label>
+                                    <Textarea
+                                      className="min-h-[120px] font-mono text-xs"
+                                      value={query.sql_template}
+                                      onChange={(e) => updateQuery(qi, { sql_template: e.target.value })}
+                                    />
+                                  </div>
+
+                                  {/* Параметры запроса */}
+                                  <div className="space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-xs font-medium text-muted-foreground">
+                                        Параметры ({(query.params || []).length})
+                                      </span>
+                                      <Button variant="outline" size="sm" onClick={() => addParam(qi)}>
+                                        <Plus className="mr-1.5 h-3 w-3" />
+                                        Параметр
+                                      </Button>
+                                    </div>
+                                    {(query.params || []).map((param, pi) => (
+                                      <div key={`p-${qi}-${pi}`} className="rounded-md border bg-muted/20 p-3 space-y-2">
+                                        <div className="grid gap-2 md:grid-cols-2">
+                                          <div className="space-y-1.5">
+                                            <Label className="text-xs">Имя параметра</Label>
+                                            <Input
+                                              value={param.param_name}
+                                              onChange={(e) => updateParam(qi, pi, { param_name: e.target.value })}
+                                            />
+                                          </div>
+                                          <div className="space-y-1.5">
+                                            <Label className="text-xs">Тип</Label>
+                                            <Input
+                                              value={param.param_type}
+                                              onChange={(e) => updateParam(qi, pi, { param_type: e.target.value })}
+                                            />
+                                          </div>
+                                          <div className="space-y-1.5">
+                                            <Label className="text-xs">Min</Label>
+                                            <Input
+                                              type="number"
+                                              value={param.min_value ?? ""}
+                                              onChange={(e) => updateParam(qi, pi, { min_value: e.target.value === "" ? null : Number(e.target.value) })}
+                                            />
+                                          </div>
+                                          <div className="space-y-1.5">
+                                            <Label className="text-xs">Max</Label>
+                                            <Input
+                                              type="number"
+                                              value={param.max_value ?? ""}
+                                              onChange={(e) => updateParam(qi, pi, { max_value: e.target.value === "" ? null : Number(e.target.value) })}
+                                            />
+                                          </div>
+                                          <div className="space-y-1.5">
+                                            <Label className="text-xs">Таблица (table_ref)</Label>
+                                            <Input
+                                              value={param.table_ref ?? ""}
+                                              onChange={(e) => updateParam(qi, pi, { table_ref: e.target.value || null })}
+                                            />
+                                          </div>
+                                          <div className="space-y-1.5">
+                                            <Label className="text-xs">Колонка (column_ref)</Label>
+                                            <Input
+                                              value={param.column_ref ?? ""}
+                                              onChange={(e) => updateParam(qi, pi, { column_ref: e.target.value || null })}
+                                            />
+                                          </div>
+                                          <div className="space-y-1.5">
+                                            <Label className="text-xs">Паттерн (string_pattern)</Label>
+                                            <Input
+                                              value={param.string_pattern ?? ""}
+                                              onChange={(e) => updateParam(qi, pi, { string_pattern: e.target.value || null })}
+                                            />
+                                          </div>
+                                          <div className="space-y-1.5">
+                                            <Label className="text-xs">Длина строки</Label>
+                                            <Input
+                                              type="number"
+                                              value={param.string_length ?? ""}
+                                              onChange={(e) => updateParam(qi, pi, { string_length: e.target.value === "" ? null : Number(e.target.value) })}
+                                            />
+                                          </div>
+                                        </div>
+                                        <div className="flex justify-end">
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => removeParam(qi, pi)}
+                                          >
+                                            <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                                            Удалить параметр
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+
+                                  <div className="flex justify-end pt-1">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => removeQuery(qi)}
+                                    >
+                                      <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                                      Удалить запрос
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Индексы */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-medium flex items-center gap-2">
+                          <Database className="h-4 w-4" />
+                          Индексы
+                          <Badge variant="outline">{draftBundle.indexes.length}</Badge>
+                        </h3>
+                        <Button variant="outline" size="sm" onClick={addIndex}>
+                          <Plus className="mr-1.5 h-3.5 w-3.5" />
+                          Добавить индекс
+                        </Button>
                       </div>
 
-                      <div className="space-y-2">
-                        <Label>SQL</Label>
-                        <Textarea
-                          className="min-h-[140px] font-mono text-xs"
-                          value={query.sql_template}
-                          onChange={(event) => updateQuery(queryIndex, { sql_template: event.target.value })}
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="text-xs font-medium text-muted-foreground">Параметры</div>
-                          <Button variant="outline" size="sm" onClick={() => addParam(queryIndex)}>
-                            <Plus className="mr-2 h-4 w-4" />
-                            Добавить param
-                          </Button>
+                      {draftBundle.indexes.length === 0 && (
+                        <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground text-center">
+                          Индексы не заданы
                         </div>
-                        {(query.params || []).map((param, paramIndex) => (
-                          <div key={`param-${queryIndex}-${paramIndex}`} className="rounded-md border p-3 space-y-3">
-                            <div className="flex justify-end">
-                              <Button variant="outline" size="sm" onClick={() => removeParam(queryIndex, paramIndex)}>
-                                <Trash2 className="mr-2 h-4 w-4" />
-                                Удалить param
+                      )}
+
+                      <div className="space-y-2">
+                        {draftBundle.indexes.map((index, ip) => (
+                          <div key={`idx-${ip}`} className="rounded-lg border p-3 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-medium text-muted-foreground">
+                                Индекс {ip + 1}{index.table_name ? ` — ${index.table_name}` : ""}
+                              </span>
+                              <Button variant="outline" size="sm" onClick={() => removeIndex(ip)}>
+                                <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                                Удалить
                               </Button>
                             </div>
                             <div className="grid gap-3 md:grid-cols-2">
-                              <div className="space-y-2">
-                                <Label>Имя</Label>
+                              <div className="space-y-1.5">
+                                <Label className="text-xs">Таблица</Label>
                                 <Input
-                                  value={param.param_name}
-                                  onChange={(event) => updateParam(queryIndex, paramIndex, { param_name: event.target.value })}
+                                  value={index.table_name}
+                                  onChange={(e) => updateIndex(ip, { table_name: e.target.value })}
                                 />
                               </div>
-                              <div className="space-y-2">
-                                <Label>Тип</Label>
+                              <div className="space-y-1.5">
+                                <Label className="text-xs">Колонки</Label>
                                 <Input
-                                  value={param.param_type}
-                                  onChange={(event) => updateParam(queryIndex, paramIndex, { param_type: event.target.value })}
+                                  value={index.column_names}
+                                  onChange={(e) => updateIndex(ip, { column_names: e.target.value })}
                                 />
                               </div>
-                              <div className="space-y-2">
-                                <Label>Min</Label>
+                              <div className="space-y-1.5">
+                                <Label className="text-xs">Тип индекса</Label>
                                 <Input
-                                  type="number"
-                                  value={param.min_value ?? ""}
-                                  onChange={(event) => updateParam(queryIndex, paramIndex, {
-                                    min_value: event.target.value === "" ? null : Number(event.target.value),
-                                  })}
+                                  value={index.index_type}
+                                  onChange={(e) => updateIndex(ip, { index_type: e.target.value })}
                                 />
                               </div>
-                              <div className="space-y-2">
-                                <Label>Max</Label>
+                              <div className="space-y-1.5">
+                                <Label className="text-xs">Имя индекса (index_name)</Label>
                                 <Input
-                                  type="number"
-                                  value={param.max_value ?? ""}
-                                  onChange={(event) => updateParam(queryIndex, paramIndex, {
-                                    max_value: event.target.value === "" ? null : Number(event.target.value),
-                                  })}
+                                  value={index.index_name ?? ""}
+                                  onChange={(e) => updateIndex(ip, { index_name: e.target.value || null })}
                                 />
                               </div>
-                              <div className="space-y-2">
-                                <Label>Table ref</Label>
+                              <div className="space-y-1.5">
+                                <Label className="text-xs">Условие (condition)</Label>
                                 <Input
-                                  value={param.table_ref ?? ""}
-                                  onChange={(event) => updateParam(queryIndex, paramIndex, { table_ref: event.target.value || null })}
+                                  value={index.condition ?? ""}
+                                  onChange={(e) => updateIndex(ip, { condition: e.target.value || null })}
                                 />
                               </div>
-                              <div className="space-y-2">
-                                <Label>Column ref</Label>
-                                <Input
-                                  value={param.column_ref ?? ""}
-                                  onChange={(event) => updateParam(queryIndex, paramIndex, { column_ref: event.target.value || null })}
-                                />
+                              <div className="space-y-1.5">
+                                <Label className="text-xs">Уникальный</Label>
+                                <Select
+                                  value={index.is_unique ? "true" : "false"}
+                                  onValueChange={(v) => updateIndex(ip, { is_unique: v === "true" })}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="false">Нет</SelectItem>
+                                    <SelectItem value="true">Да</SelectItem>
+                                  </SelectContent>
+                                </Select>
                               </div>
-                              <div className="space-y-2">
-                                <Label>String pattern</Label>
-                                <Input
-                                  value={param.string_pattern ?? ""}
-                                  onChange={(event) => updateParam(queryIndex, paramIndex, { string_pattern: event.target.value || null })}
-                                />
-                              </div>
-                              <div className="space-y-2">
-                                <Label>String length</Label>
-                                <Input
-                                  type="number"
-                                  value={param.string_length ?? ""}
-                                  onChange={(event) => updateParam(queryIndex, paramIndex, {
-                                    string_length: event.target.value === "" ? null : Number(event.target.value),
-                                  })}
-                                />
-                              </div>
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label className="text-xs">Описание</Label>
+                              <Input
+                                value={index.description ?? ""}
+                                onChange={(e) => updateIndex(ip, { description: e.target.value || null })}
+                              />
                             </div>
                           </div>
                         ))}
                       </div>
                     </div>
-                  ))}
-                </div>
-              </ScrollArea>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <Database className="h-4 w-4" />
-                    Индексы bundle
                   </div>
-                  <Button variant="outline" size="sm" onClick={addIndex}>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Добавить index
-                  </Button>
-                </div>
-                <div className="space-y-3">
-                  {draftBundle.indexes.map((index, indexPosition) => (
-                    <div key={`index-${indexPosition}`} className="rounded-lg border p-3 space-y-3">
-                      <div className="flex justify-end">
-                        <Button variant="outline" size="sm" onClick={() => removeIndex(indexPosition)}>
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Удалить index
-                        </Button>
-                      </div>
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <div className="space-y-2">
-                          <Label>Таблица</Label>
-                          <Input
-                            value={index.table_name}
-                            onChange={(event) => updateIndex(indexPosition, { table_name: event.target.value })}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Колонки</Label>
-                          <Input
-                            value={index.column_names}
-                            onChange={(event) => updateIndex(indexPosition, { column_names: event.target.value })}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Тип</Label>
-                          <Input
-                            value={index.index_type}
-                            onChange={(event) => updateIndex(indexPosition, { index_type: event.target.value })}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Index name</Label>
-                          <Input
-                            value={index.index_name ?? ""}
-                            onChange={(event) => updateIndex(indexPosition, { index_name: event.target.value || null })}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Condition</Label>
-                          <Input
-                            value={index.condition ?? ""}
-                            onChange={(event) => updateIndex(indexPosition, { condition: event.target.value || null })}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Unique</Label>
-                          <Select
-                            value={index.is_unique ? "true" : "false"}
-                            onValueChange={(value) => updateIndex(indexPosition, { is_unique: value === "true" })}
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="false">Нет</SelectItem>
-                              <SelectItem value="true">Да</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Описание</Label>
-                        <Input
-                          value={index.description ?? ""}
-                          onChange={(event) => updateIndex(indexPosition, { description: event.target.value || null })}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                  {draftBundle.indexes.length === 0 && (
-                    <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                      Для этого variant пока не задано ни одного индекса.
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
+                )}
+              </CardContent>
+            </>
+          )}
+        </Card>
+      </div>
     </div>
   )
 }
