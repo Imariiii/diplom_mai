@@ -3,6 +3,7 @@
 import { Header } from "@/components/header"
 import { Sidebar } from "@/components/sidebar"
 import { HomePage } from "@/components/pages/home-page"
+import { ConnectionsPage } from "@/components/pages/connections-page"
 import { ConfigPage } from "@/components/pages/config-page"
 import { ScenariosPage } from "@/components/pages/scenarios-page"
 import { DashboardsPage } from "@/components/pages/dashboards-page"
@@ -20,6 +21,7 @@ export default function Page() {
       <Sidebar />
       <main className="min-h-[calc(100vh-3.5rem)]">
         {currentPage === "home" && <HomePage />}
+        {currentPage === "connections" && <ConnectionsPage />}
         {currentPage === "config" && <ConfigPage />}
         {currentPage === "scenarios" && <ScenariosPage />}
         {currentPage === "dashboards" && <DashboardsPage />}

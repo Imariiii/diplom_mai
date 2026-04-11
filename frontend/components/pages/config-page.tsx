@@ -10,11 +10,11 @@ import type {
   TestRun,
   ScenarioTemplate,
   DatabaseConnection,
+  LogicalDatabaseWithConnections,
   LogicalDatabaseDetail,
-  SchemaProfileDetail,
 } from "@/lib/types"
 import { DatabaseStatePanel } from "@/components/database-state-panel"
-import { ConnectionManager } from "./config/connection-manager"
+import { LogicalDbSelectorCard } from "./config/logical-db-selector-card"
 import { ConnectionStatusCard } from "./config/connection-status-card"
 import { DatabaseSelectionCard } from "./config/database-selection-card"
 import { TestModeSelectorCard } from "./config/test-mode-selector-card"
@@ -28,18 +28,22 @@ export function ConfigPage() {
     testConfig,
     setTestConfig,
     setCurrentTest,
-    addTestToHistory,
     setCurrentPage,
   } = useAppStore()
   const [isRunning, setIsRunning] = useState(false)
   const [queries, setQueries] = useState<Query[]>([])
   const [scenarios, setScenarios] = useState<ScenarioTemplate[]>([])
   const [scenariosLoading, setScenariosLoading] = useState(true)
-  const [connections, setConnections] = useState<DatabaseConnection[]>([])
-  const [selectedProfileDetail, setSelectedProfileDetail] = useState<SchemaProfileDetail | null>(null)
+  const [logicalDatabases, setLogicalDatabases] = useState<LogicalDatabaseWithConnections[]>([])
+  const [selectedLogicalDbId, setSelectedLogicalDbId] = useState<string | null>(null)
   const [selectedLogicalDatabaseDetail, setSelectedLogicalDatabaseDetail] = useState<LogicalDatabaseDetail | null>(null)
   const [healthStatus, setHealthStatus] = useState<Record<string, boolean>>({})
   const [useCustomSql, setUseCustomSql] = useState(false)
+
+  // Подключения выбранной логической БД
+  const connections: DatabaseConnection[] = selectedLogicalDbId
+    ? (logicalDatabases.find((db) => db.id === selectedLogicalDbId)?.connections ?? [])
+    : []
 
   useEffect(() => {
     apiClient
@@ -70,65 +74,59 @@ export function ConfigPage() {
         toast.error("Не удалось загрузить сценарии")
         setScenariosLoading(false)
       })
+
+    loadLogicalDatabases()
   }, [])
 
+  const loadLogicalDatabases = () => {
+    apiClient
+      .getLogicalDatabases()
+      .then((response) => {
+        const dbs = response.databases
+        setLogicalDatabases(dbs)
+
+        // Инициализируем статус всех подключений
+        const status: Record<string, boolean> = {}
+        dbs.forEach((db) => db.connections.forEach((conn) => { status[conn.id] = true }))
+        setHealthStatus(status)
+
+        // Автовыбор первой БД, если она одна
+        if (dbs.length === 1 && !selectedLogicalDbId) {
+          setSelectedLogicalDbId(dbs[0].id)
+        }
+      })
+      .catch((error) => {
+        console.error("Ошибка загрузки логических баз данных:", error)
+        toast.error("Не удалось загрузить список баз данных")
+      })
+  }
+
   useEffect(() => {
-    const selectedConnections = connections.filter((connection) =>
-      testConfig.databases.includes(connection.id)
-    )
-    const logicalDatabaseIds = Array.from(
-      new Set(
-        selectedConnections
-          .map((connection) => connection.logical_database_id)
-          .filter((value): value is string => Boolean(value))
-      )
-    )
-
-    if (
-      logicalDatabaseIds.length === 1 &&
-      selectedConnections.length > 0 &&
-      selectedConnections.every((connection) => connection.logical_database_id === logicalDatabaseIds[0])
-    ) {
-      apiClient
-        .getLogicalDatabaseDetail(logicalDatabaseIds[0])
-        .then((logicalDatabase) => {
-          setSelectedLogicalDatabaseDetail(logicalDatabase)
-          setSelectedProfileDetail(null)
-        })
-        .catch(() => {
-          setSelectedLogicalDatabaseDetail(null)
-          setSelectedProfileDetail(null)
-        })
-      return
-    }
-
-    setSelectedLogicalDatabaseDetail(null)
-    const profileIds = Array.from(
-      new Set(
-        selectedConnections
-          .map((connection) => connection.schema_profile_id)
-          .filter((value): value is string => Boolean(value))
-      )
-    )
-
-    if (profileIds.length !== 1 || selectedConnections.some((connection) => !connection.schema_profile_id)) {
-      setSelectedProfileDetail(null)
+    if (!selectedLogicalDbId) {
+      setSelectedLogicalDatabaseDetail(null)
       return
     }
 
     apiClient
-      .getSchemaProfile(profileIds[0])
-      .then((profile) => setSelectedProfileDetail(profile))
-      .catch(() => setSelectedProfileDetail(null))
-  }, [connections, testConfig.databases])
+      .getLogicalDatabaseDetail(selectedLogicalDbId)
+      .then((detail) => setSelectedLogicalDatabaseDetail(detail))
+      .catch(() => setSelectedLogicalDatabaseDetail(null))
+  }, [selectedLogicalDbId])
 
-  const handleConnectionsChange = (newConnections: DatabaseConnection[]) => {
-    setConnections(newConnections)
-    const status: Record<string, boolean> = {}
-    newConnections.forEach((conn) => {
-      status[conn.id] = true
-    })
-    setHealthStatus(status)
+  const handleLogicalDbSelect = (id: string) => {
+    if (id === selectedLogicalDbId) return
+
+    setSelectedLogicalDbId(id)
+
+    // Сбрасываем выбранные подключения, если они не принадлежат новой БД
+    const newDb = logicalDatabases.find((db) => db.id === id)
+    if (newDb) {
+      const validIds = new Set(newDb.connections.map((c) => c.id))
+      const filtered = testConfig.databases.filter((dbId) => validIds.has(dbId))
+      if (filtered.length !== testConfig.databases.length) {
+        setTestConfig({ databases: filtered })
+      }
+    }
   }
 
   const handleDatabaseToggle = (dbId: string) => {
@@ -268,10 +266,9 @@ export function ConfigPage() {
   )
   const hasMissingProfiles = selectedConnections.some((connection) => !connection.schema_profile_id)
   const hasMixedProfiles = selectedProfileIds.length > 1
-  const selectedBundles = selectedLogicalDatabaseDetail?.bundles || selectedProfileDetail?.bundles || []
+  const selectedBundles = selectedLogicalDatabaseDetail?.bundles || []
   const selectedProfileName =
     selectedLogicalDatabaseDetail?.schema_profile_name ||
-    selectedProfileDetail?.name ||
     selectedConnections[0]?.schema_profile_name ||
     null
   const selectedBundle = selectedBundles.find(
@@ -297,7 +294,11 @@ export function ConfigPage() {
         <p className="text-muted-foreground">Настройте параметры нагрузочного тестирования</p>
       </div>
 
-      <ConnectionManager onConnectionsChange={handleConnectionsChange} />
+      <LogicalDbSelectorCard
+        databases={logicalDatabases}
+        selectedId={selectedLogicalDbId}
+        onSelect={handleLogicalDbSelect}
+      />
 
       <ConnectionStatusCard connections={connections} healthStatus={healthStatus} />
 
