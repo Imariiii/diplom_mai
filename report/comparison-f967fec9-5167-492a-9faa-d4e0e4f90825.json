@@ -1,0 +1,3465 @@
+{
+  "tests": [
+    {
+      "id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "name": "Тест 11.04.2026, 17:50:26",
+      "status": "completed",
+      "config": {
+        "query_id": null,
+        "db_types": null,
+        "connection_ids": [
+          "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+          "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+          "f4c54e43-2999-47e3-a49c-8b2c89d64aad"
+        ],
+        "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+        "iterations": 121,
+        "virtual_users": 20,
+        "scenario": "read_only",
+        "use_indexes": false,
+        "warmup_time": 5,
+        "test_name": "Тест 11.04.2026, 17:50:26",
+        "logical_database_id": "a23dc7cb-0b43-4bcb-a1e5-8945227a739b",
+        "scenario_template_id": "read_only",
+        "resolved_bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+        "resolved_bundle_name": "read_only::Sakila MySQL::canonical",
+        "resolved_bundle_description": "Канонический bundle, сгенерированный по эталонной БД 'Sakila MySQL'",
+        "resolved_profile_id": "10b90004-1c11-43ba-9a71-3cb80ae82329",
+        "resolved_profile_name": "sakila_like",
+        "resolved_bundle_snapshot": {
+          "id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+          "name": "read_only::Sakila MySQL::canonical",
+          "description": "Канонический bundle, сгенерированный по эталонной БД 'Sakila MySQL'",
+          "scenario_template_id": "read_only",
+          "scenario_template_name": "Только чтение",
+          "schema_profile_id": "10b90004-1c11-43ba-9a71-3cb80ae82329",
+          "schema_profile_name": "sakila_like",
+          "generation_source": "generated_from_reference",
+          "is_builtin": true,
+          "queries": [
+            {
+              "id": "b9bdb57b-4aca-44ae-9e65-a5a49e8806dd",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT * FROM payment WHERE payment_id = {payment_payment_id}",
+              "query_type": "select",
+              "weight": 30,
+              "order_index": 0,
+              "description": "Быстрое чтение одной строки по первичному ключу. Таблица: payment",
+              "created_at": "2026-04-11T14:42:53.017537+00:00",
+              "params": [
+                {
+                  "id": "3ccc9392-12da-470a-bb4c-3592524f5f35",
+                  "query_id": "b9bdb57b-4aca-44ae-9e65-a5a49e8806dd",
+                  "param_name": "payment_payment_id",
+                  "param_type": "random_from_table",
+                  "min_value": null,
+                  "max_value": null,
+                  "string_pattern": null,
+                  "string_length": null,
+                  "table_ref": "payment",
+                  "column_ref": "payment_id",
+                  "current_value": 0,
+                  "step": 1,
+                  "created_at": "2026-04-11T14:42:53.019485+00:00"
+                }
+              ]
+            },
+            {
+              "id": "3652ddc9-91bd-445f-9201-a72a6a42c7f8",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT customer_id, staff_id, rental_id FROM payment WHERE payment_id = {payment_payment_id}",
+              "query_type": "select",
+              "weight": 20,
+              "order_index": 1,
+              "description": "Чтение нескольких прикладных колонок по первичному ключу. Таблица: payment",
+              "created_at": "2026-04-11T14:42:53.018703+00:00",
+              "params": [
+                {
+                  "id": "00e06ff4-96c5-4b21-a7b8-c3b3d6c13e20",
+                  "query_id": "3652ddc9-91bd-445f-9201-a72a6a42c7f8",
+                  "param_name": "payment_payment_id",
+                  "param_type": "random_from_table",
+                  "min_value": null,
+                  "max_value": null,
+                  "string_pattern": null,
+                  "string_length": null,
+                  "table_ref": "payment",
+                  "column_ref": "payment_id",
+                  "current_value": 0,
+                  "step": 1,
+                  "created_at": "2026-04-11T14:42:53.021120+00:00"
+                }
+              ]
+            },
+            {
+              "id": "202a7082-2e28-45c3-b814-deda5e1fd14d",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT * FROM payment WHERE customer_id = {payment_customer_id} LIMIT 100",
+              "query_type": "select",
+              "weight": 15,
+              "order_index": 2,
+              "description": "Чтение строк по значению внешнего ключа. Таблица: payment",
+              "created_at": "2026-04-11T14:42:53.020675+00:00",
+              "params": [
+                {
+                  "id": "e3aec68f-0b43-4abb-96c0-c808289aaa89",
+                  "query_id": "202a7082-2e28-45c3-b814-deda5e1fd14d",
+                  "param_name": "payment_customer_id",
+                  "param_type": "random_from_table",
+                  "min_value": null,
+                  "max_value": null,
+                  "string_pattern": null,
+                  "string_length": null,
+                  "table_ref": "customer",
+                  "column_ref": "customer_id",
+                  "current_value": 0,
+                  "step": 1,
+                  "created_at": "2026-04-11T14:42:53.022057+00:00"
+                }
+              ]
+            },
+            {
+              "id": "9f1503e5-1b15-4bf8-bc83-41aef22244d2",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT a.*, b.* FROM payment a JOIN customer b ON a.customer_id = b.customer_id WHERE a.payment_id = {payment_payment_id}",
+              "query_type": "select",
+              "weight": 20,
+              "order_index": 3,
+              "description": "Чтение с одним JOIN через существующую FK-связь. Таблицы: payment -> customer",
+              "created_at": "2026-04-11T14:42:53.021720+00:00",
+              "params": [
+                {
+                  "id": "0dcc1ab4-f9c3-4485-95c4-bf84b098de92",
+                  "query_id": "9f1503e5-1b15-4bf8-bc83-41aef22244d2",
+                  "param_name": "payment_payment_id",
+                  "param_type": "random_from_table",
+                  "min_value": null,
+                  "max_value": null,
+                  "string_pattern": null,
+                  "string_length": null,
+                  "table_ref": "payment",
+                  "column_ref": "payment_id",
+                  "current_value": 0,
+                  "step": 1,
+                  "created_at": "2026-04-11T14:42:53.023043+00:00"
+                }
+              ]
+            },
+            {
+              "id": "caff5982-ffc0-4604-a36a-97df2e72ba50",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT a.*, b.*, c.* FROM payment a JOIN customer b ON a.customer_id = b.customer_id JOIN address c ON b.address_id = c.address_id WHERE a.payment_id = {payment_payment_id}",
+              "query_type": "select",
+              "weight": 15,
+              "order_index": 4,
+              "description": "Чтение с двумя JOIN по цепочке FK. Таблицы: payment -> customer -> address",
+              "created_at": "2026-04-11T14:42:53.022648+00:00",
+              "params": [
+                {
+                  "id": "ff51735b-70d3-4fd2-a1e3-9ca2680fea69",
+                  "query_id": "caff5982-ffc0-4604-a36a-97df2e72ba50",
+                  "param_name": "payment_payment_id",
+                  "param_type": "random_from_table",
+                  "min_value": null,
+                  "max_value": null,
+                  "string_pattern": null,
+                  "string_length": null,
+                  "table_ref": "payment",
+                  "column_ref": "payment_id",
+                  "current_value": 0,
+                  "step": 1,
+                  "created_at": "2026-04-11T14:42:53.024014+00:00"
+                }
+              ]
+            },
+            {
+              "id": "318933e6-257d-4034-8950-b69835e539d5",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT customer_id, COUNT(*) AS item_count FROM payment GROUP BY customer_id ORDER BY item_count DESC",
+              "query_type": "select",
+              "weight": 20,
+              "order_index": 5,
+              "description": "Агрегация количества строк по связующей колонке. Таблица: payment",
+              "created_at": "2026-04-11T14:42:53.023624+00:00",
+              "params": []
+            }
+          ],
+          "indexes": [
+            {
+              "id": "51bd7d50-e8be-46fb-a1ba-5d31e627fd28",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "table_name": "payment",
+              "column_names": "rental_id",
+              "index_type": "btree",
+              "index_name": "idx_bundle_read_only_payment_rental_id",
+              "is_unique": false,
+              "condition": null,
+              "description": "Ускоряет JOIN между rental и payment",
+              "created_at": "2026-04-11T14:42:53.025213+00:00"
+            },
+            {
+              "id": "ada3950d-ceac-425d-8df5-15931a9b75ee",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "table_name": "payment",
+              "column_names": "customer_id",
+              "index_type": "btree",
+              "index_name": "idx_bundle_read_only_payment_customer_id",
+              "is_unique": false,
+              "condition": null,
+              "description": "Ускоряет фильтрацию и JOIN по payment.customer_id",
+              "created_at": "2026-04-11T14:42:53.025215+00:00"
+            },
+            {
+              "id": "708ae1c3-7c9f-44cd-a153-8e5e02390349",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "table_name": "customer",
+              "column_names": "address_id",
+              "index_type": "btree",
+              "index_name": "idx_bundle_read_only_customer_address_id",
+              "is_unique": false,
+              "condition": null,
+              "description": "Ускоряет второй JOIN из customer в address",
+              "created_at": "2026-04-11T14:42:53.025215+00:00"
+            }
+          ]
+        }
+      },
+      "summary": {
+        "total_transactions": 7260,
+        "overall_tps": 294.4316693244431,
+        "total_duration": 24.65767360100108
+      },
+      "started_at": "2026-04-11T14:48:20.185505+00:00",
+      "finished_at": "2026-04-11T14:48:44.843179+00:00",
+      "scenario_info": {
+        "name": "read_only::Sakila MySQL::canonical",
+        "description": "Канонический bundle, сгенерированный по эталонной БД 'Sakila MySQL'",
+        "scenario_type": "read_only",
+        "queries": [
+          {
+            "sql_template": "SELECT * FROM payment WHERE payment_id = {payment_payment_id}",
+            "query_type": "select",
+            "weight": 30,
+            "description": "Быстрое чтение одной строки по первичному ключу. Таблица: payment"
+          },
+          {
+            "sql_template": "SELECT customer_id, staff_id, rental_id FROM payment WHERE payment_id = {payment_payment_id}",
+            "query_type": "select",
+            "weight": 20,
+            "description": "Чтение нескольких прикладных колонок по первичному ключу. Таблица: payment"
+          },
+          {
+            "sql_template": "SELECT * FROM payment WHERE customer_id = {payment_customer_id} LIMIT 100",
+            "query_type": "select",
+            "weight": 15,
+            "description": "Чтение строк по значению внешнего ключа. Таблица: payment"
+          },
+          {
+            "sql_template": "SELECT a.*, b.* FROM payment a JOIN customer b ON a.customer_id = b.customer_id WHERE a.payment_id = {payment_payment_id}",
+            "query_type": "select",
+            "weight": 20,
+            "description": "Чтение с одним JOIN через существующую FK-связь. Таблицы: payment -> customer"
+          },
+          {
+            "sql_template": "SELECT a.*, b.*, c.* FROM payment a JOIN customer b ON a.customer_id = b.customer_id JOIN address c ON b.address_id = c.address_id WHERE a.payment_id = {payment_payment_id}",
+            "query_type": "select",
+            "weight": 15,
+            "description": "Чтение с двумя JOIN по цепочке FK. Таблицы: payment -> customer -> address"
+          },
+          {
+            "sql_template": "SELECT customer_id, COUNT(*) AS item_count FROM payment GROUP BY customer_id ORDER BY item_count DESC",
+            "query_type": "select",
+            "weight": 20,
+            "description": "Агрегация количества строк по связующей колонке. Таблица: payment"
+          }
+        ]
+      },
+      "connections": [
+        {
+          "id": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+          "name": "Sakila MySQL",
+          "dbms_type": "mysql",
+          "host": "localhost",
+          "port": 3306,
+          "database": "sakila"
+        },
+        {
+          "id": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+          "name": "Sakila PostgreSQL (Pagila)",
+          "dbms_type": "postgresql",
+          "host": "localhost",
+          "port": 5432,
+          "database": "postgres"
+        },
+        {
+          "id": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+          "name": "Sakila MariaDB",
+          "dbms_type": "mariadb",
+          "host": "localhost",
+          "port": 3307,
+          "database": "sakila"
+        }
+      ],
+      "logical_database_id": "a23dc7cb-0b43-4bcb-a1e5-8945227a739b",
+      "use_indexes": false
+    },
+    {
+      "id": "87768715-3b42-4e1e-ae2c-02198452bc5e",
+      "name": "Тест 11.04.2026, 17:51:14",
+      "status": "completed",
+      "config": {
+        "query_id": null,
+        "db_types": null,
+        "connection_ids": [
+          "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+          "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+          "f4c54e43-2999-47e3-a49c-8b2c89d64aad"
+        ],
+        "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+        "iterations": 121,
+        "virtual_users": 50,
+        "scenario": "read_only",
+        "use_indexes": false,
+        "warmup_time": 5,
+        "test_name": "Тест 11.04.2026, 17:51:14",
+        "logical_database_id": "a23dc7cb-0b43-4bcb-a1e5-8945227a739b",
+        "scenario_template_id": "read_only",
+        "resolved_bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+        "resolved_bundle_name": "read_only::Sakila MySQL::canonical",
+        "resolved_bundle_description": "Канонический bundle, сгенерированный по эталонной БД 'Sakila MySQL'",
+        "resolved_profile_id": "10b90004-1c11-43ba-9a71-3cb80ae82329",
+        "resolved_profile_name": "sakila_like",
+        "resolved_bundle_snapshot": {
+          "id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+          "name": "read_only::Sakila MySQL::canonical",
+          "description": "Канонический bundle, сгенерированный по эталонной БД 'Sakila MySQL'",
+          "scenario_template_id": "read_only",
+          "scenario_template_name": "Только чтение",
+          "schema_profile_id": "10b90004-1c11-43ba-9a71-3cb80ae82329",
+          "schema_profile_name": "sakila_like",
+          "generation_source": "generated_from_reference",
+          "is_builtin": true,
+          "queries": [
+            {
+              "id": "b9bdb57b-4aca-44ae-9e65-a5a49e8806dd",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT * FROM payment WHERE payment_id = {payment_payment_id}",
+              "query_type": "select",
+              "weight": 30,
+              "order_index": 0,
+              "description": "Быстрое чтение одной строки по первичному ключу. Таблица: payment",
+              "created_at": "2026-04-11T14:42:53.017537+00:00",
+              "params": [
+                {
+                  "id": "3ccc9392-12da-470a-bb4c-3592524f5f35",
+                  "query_id": "b9bdb57b-4aca-44ae-9e65-a5a49e8806dd",
+                  "param_name": "payment_payment_id",
+                  "param_type": "random_from_table",
+                  "min_value": null,
+                  "max_value": null,
+                  "string_pattern": null,
+                  "string_length": null,
+                  "table_ref": "payment",
+                  "column_ref": "payment_id",
+                  "current_value": 0,
+                  "step": 1,
+                  "created_at": "2026-04-11T14:42:53.019485+00:00"
+                }
+              ]
+            },
+            {
+              "id": "3652ddc9-91bd-445f-9201-a72a6a42c7f8",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT customer_id, staff_id, rental_id FROM payment WHERE payment_id = {payment_payment_id}",
+              "query_type": "select",
+              "weight": 20,
+              "order_index": 1,
+              "description": "Чтение нескольких прикладных колонок по первичному ключу. Таблица: payment",
+              "created_at": "2026-04-11T14:42:53.018703+00:00",
+              "params": [
+                {
+                  "id": "00e06ff4-96c5-4b21-a7b8-c3b3d6c13e20",
+                  "query_id": "3652ddc9-91bd-445f-9201-a72a6a42c7f8",
+                  "param_name": "payment_payment_id",
+                  "param_type": "random_from_table",
+                  "min_value": null,
+                  "max_value": null,
+                  "string_pattern": null,
+                  "string_length": null,
+                  "table_ref": "payment",
+                  "column_ref": "payment_id",
+                  "current_value": 0,
+                  "step": 1,
+                  "created_at": "2026-04-11T14:42:53.021120+00:00"
+                }
+              ]
+            },
+            {
+              "id": "202a7082-2e28-45c3-b814-deda5e1fd14d",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT * FROM payment WHERE customer_id = {payment_customer_id} LIMIT 100",
+              "query_type": "select",
+              "weight": 15,
+              "order_index": 2,
+              "description": "Чтение строк по значению внешнего ключа. Таблица: payment",
+              "created_at": "2026-04-11T14:42:53.020675+00:00",
+              "params": [
+                {
+                  "id": "e3aec68f-0b43-4abb-96c0-c808289aaa89",
+                  "query_id": "202a7082-2e28-45c3-b814-deda5e1fd14d",
+                  "param_name": "payment_customer_id",
+                  "param_type": "random_from_table",
+                  "min_value": null,
+                  "max_value": null,
+                  "string_pattern": null,
+                  "string_length": null,
+                  "table_ref": "customer",
+                  "column_ref": "customer_id",
+                  "current_value": 0,
+                  "step": 1,
+                  "created_at": "2026-04-11T14:42:53.022057+00:00"
+                }
+              ]
+            },
+            {
+              "id": "9f1503e5-1b15-4bf8-bc83-41aef22244d2",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT a.*, b.* FROM payment a JOIN customer b ON a.customer_id = b.customer_id WHERE a.payment_id = {payment_payment_id}",
+              "query_type": "select",
+              "weight": 20,
+              "order_index": 3,
+              "description": "Чтение с одним JOIN через существующую FK-связь. Таблицы: payment -> customer",
+              "created_at": "2026-04-11T14:42:53.021720+00:00",
+              "params": [
+                {
+                  "id": "0dcc1ab4-f9c3-4485-95c4-bf84b098de92",
+                  "query_id": "9f1503e5-1b15-4bf8-bc83-41aef22244d2",
+                  "param_name": "payment_payment_id",
+                  "param_type": "random_from_table",
+                  "min_value": null,
+                  "max_value": null,
+                  "string_pattern": null,
+                  "string_length": null,
+                  "table_ref": "payment",
+                  "column_ref": "payment_id",
+                  "current_value": 0,
+                  "step": 1,
+                  "created_at": "2026-04-11T14:42:53.023043+00:00"
+                }
+              ]
+            },
+            {
+              "id": "caff5982-ffc0-4604-a36a-97df2e72ba50",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT a.*, b.*, c.* FROM payment a JOIN customer b ON a.customer_id = b.customer_id JOIN address c ON b.address_id = c.address_id WHERE a.payment_id = {payment_payment_id}",
+              "query_type": "select",
+              "weight": 15,
+              "order_index": 4,
+              "description": "Чтение с двумя JOIN по цепочке FK. Таблицы: payment -> customer -> address",
+              "created_at": "2026-04-11T14:42:53.022648+00:00",
+              "params": [
+                {
+                  "id": "ff51735b-70d3-4fd2-a1e3-9ca2680fea69",
+                  "query_id": "caff5982-ffc0-4604-a36a-97df2e72ba50",
+                  "param_name": "payment_payment_id",
+                  "param_type": "random_from_table",
+                  "min_value": null,
+                  "max_value": null,
+                  "string_pattern": null,
+                  "string_length": null,
+                  "table_ref": "payment",
+                  "column_ref": "payment_id",
+                  "current_value": 0,
+                  "step": 1,
+                  "created_at": "2026-04-11T14:42:53.024014+00:00"
+                }
+              ]
+            },
+            {
+              "id": "318933e6-257d-4034-8950-b69835e539d5",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT customer_id, COUNT(*) AS item_count FROM payment GROUP BY customer_id ORDER BY item_count DESC",
+              "query_type": "select",
+              "weight": 20,
+              "order_index": 5,
+              "description": "Агрегация количества строк по связующей колонке. Таблица: payment",
+              "created_at": "2026-04-11T14:42:53.023624+00:00",
+              "params": []
+            }
+          ],
+          "indexes": [
+            {
+              "id": "51bd7d50-e8be-46fb-a1ba-5d31e627fd28",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "table_name": "payment",
+              "column_names": "rental_id",
+              "index_type": "btree",
+              "index_name": "idx_bundle_read_only_payment_rental_id",
+              "is_unique": false,
+              "condition": null,
+              "description": "Ускоряет JOIN между rental и payment",
+              "created_at": "2026-04-11T14:42:53.025213+00:00"
+            },
+            {
+              "id": "ada3950d-ceac-425d-8df5-15931a9b75ee",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "table_name": "payment",
+              "column_names": "customer_id",
+              "index_type": "btree",
+              "index_name": "idx_bundle_read_only_payment_customer_id",
+              "is_unique": false,
+              "condition": null,
+              "description": "Ускоряет фильтрацию и JOIN по payment.customer_id",
+              "created_at": "2026-04-11T14:42:53.025215+00:00"
+            },
+            {
+              "id": "708ae1c3-7c9f-44cd-a153-8e5e02390349",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "table_name": "customer",
+              "column_names": "address_id",
+              "index_type": "btree",
+              "index_name": "idx_bundle_read_only_customer_address_id",
+              "is_unique": false,
+              "condition": null,
+              "description": "Ускоряет второй JOIN из customer в address",
+              "created_at": "2026-04-11T14:42:53.025215+00:00"
+            }
+          ]
+        }
+      },
+      "summary": {
+        "total_transactions": 18150,
+        "overall_tps": 483.46342394180294,
+        "total_duration": 37.541619699000876
+      },
+      "started_at": "2026-04-11T14:49:07.529596+00:00",
+      "finished_at": "2026-04-11T14:49:45.071216+00:00",
+      "scenario_info": {
+        "name": "read_only::Sakila MySQL::canonical",
+        "description": "Канонический bundle, сгенерированный по эталонной БД 'Sakila MySQL'",
+        "scenario_type": "read_only",
+        "queries": [
+          {
+            "sql_template": "SELECT * FROM payment WHERE payment_id = {payment_payment_id}",
+            "query_type": "select",
+            "weight": 30,
+            "description": "Быстрое чтение одной строки по первичному ключу. Таблица: payment"
+          },
+          {
+            "sql_template": "SELECT customer_id, staff_id, rental_id FROM payment WHERE payment_id = {payment_payment_id}",
+            "query_type": "select",
+            "weight": 20,
+            "description": "Чтение нескольких прикладных колонок по первичному ключу. Таблица: payment"
+          },
+          {
+            "sql_template": "SELECT * FROM payment WHERE customer_id = {payment_customer_id} LIMIT 100",
+            "query_type": "select",
+            "weight": 15,
+            "description": "Чтение строк по значению внешнего ключа. Таблица: payment"
+          },
+          {
+            "sql_template": "SELECT a.*, b.* FROM payment a JOIN customer b ON a.customer_id = b.customer_id WHERE a.payment_id = {payment_payment_id}",
+            "query_type": "select",
+            "weight": 20,
+            "description": "Чтение с одним JOIN через существующую FK-связь. Таблицы: payment -> customer"
+          },
+          {
+            "sql_template": "SELECT a.*, b.*, c.* FROM payment a JOIN customer b ON a.customer_id = b.customer_id JOIN address c ON b.address_id = c.address_id WHERE a.payment_id = {payment_payment_id}",
+            "query_type": "select",
+            "weight": 15,
+            "description": "Чтение с двумя JOIN по цепочке FK. Таблицы: payment -> customer -> address"
+          },
+          {
+            "sql_template": "SELECT customer_id, COUNT(*) AS item_count FROM payment GROUP BY customer_id ORDER BY item_count DESC",
+            "query_type": "select",
+            "weight": 20,
+            "description": "Агрегация количества строк по связующей колонке. Таблица: payment"
+          }
+        ]
+      },
+      "connections": [
+        {
+          "id": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+          "name": "Sakila MySQL",
+          "dbms_type": "mysql",
+          "host": "localhost",
+          "port": 3306,
+          "database": "sakila"
+        },
+        {
+          "id": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+          "name": "Sakila PostgreSQL (Pagila)",
+          "dbms_type": "postgresql",
+          "host": "localhost",
+          "port": 5432,
+          "database": "postgres"
+        },
+        {
+          "id": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+          "name": "Sakila MariaDB",
+          "dbms_type": "mariadb",
+          "host": "localhost",
+          "port": 3307,
+          "database": "sakila"
+        }
+      ],
+      "logical_database_id": "a23dc7cb-0b43-4bcb-a1e5-8945227a739b",
+      "use_indexes": false
+    },
+    {
+      "id": "c20d0b26-828f-4375-b5fa-a4bc91bc9655",
+      "name": "Тест 11.04.2026, 17:52:53",
+      "status": "completed",
+      "config": {
+        "query_id": null,
+        "db_types": null,
+        "connection_ids": [
+          "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+          "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+          "f4c54e43-2999-47e3-a49c-8b2c89d64aad"
+        ],
+        "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+        "iterations": 201,
+        "virtual_users": 20,
+        "scenario": "read_only",
+        "use_indexes": false,
+        "warmup_time": 5,
+        "test_name": "Тест 11.04.2026, 17:52:53",
+        "logical_database_id": "a23dc7cb-0b43-4bcb-a1e5-8945227a739b",
+        "scenario_template_id": "read_only",
+        "resolved_bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+        "resolved_bundle_name": "read_only::Sakila MySQL::canonical",
+        "resolved_bundle_description": "Канонический bundle, сгенерированный по эталонной БД 'Sakila MySQL'",
+        "resolved_profile_id": "10b90004-1c11-43ba-9a71-3cb80ae82329",
+        "resolved_profile_name": "sakila_like",
+        "resolved_bundle_snapshot": {
+          "id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+          "name": "read_only::Sakila MySQL::canonical",
+          "description": "Канонический bundle, сгенерированный по эталонной БД 'Sakila MySQL'",
+          "scenario_template_id": "read_only",
+          "scenario_template_name": "Только чтение",
+          "schema_profile_id": "10b90004-1c11-43ba-9a71-3cb80ae82329",
+          "schema_profile_name": "sakila_like",
+          "generation_source": "generated_from_reference",
+          "is_builtin": true,
+          "queries": [
+            {
+              "id": "b9bdb57b-4aca-44ae-9e65-a5a49e8806dd",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT * FROM payment WHERE payment_id = {payment_payment_id}",
+              "query_type": "select",
+              "weight": 30,
+              "order_index": 0,
+              "description": "Быстрое чтение одной строки по первичному ключу. Таблица: payment",
+              "created_at": "2026-04-11T14:42:53.017537+00:00",
+              "params": [
+                {
+                  "id": "3ccc9392-12da-470a-bb4c-3592524f5f35",
+                  "query_id": "b9bdb57b-4aca-44ae-9e65-a5a49e8806dd",
+                  "param_name": "payment_payment_id",
+                  "param_type": "random_from_table",
+                  "min_value": null,
+                  "max_value": null,
+                  "string_pattern": null,
+                  "string_length": null,
+                  "table_ref": "payment",
+                  "column_ref": "payment_id",
+                  "current_value": 0,
+                  "step": 1,
+                  "created_at": "2026-04-11T14:42:53.019485+00:00"
+                }
+              ]
+            },
+            {
+              "id": "3652ddc9-91bd-445f-9201-a72a6a42c7f8",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT customer_id, staff_id, rental_id FROM payment WHERE payment_id = {payment_payment_id}",
+              "query_type": "select",
+              "weight": 20,
+              "order_index": 1,
+              "description": "Чтение нескольких прикладных колонок по первичному ключу. Таблица: payment",
+              "created_at": "2026-04-11T14:42:53.018703+00:00",
+              "params": [
+                {
+                  "id": "00e06ff4-96c5-4b21-a7b8-c3b3d6c13e20",
+                  "query_id": "3652ddc9-91bd-445f-9201-a72a6a42c7f8",
+                  "param_name": "payment_payment_id",
+                  "param_type": "random_from_table",
+                  "min_value": null,
+                  "max_value": null,
+                  "string_pattern": null,
+                  "string_length": null,
+                  "table_ref": "payment",
+                  "column_ref": "payment_id",
+                  "current_value": 0,
+                  "step": 1,
+                  "created_at": "2026-04-11T14:42:53.021120+00:00"
+                }
+              ]
+            },
+            {
+              "id": "202a7082-2e28-45c3-b814-deda5e1fd14d",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT * FROM payment WHERE customer_id = {payment_customer_id} LIMIT 100",
+              "query_type": "select",
+              "weight": 15,
+              "order_index": 2,
+              "description": "Чтение строк по значению внешнего ключа. Таблица: payment",
+              "created_at": "2026-04-11T14:42:53.020675+00:00",
+              "params": [
+                {
+                  "id": "e3aec68f-0b43-4abb-96c0-c808289aaa89",
+                  "query_id": "202a7082-2e28-45c3-b814-deda5e1fd14d",
+                  "param_name": "payment_customer_id",
+                  "param_type": "random_from_table",
+                  "min_value": null,
+                  "max_value": null,
+                  "string_pattern": null,
+                  "string_length": null,
+                  "table_ref": "customer",
+                  "column_ref": "customer_id",
+                  "current_value": 0,
+                  "step": 1,
+                  "created_at": "2026-04-11T14:42:53.022057+00:00"
+                }
+              ]
+            },
+            {
+              "id": "9f1503e5-1b15-4bf8-bc83-41aef22244d2",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT a.*, b.* FROM payment a JOIN customer b ON a.customer_id = b.customer_id WHERE a.payment_id = {payment_payment_id}",
+              "query_type": "select",
+              "weight": 20,
+              "order_index": 3,
+              "description": "Чтение с одним JOIN через существующую FK-связь. Таблицы: payment -> customer",
+              "created_at": "2026-04-11T14:42:53.021720+00:00",
+              "params": [
+                {
+                  "id": "0dcc1ab4-f9c3-4485-95c4-bf84b098de92",
+                  "query_id": "9f1503e5-1b15-4bf8-bc83-41aef22244d2",
+                  "param_name": "payment_payment_id",
+                  "param_type": "random_from_table",
+                  "min_value": null,
+                  "max_value": null,
+                  "string_pattern": null,
+                  "string_length": null,
+                  "table_ref": "payment",
+                  "column_ref": "payment_id",
+                  "current_value": 0,
+                  "step": 1,
+                  "created_at": "2026-04-11T14:42:53.023043+00:00"
+                }
+              ]
+            },
+            {
+              "id": "caff5982-ffc0-4604-a36a-97df2e72ba50",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT a.*, b.*, c.* FROM payment a JOIN customer b ON a.customer_id = b.customer_id JOIN address c ON b.address_id = c.address_id WHERE a.payment_id = {payment_payment_id}",
+              "query_type": "select",
+              "weight": 15,
+              "order_index": 4,
+              "description": "Чтение с двумя JOIN по цепочке FK. Таблицы: payment -> customer -> address",
+              "created_at": "2026-04-11T14:42:53.022648+00:00",
+              "params": [
+                {
+                  "id": "ff51735b-70d3-4fd2-a1e3-9ca2680fea69",
+                  "query_id": "caff5982-ffc0-4604-a36a-97df2e72ba50",
+                  "param_name": "payment_payment_id",
+                  "param_type": "random_from_table",
+                  "min_value": null,
+                  "max_value": null,
+                  "string_pattern": null,
+                  "string_length": null,
+                  "table_ref": "payment",
+                  "column_ref": "payment_id",
+                  "current_value": 0,
+                  "step": 1,
+                  "created_at": "2026-04-11T14:42:53.024014+00:00"
+                }
+              ]
+            },
+            {
+              "id": "318933e6-257d-4034-8950-b69835e539d5",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT customer_id, COUNT(*) AS item_count FROM payment GROUP BY customer_id ORDER BY item_count DESC",
+              "query_type": "select",
+              "weight": 20,
+              "order_index": 5,
+              "description": "Агрегация количества строк по связующей колонке. Таблица: payment",
+              "created_at": "2026-04-11T14:42:53.023624+00:00",
+              "params": []
+            }
+          ],
+          "indexes": [
+            {
+              "id": "51bd7d50-e8be-46fb-a1ba-5d31e627fd28",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "table_name": "payment",
+              "column_names": "rental_id",
+              "index_type": "btree",
+              "index_name": "idx_bundle_read_only_payment_rental_id",
+              "is_unique": false,
+              "condition": null,
+              "description": "Ускоряет JOIN между rental и payment",
+              "created_at": "2026-04-11T14:42:53.025213+00:00"
+            },
+            {
+              "id": "ada3950d-ceac-425d-8df5-15931a9b75ee",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "table_name": "payment",
+              "column_names": "customer_id",
+              "index_type": "btree",
+              "index_name": "idx_bundle_read_only_payment_customer_id",
+              "is_unique": false,
+              "condition": null,
+              "description": "Ускоряет фильтрацию и JOIN по payment.customer_id",
+              "created_at": "2026-04-11T14:42:53.025215+00:00"
+            },
+            {
+              "id": "708ae1c3-7c9f-44cd-a153-8e5e02390349",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "table_name": "customer",
+              "column_names": "address_id",
+              "index_type": "btree",
+              "index_name": "idx_bundle_read_only_customer_address_id",
+              "is_unique": false,
+              "condition": null,
+              "description": "Ускоряет второй JOIN из customer в address",
+              "created_at": "2026-04-11T14:42:53.025215+00:00"
+            }
+          ]
+        }
+      },
+      "summary": {
+        "total_transactions": 12060,
+        "overall_tps": 411.37409714784195,
+        "total_duration": 29.316381569999066
+      },
+      "started_at": "2026-04-11T14:50:46.981016+00:00",
+      "finished_at": "2026-04-11T14:51:16.297398+00:00",
+      "scenario_info": {
+        "name": "read_only::Sakila MySQL::canonical",
+        "description": "Канонический bundle, сгенерированный по эталонной БД 'Sakila MySQL'",
+        "scenario_type": "read_only",
+        "queries": [
+          {
+            "sql_template": "SELECT * FROM payment WHERE payment_id = {payment_payment_id}",
+            "query_type": "select",
+            "weight": 30,
+            "description": "Быстрое чтение одной строки по первичному ключу. Таблица: payment"
+          },
+          {
+            "sql_template": "SELECT customer_id, staff_id, rental_id FROM payment WHERE payment_id = {payment_payment_id}",
+            "query_type": "select",
+            "weight": 20,
+            "description": "Чтение нескольких прикладных колонок по первичному ключу. Таблица: payment"
+          },
+          {
+            "sql_template": "SELECT * FROM payment WHERE customer_id = {payment_customer_id} LIMIT 100",
+            "query_type": "select",
+            "weight": 15,
+            "description": "Чтение строк по значению внешнего ключа. Таблица: payment"
+          },
+          {
+            "sql_template": "SELECT a.*, b.* FROM payment a JOIN customer b ON a.customer_id = b.customer_id WHERE a.payment_id = {payment_payment_id}",
+            "query_type": "select",
+            "weight": 20,
+            "description": "Чтение с одним JOIN через существующую FK-связь. Таблицы: payment -> customer"
+          },
+          {
+            "sql_template": "SELECT a.*, b.*, c.* FROM payment a JOIN customer b ON a.customer_id = b.customer_id JOIN address c ON b.address_id = c.address_id WHERE a.payment_id = {payment_payment_id}",
+            "query_type": "select",
+            "weight": 15,
+            "description": "Чтение с двумя JOIN по цепочке FK. Таблицы: payment -> customer -> address"
+          },
+          {
+            "sql_template": "SELECT customer_id, COUNT(*) AS item_count FROM payment GROUP BY customer_id ORDER BY item_count DESC",
+            "query_type": "select",
+            "weight": 20,
+            "description": "Агрегация количества строк по связующей колонке. Таблица: payment"
+          }
+        ]
+      },
+      "connections": [
+        {
+          "id": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+          "name": "Sakila MySQL",
+          "dbms_type": "mysql",
+          "host": "localhost",
+          "port": 3306,
+          "database": "sakila"
+        },
+        {
+          "id": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+          "name": "Sakila PostgreSQL (Pagila)",
+          "dbms_type": "postgresql",
+          "host": "localhost",
+          "port": 5432,
+          "database": "postgres"
+        },
+        {
+          "id": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+          "name": "Sakila MariaDB",
+          "dbms_type": "mariadb",
+          "host": "localhost",
+          "port": 3307,
+          "database": "sakila"
+        }
+      ],
+      "logical_database_id": "a23dc7cb-0b43-4bcb-a1e5-8945227a739b",
+      "use_indexes": false
+    },
+    {
+      "id": "fe2fccb3-5bb4-45b0-8440-33e20c82e9da",
+      "name": "Тест 11.04.2026, 17:54:34",
+      "status": "completed",
+      "config": {
+        "query_id": null,
+        "db_types": null,
+        "connection_ids": [
+          "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+          "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+          "f4c54e43-2999-47e3-a49c-8b2c89d64aad"
+        ],
+        "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+        "iterations": 201,
+        "virtual_users": 50,
+        "scenario": "read_only",
+        "use_indexes": true,
+        "warmup_time": 5,
+        "test_name": "Тест 11.04.2026, 17:54:34",
+        "logical_database_id": "a23dc7cb-0b43-4bcb-a1e5-8945227a739b",
+        "scenario_template_id": "read_only",
+        "resolved_bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+        "resolved_bundle_name": "read_only::Sakila MySQL::canonical",
+        "resolved_bundle_description": "Канонический bundle, сгенерированный по эталонной БД 'Sakila MySQL'",
+        "resolved_profile_id": "10b90004-1c11-43ba-9a71-3cb80ae82329",
+        "resolved_profile_name": "sakila_like",
+        "resolved_bundle_snapshot": {
+          "id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+          "name": "read_only::Sakila MySQL::canonical",
+          "description": "Канонический bundle, сгенерированный по эталонной БД 'Sakila MySQL'",
+          "scenario_template_id": "read_only",
+          "scenario_template_name": "Только чтение",
+          "schema_profile_id": "10b90004-1c11-43ba-9a71-3cb80ae82329",
+          "schema_profile_name": "sakila_like",
+          "generation_source": "generated_from_reference",
+          "is_builtin": true,
+          "queries": [
+            {
+              "id": "b9bdb57b-4aca-44ae-9e65-a5a49e8806dd",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT * FROM payment WHERE payment_id = {payment_payment_id}",
+              "query_type": "select",
+              "weight": 30,
+              "order_index": 0,
+              "description": "Быстрое чтение одной строки по первичному ключу. Таблица: payment",
+              "created_at": "2026-04-11T14:42:53.017537+00:00",
+              "params": [
+                {
+                  "id": "3ccc9392-12da-470a-bb4c-3592524f5f35",
+                  "query_id": "b9bdb57b-4aca-44ae-9e65-a5a49e8806dd",
+                  "param_name": "payment_payment_id",
+                  "param_type": "random_from_table",
+                  "min_value": null,
+                  "max_value": null,
+                  "string_pattern": null,
+                  "string_length": null,
+                  "table_ref": "payment",
+                  "column_ref": "payment_id",
+                  "current_value": 0,
+                  "step": 1,
+                  "created_at": "2026-04-11T14:42:53.019485+00:00"
+                }
+              ]
+            },
+            {
+              "id": "3652ddc9-91bd-445f-9201-a72a6a42c7f8",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT customer_id, staff_id, rental_id FROM payment WHERE payment_id = {payment_payment_id}",
+              "query_type": "select",
+              "weight": 20,
+              "order_index": 1,
+              "description": "Чтение нескольких прикладных колонок по первичному ключу. Таблица: payment",
+              "created_at": "2026-04-11T14:42:53.018703+00:00",
+              "params": [
+                {
+                  "id": "00e06ff4-96c5-4b21-a7b8-c3b3d6c13e20",
+                  "query_id": "3652ddc9-91bd-445f-9201-a72a6a42c7f8",
+                  "param_name": "payment_payment_id",
+                  "param_type": "random_from_table",
+                  "min_value": null,
+                  "max_value": null,
+                  "string_pattern": null,
+                  "string_length": null,
+                  "table_ref": "payment",
+                  "column_ref": "payment_id",
+                  "current_value": 0,
+                  "step": 1,
+                  "created_at": "2026-04-11T14:42:53.021120+00:00"
+                }
+              ]
+            },
+            {
+              "id": "202a7082-2e28-45c3-b814-deda5e1fd14d",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT * FROM payment WHERE customer_id = {payment_customer_id} LIMIT 100",
+              "query_type": "select",
+              "weight": 15,
+              "order_index": 2,
+              "description": "Чтение строк по значению внешнего ключа. Таблица: payment",
+              "created_at": "2026-04-11T14:42:53.020675+00:00",
+              "params": [
+                {
+                  "id": "e3aec68f-0b43-4abb-96c0-c808289aaa89",
+                  "query_id": "202a7082-2e28-45c3-b814-deda5e1fd14d",
+                  "param_name": "payment_customer_id",
+                  "param_type": "random_from_table",
+                  "min_value": null,
+                  "max_value": null,
+                  "string_pattern": null,
+                  "string_length": null,
+                  "table_ref": "customer",
+                  "column_ref": "customer_id",
+                  "current_value": 0,
+                  "step": 1,
+                  "created_at": "2026-04-11T14:42:53.022057+00:00"
+                }
+              ]
+            },
+            {
+              "id": "9f1503e5-1b15-4bf8-bc83-41aef22244d2",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT a.*, b.* FROM payment a JOIN customer b ON a.customer_id = b.customer_id WHERE a.payment_id = {payment_payment_id}",
+              "query_type": "select",
+              "weight": 20,
+              "order_index": 3,
+              "description": "Чтение с одним JOIN через существующую FK-связь. Таблицы: payment -> customer",
+              "created_at": "2026-04-11T14:42:53.021720+00:00",
+              "params": [
+                {
+                  "id": "0dcc1ab4-f9c3-4485-95c4-bf84b098de92",
+                  "query_id": "9f1503e5-1b15-4bf8-bc83-41aef22244d2",
+                  "param_name": "payment_payment_id",
+                  "param_type": "random_from_table",
+                  "min_value": null,
+                  "max_value": null,
+                  "string_pattern": null,
+                  "string_length": null,
+                  "table_ref": "payment",
+                  "column_ref": "payment_id",
+                  "current_value": 0,
+                  "step": 1,
+                  "created_at": "2026-04-11T14:42:53.023043+00:00"
+                }
+              ]
+            },
+            {
+              "id": "caff5982-ffc0-4604-a36a-97df2e72ba50",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT a.*, b.*, c.* FROM payment a JOIN customer b ON a.customer_id = b.customer_id JOIN address c ON b.address_id = c.address_id WHERE a.payment_id = {payment_payment_id}",
+              "query_type": "select",
+              "weight": 15,
+              "order_index": 4,
+              "description": "Чтение с двумя JOIN по цепочке FK. Таблицы: payment -> customer -> address",
+              "created_at": "2026-04-11T14:42:53.022648+00:00",
+              "params": [
+                {
+                  "id": "ff51735b-70d3-4fd2-a1e3-9ca2680fea69",
+                  "query_id": "caff5982-ffc0-4604-a36a-97df2e72ba50",
+                  "param_name": "payment_payment_id",
+                  "param_type": "random_from_table",
+                  "min_value": null,
+                  "max_value": null,
+                  "string_pattern": null,
+                  "string_length": null,
+                  "table_ref": "payment",
+                  "column_ref": "payment_id",
+                  "current_value": 0,
+                  "step": 1,
+                  "created_at": "2026-04-11T14:42:53.024014+00:00"
+                }
+              ]
+            },
+            {
+              "id": "318933e6-257d-4034-8950-b69835e539d5",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "sql_template": "SELECT customer_id, COUNT(*) AS item_count FROM payment GROUP BY customer_id ORDER BY item_count DESC",
+              "query_type": "select",
+              "weight": 20,
+              "order_index": 5,
+              "description": "Агрегация количества строк по связующей колонке. Таблица: payment",
+              "created_at": "2026-04-11T14:42:53.023624+00:00",
+              "params": []
+            }
+          ],
+          "indexes": [
+            {
+              "id": "51bd7d50-e8be-46fb-a1ba-5d31e627fd28",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "table_name": "payment",
+              "column_names": "rental_id",
+              "index_type": "btree",
+              "index_name": "idx_bundle_read_only_payment_rental_id",
+              "is_unique": false,
+              "condition": null,
+              "description": "Ускоряет JOIN между rental и payment",
+              "created_at": "2026-04-11T14:42:53.025213+00:00"
+            },
+            {
+              "id": "ada3950d-ceac-425d-8df5-15931a9b75ee",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "table_name": "payment",
+              "column_names": "customer_id",
+              "index_type": "btree",
+              "index_name": "idx_bundle_read_only_payment_customer_id",
+              "is_unique": false,
+              "condition": null,
+              "description": "Ускоряет фильтрацию и JOIN по payment.customer_id",
+              "created_at": "2026-04-11T14:42:53.025215+00:00"
+            },
+            {
+              "id": "708ae1c3-7c9f-44cd-a153-8e5e02390349",
+              "bundle_id": "2bb7c480-bbfb-4e48-8025-43e25acc300d",
+              "table_name": "customer",
+              "column_names": "address_id",
+              "index_type": "btree",
+              "index_name": "idx_bundle_read_only_customer_address_id",
+              "is_unique": false,
+              "condition": null,
+              "description": "Ускоряет второй JOIN из customer в address",
+              "created_at": "2026-04-11T14:42:53.025215+00:00"
+            }
+          ]
+        }
+      },
+      "summary": {
+        "total_transactions": 30150,
+        "overall_tps": 623.8331615954606,
+        "total_duration": 48.33022970899947
+      },
+      "started_at": "2026-04-11T14:52:28.190699+00:00",
+      "finished_at": "2026-04-11T14:53:16.520929+00:00",
+      "scenario_info": {
+        "name": "read_only::Sakila MySQL::canonical",
+        "description": "Канонический bundle, сгенерированный по эталонной БД 'Sakila MySQL'",
+        "scenario_type": "read_only",
+        "queries": [
+          {
+            "sql_template": "SELECT * FROM payment WHERE payment_id = {payment_payment_id}",
+            "query_type": "select",
+            "weight": 30,
+            "description": "Быстрое чтение одной строки по первичному ключу. Таблица: payment"
+          },
+          {
+            "sql_template": "SELECT customer_id, staff_id, rental_id FROM payment WHERE payment_id = {payment_payment_id}",
+            "query_type": "select",
+            "weight": 20,
+            "description": "Чтение нескольких прикладных колонок по первичному ключу. Таблица: payment"
+          },
+          {
+            "sql_template": "SELECT * FROM payment WHERE customer_id = {payment_customer_id} LIMIT 100",
+            "query_type": "select",
+            "weight": 15,
+            "description": "Чтение строк по значению внешнего ключа. Таблица: payment"
+          },
+          {
+            "sql_template": "SELECT a.*, b.* FROM payment a JOIN customer b ON a.customer_id = b.customer_id WHERE a.payment_id = {payment_payment_id}",
+            "query_type": "select",
+            "weight": 20,
+            "description": "Чтение с одним JOIN через существующую FK-связь. Таблицы: payment -> customer"
+          },
+          {
+            "sql_template": "SELECT a.*, b.*, c.* FROM payment a JOIN customer b ON a.customer_id = b.customer_id JOIN address c ON b.address_id = c.address_id WHERE a.payment_id = {payment_payment_id}",
+            "query_type": "select",
+            "weight": 15,
+            "description": "Чтение с двумя JOIN по цепочке FK. Таблицы: payment -> customer -> address"
+          },
+          {
+            "sql_template": "SELECT customer_id, COUNT(*) AS item_count FROM payment GROUP BY customer_id ORDER BY item_count DESC",
+            "query_type": "select",
+            "weight": 20,
+            "description": "Агрегация количества строк по связующей колонке. Таблица: payment"
+          }
+        ]
+      },
+      "connections": [
+        {
+          "id": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+          "name": "Sakila MySQL",
+          "dbms_type": "mysql",
+          "host": "localhost",
+          "port": 3306,
+          "database": "sakila"
+        },
+        {
+          "id": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+          "name": "Sakila PostgreSQL (Pagila)",
+          "dbms_type": "postgresql",
+          "host": "localhost",
+          "port": 5432,
+          "database": "postgres"
+        },
+        {
+          "id": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+          "name": "Sakila MariaDB",
+          "dbms_type": "mariadb",
+          "host": "localhost",
+          "port": 3307,
+          "database": "sakila"
+        }
+      ],
+      "logical_database_id": "a23dc7cb-0b43-4bcb-a1e5-8945227a739b",
+      "use_indexes": true
+    }
+  ],
+  "baseline_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+  "comparison_type": "mixed",
+  "warnings": [
+    "Определён mixed-сценарий: сравниваются тесты с разными конфигурациями и/или разными целевыми СУБД",
+    "Сравнение не блокируется, но интерпретация результатов требует учёта различий конфигурации",
+    "Для Тест 11.04.2026, 17:54:34/f4c54e43-2999-47e3-a49c-8b2c89d64aad доступно только 9 latency samples"
+  ],
+  "descriptive_stats": {
+    "f967fec9-5167-492a-9faa-d4e0e4f90825": {
+      "c5022087-55ed-4df8-a174-a6b8636b9eb9": {
+        "latency_ms": {
+          "count": 2420,
+          "mean": 16.848126499176896,
+          "median": 15.581589500470727,
+          "std": 9.264028421641713,
+          "min": 4.1693469993333565,
+          "max": 99.70331199838256,
+          "p50": 15.581589500470727,
+          "p95": 21.899395300624743,
+          "p99": 76.81755044881356,
+          "cv": 0.549855108346575,
+          "iqr": 4.418290001012792
+        },
+        "throughput": {
+          "count": 2,
+          "mean": 980.3652725850784,
+          "median": 980.3652725850784,
+          "std": 55.88170914816439,
+          "min": 940.8509371021171,
+          "max": 1019.8796080680398,
+          "p50": 980.3652725850784,
+          "p95": 1015.9281745197437,
+          "p99": 1019.0893213583806,
+          "cv": 0.0570009064078867,
+          "iqr": 39.51433548296143
+        },
+        "error_rate": 0,
+        "total_duration_sec": null,
+        "source": "metric_samples",
+        "sample_size_warning": null
+      },
+      "e0c34830-80ee-4185-a07d-6452cd47c7e7": {
+        "latency_ms": {
+          "count": 2420,
+          "mean": 17.826176344644693,
+          "median": 13.34927549942222,
+          "std": 39.19673520292695,
+          "min": 4.682066000896157,
+          "max": 544.6775390009861,
+          "p50": 13.34927549942222,
+          "p95": 17.172014849984404,
+          "p99": 96.5199913206561,
+          "cv": 2.198830217154357,
+          "iqr": 2.327187999526359
+        },
+        "throughput": {
+          "count": 2,
+          "mean": 916.5920820770202,
+          "median": 916.5920820770202,
+          "std": 339.70989764569555,
+          "min": 676.3809098155609,
+          "max": 1156.8032543384795,
+          "p50": 916.5920820770202,
+          "p95": 1132.7821371123337,
+          "p99": 1151.9990308932504,
+          "cv": 0.37062277133782845,
+          "iqr": 240.21117226145918
+        },
+        "error_rate": 0,
+        "total_duration_sec": null,
+        "source": "metric_samples",
+        "sample_size_warning": null
+      },
+      "f4c54e43-2999-47e3-a49c-8b2c89d64aad": {
+        "latency_ms": {
+          "count": 2420,
+          "mean": 17.06516198057351,
+          "median": 16.36434600004577,
+          "std": 6.098122631468068,
+          "min": 3.5907429992221296,
+          "max": 93.9351090000855,
+          "p50": 16.36434600004577,
+          "p95": 23.29681884930323,
+          "p99": 33.60830038986023,
+          "cv": 0.3573433781882642,
+          "iqr": 5.032688000483176
+        },
+        "throughput": {
+          "count": 2,
+          "mean": 947.129207257127,
+          "median": 947.129207257127,
+          "std": 9.266683005279795,
+          "min": 940.5766728649875,
+          "max": 953.6817416492664,
+          "p50": 947.129207257127,
+          "p95": 953.0264882100524,
+          "p99": 953.5506909614236,
+          "cv": 0.009783969213784443,
+          "iqr": 6.552534392139478
+        },
+        "error_rate": 0,
+        "total_duration_sec": null,
+        "source": "metric_samples",
+        "sample_size_warning": null
+      }
+    },
+    "87768715-3b42-4e1e-ae2c-02198452bc5e": {
+      "c5022087-55ed-4df8-a174-a6b8636b9eb9": {
+        "latency_ms": {
+          "count": 6050,
+          "mean": 46.33775590428823,
+          "median": 43.042736499955936,
+          "std": 22.23579307775788,
+          "min": 4.138357000556425,
+          "max": 379.38936300088244,
+          "p50": 43.042736499955936,
+          "p95": 72.15055079941521,
+          "p99": 124.37919661048001,
+          "cv": 0.47986339959333496,
+          "iqr": 10.17391199911799
+        },
+        "throughput": {
+          "count": 5,
+          "mean": 876.2200994777944,
+          "median": 875.0193666166546,
+          "std": 24.697683686557852,
+          "min": 855.3211173749712,
+          "max": 916.5278258836926,
+          "p50": 875.0193666166546,
+          "p95": 908.7007870131129,
+          "p99": 914.9624181095767,
+          "cv": 0.02818662080597907,
+          "iqr": 20.55307554793478
+        },
+        "error_rate": 0,
+        "total_duration_sec": null,
+        "source": "metric_samples",
+        "sample_size_warning": null
+      },
+      "e0c34830-80ee-4185-a07d-6452cd47c7e7": {
+        "latency_ms": {
+          "count": 3396,
+          "mean": 54.140317916373895,
+          "median": 34.46078149954701,
+          "std": 151.59486401065112,
+          "min": 4.688611999881687,
+          "max": 1906.3157519995002,
+          "p50": 34.46078149954701,
+          "p95": 108.64326150021952,
+          "p99": 1036.5119135504772,
+          "cv": 2.8000364579463177,
+          "iqr": 7.735706249604846
+        },
+        "throughput": {
+          "count": 3,
+          "mean": 751.7426712945913,
+          "median": 1043.5782492766577,
+          "std": 571.7881680952395,
+          "min": 92.9255688495288,
+          "max": 1118.7241957575877,
+          "p50": 1043.5782492766577,
+          "p95": 1111.2096011094948,
+          "p99": 1117.2212768279692,
+          "cv": 0.7606168838474361,
+          "iqr": 512.8993134540294
+        },
+        "error_rate": 0,
+        "total_duration_sec": null,
+        "source": "metric_samples",
+        "sample_size_warning": null
+      },
+      "f4c54e43-2999-47e3-a49c-8b2c89d64aad": {
+        "latency_ms": {
+          "count": 546,
+          "mean": 34.43455664471532,
+          "median": 36.20931500063307,
+          "std": 10.21775696090033,
+          "min": 6.087040999773308,
+          "max": 58.677402999819606,
+          "p50": 36.20931500063307,
+          "p95": 50.17316999919785,
+          "p99": 54.22087459892282,
+          "cv": 0.29672973769704253,
+          "iqr": 14.001197749621497
+        },
+        "throughput": {
+          "count": 6,
+          "mean": 865.8593157001425,
+          "median": 839.322828070785,
+          "std": 49.67741509130572,
+          "min": 826.3640812755264,
+          "max": 937.5964289253594,
+          "p50": 839.322828070785,
+          "p95": 933.4549096801109,
+          "p99": 936.7681250763097,
+          "cv": 0.057373541163712106,
+          "iqr": 67.59364466993236
+        },
+        "error_rate": 0,
+        "total_duration_sec": null,
+        "source": "mixed_sources",
+        "sample_size_warning": null
+      }
+    },
+    "c20d0b26-828f-4375-b5fa-a4bc91bc9655": {
+      "c5022087-55ed-4df8-a174-a6b8636b9eb9": {
+        "latency_ms": {
+          "count": 3526,
+          "mean": 16.859000500008484,
+          "median": 16.04465749915107,
+          "std": 8.15231388047003,
+          "min": 3.5569930005294736,
+          "max": 110.82960599924263,
+          "p50": 16.04465749915107,
+          "p95": 23.53092175007987,
+          "p99": 35.003050249997614,
+          "cv": 0.48355855262391906,
+          "iqr": 5.1743900003202725
+        },
+        "throughput": {
+          "count": 2,
+          "mean": 975.5537218823318,
+          "median": 975.5537218823318,
+          "std": 7.2603646835454665,
+          "min": 970.4198687807095,
+          "max": 980.6875749839542,
+          "p50": 975.5537218823318,
+          "p95": 980.174189673792,
+          "p99": 980.5848979219218,
+          "cv": 0.007442301249731881,
+          "iqr": 5.133853101622435
+        },
+        "error_rate": 0,
+        "total_duration_sec": null,
+        "source": "metric_samples",
+        "sample_size_warning": null
+      },
+      "e0c34830-80ee-4185-a07d-6452cd47c7e7": {
+        "latency_ms": {
+          "count": 3734,
+          "mean": 16.66459895501325,
+          "median": 12.349506499958807,
+          "std": 34.49226567118907,
+          "min": 4.70083300024271,
+          "max": 576.6478690002259,
+          "p50": 12.349506499958807,
+          "p95": 15.86188250066698,
+          "p99": 110.20838667966024,
+          "cv": 2.069792724343521,
+          "iqr": 1.9595030007621972
+        },
+        "throughput": {
+          "count": 3,
+          "mean": 1055.9251276209113,
+          "median": 1153.972962214141,
+          "std": 250.2480421561131,
+          "min": 771.4993216282799,
+          "max": 1242.3030990203129,
+          "p50": 1153.972962214141,
+          "p95": 1233.4700853396957,
+          "p99": 1240.5364962841895,
+          "cv": 0.23699411597481643,
+          "iqr": 235.40188869601639
+        },
+        "error_rate": 0,
+        "total_duration_sec": null,
+        "source": "metric_samples",
+        "sample_size_warning": null
+      },
+      "f4c54e43-2999-47e3-a49c-8b2c89d64aad": {
+        "latency_ms": {
+          "count": 2732,
+          "mean": 18.327206156288252,
+          "median": 16.3326470001266,
+          "std": 12.78940289446722,
+          "min": 4.07552099932218,
+          "max": 122.69369600107893,
+          "p50": 16.3326470001266,
+          "p95": 25.323412900434047,
+          "p99": 111.10104705994672,
+          "cv": 0.6978370181141355,
+          "iqr": 5.584581248967879
+        },
+        "throughput": {
+          "count": 3,
+          "mean": 921.9098683574648,
+          "median": 959.7398721053956,
+          "std": 89.25239927128537,
+          "min": 819.9728279153903,
+          "max": 986.0169050516085,
+          "p50": 959.7398721053956,
+          "p95": 983.3892017569873,
+          "p99": 985.4913643926843,
+          "cv": 0.0968125001528656,
+          "iqr": 83.02203856810911
+        },
+        "error_rate": 0,
+        "total_duration_sec": null,
+        "source": "metric_samples",
+        "sample_size_warning": null
+      }
+    },
+    "fe2fccb3-5bb4-45b0-8440-33e20c82e9da": {
+      "c5022087-55ed-4df8-a174-a6b8636b9eb9": {
+        "latency_ms": {
+          "count": 8643,
+          "mean": 41.226659079829794,
+          "median": 38.82329000043683,
+          "std": 17.65172337511767,
+          "min": 3.9987739983189385,
+          "max": 326.3955200000055,
+          "p50": 38.82329000043683,
+          "p95": 53.88296430101036,
+          "p99": 112.50208265959373,
+          "cv": 0.4281628385394392,
+          "iqr": 9.890487999655306
+        },
+        "throughput": {
+          "count": 7,
+          "mean": 982.2450359409164,
+          "median": 983.4116193876105,
+          "std": 39.27470845085116,
+          "min": 923.1132569091221,
+          "max": 1045.3075732172697,
+          "p50": 983.4116193876105,
+          "p95": 1035.158403178609,
+          "p99": 1043.2777392095375,
+          "cv": 0.039984634193879084,
+          "iqr": 38.523569749858666
+        },
+        "error_rate": 0,
+        "total_duration_sec": null,
+        "source": "metric_samples",
+        "sample_size_warning": null
+      },
+      "e0c34830-80ee-4185-a07d-6452cd47c7e7": {
+        "latency_ms": {
+          "count": 1349,
+          "mean": 70.31494336393469,
+          "median": 26.604128999679233,
+          "std": 222.8298653352077,
+          "min": 4.804002999662771,
+          "max": 1718.5394619991712,
+          "p50": 26.604128999679233,
+          "p95": 106.37542360018415,
+          "p99": 1378.3074974401093,
+          "cv": 3.1690257386952485,
+          "iqr": 10.437678000016604
+        },
+        "throughput": {
+          "count": 1,
+          "mean": 205.73420621847524,
+          "median": 205.73420621847524,
+          "std": 0,
+          "min": 205.73420621847524,
+          "max": 205.73420621847524,
+          "p50": 205.73420621847524,
+          "p95": 205.73420621847524,
+          "p99": 205.73420621847524,
+          "cv": 0,
+          "iqr": 0
+        },
+        "error_rate": 0,
+        "total_duration_sec": null,
+        "source": "metric_samples",
+        "sample_size_warning": null
+      },
+      "f4c54e43-2999-47e3-a49c-8b2c89d64aad": {
+        "latency_ms": {
+          "count": 9,
+          "mean": 45.91021799090189,
+          "median": 47.79539991611944,
+          "std": 4.975431491784413,
+          "min": 39.84701593922382,
+          "max": 54.02134887962162,
+          "p50": 47.79539991611944,
+          "p95": 52.46300761459187,
+          "p99": 53.70968062661567,
+          "cv": 0.1083730748734498,
+          "iqr": 7.241885038505401
+        },
+        "throughput": {
+          "count": 9,
+          "mean": 891.6225791205552,
+          "median": 867.9633233747016,
+          "std": 85.01434271675654,
+          "min": 757.2646196426276,
+          "max": 1012.4411644918273,
+          "p50": 867.9633233747016,
+          "p95": 995.5715965570975,
+          "p99": 1009.0672509048813,
+          "cv": 0.09534790247305061,
+          "iqr": 115.68931897634263
+        },
+        "error_rate": 0,
+        "total_duration_sec": null,
+        "source": "time_series",
+        "sample_size_warning": "Для Тест 11.04.2026, 17:54:34/f4c54e43-2999-47e3-a49c-8b2c89d64aad доступно только 9 latency samples"
+      }
+    }
+  },
+  "normalized_metrics": {
+    "f967fec9-5167-492a-9faa-d4e0e4f90825": {
+      "c5022087-55ed-4df8-a174-a6b8636b9eb9": {
+        "throughput_abs": 980.3652725850784,
+        "latency_mean_abs": 16.848126499176896,
+        "throughput_per_thread": 49.01826362925392,
+        "throughput_per_second": 98.14388977481437,
+        "scaling_efficiency": 1,
+        "latency_per_thread": 0.8424063249588448,
+        "threads": 20,
+        "duration_seconds": 24.65767360100108,
+        "source_metrics": [
+          "throughput_abs",
+          "latency_mean_abs",
+          "throughput_per_thread",
+          "throughput_per_second",
+          "scaling_efficiency",
+          "latency_per_thread"
+        ],
+        "normalization_warning": null
+      },
+      "e0c34830-80ee-4185-a07d-6452cd47c7e7": {
+        "throughput_abs": 916.5920820770202,
+        "latency_mean_abs": 17.826176344644693,
+        "throughput_per_thread": 45.82960410385101,
+        "throughput_per_second": 98.14388977481437,
+        "scaling_efficiency": 1,
+        "latency_per_thread": 0.8913088172322347,
+        "threads": 20,
+        "duration_seconds": 24.65767360100108,
+        "source_metrics": [
+          "throughput_abs",
+          "latency_mean_abs",
+          "throughput_per_thread",
+          "throughput_per_second",
+          "scaling_efficiency",
+          "latency_per_thread"
+        ],
+        "normalization_warning": null
+      },
+      "f4c54e43-2999-47e3-a49c-8b2c89d64aad": {
+        "throughput_abs": 947.129207257127,
+        "latency_mean_abs": 17.06516198057351,
+        "throughput_per_thread": 47.356460362856346,
+        "throughput_per_second": 98.14388977481437,
+        "scaling_efficiency": 1,
+        "latency_per_thread": 0.8532580990286756,
+        "threads": 20,
+        "duration_seconds": 24.65767360100108,
+        "source_metrics": [
+          "throughput_abs",
+          "latency_mean_abs",
+          "throughput_per_thread",
+          "throughput_per_second",
+          "scaling_efficiency",
+          "latency_per_thread"
+        ],
+        "normalization_warning": null
+      }
+    },
+    "87768715-3b42-4e1e-ae2c-02198452bc5e": {
+      "c5022087-55ed-4df8-a174-a6b8636b9eb9": {
+        "throughput_abs": 876.2200994777944,
+        "latency_mean_abs": 46.33775590428823,
+        "throughput_per_thread": 17.524401989555887,
+        "throughput_per_second": 161.15447464726765,
+        "scaling_efficiency": 0.3575076041473119,
+        "latency_per_thread": 0.9267551180857646,
+        "threads": 50,
+        "duration_seconds": 37.541619699000876,
+        "source_metrics": [
+          "throughput_abs",
+          "latency_mean_abs",
+          "throughput_per_thread",
+          "throughput_per_second",
+          "scaling_efficiency",
+          "latency_per_thread"
+        ],
+        "normalization_warning": null
+      },
+      "e0c34830-80ee-4185-a07d-6452cd47c7e7": {
+        "throughput_abs": 751.7426712945913,
+        "latency_mean_abs": 54.140317916373895,
+        "throughput_per_thread": 15.034853425891827,
+        "throughput_per_second": 161.15447464726765,
+        "scaling_efficiency": 0.32805985824844736,
+        "latency_per_thread": 1.0828063583274778,
+        "threads": 50,
+        "duration_seconds": 37.541619699000876,
+        "source_metrics": [
+          "throughput_abs",
+          "latency_mean_abs",
+          "throughput_per_thread",
+          "throughput_per_second",
+          "scaling_efficiency",
+          "latency_per_thread"
+        ],
+        "normalization_warning": null
+      },
+      "f4c54e43-2999-47e3-a49c-8b2c89d64aad": {
+        "throughput_abs": 865.8593157001425,
+        "latency_mean_abs": 34.43455664471532,
+        "throughput_per_thread": 17.31718631400285,
+        "throughput_per_second": 161.15447464726765,
+        "scaling_efficiency": 0.36567737920685983,
+        "latency_per_thread": 0.6886911328943064,
+        "threads": 50,
+        "duration_seconds": 37.541619699000876,
+        "source_metrics": [
+          "throughput_abs",
+          "latency_mean_abs",
+          "throughput_per_thread",
+          "throughput_per_second",
+          "scaling_efficiency",
+          "latency_per_thread"
+        ],
+        "normalization_warning": null
+      }
+    },
+    "c20d0b26-828f-4375-b5fa-a4bc91bc9655": {
+      "c5022087-55ed-4df8-a174-a6b8636b9eb9": {
+        "throughput_abs": 975.5537218823318,
+        "latency_mean_abs": 16.859000500008484,
+        "throughput_per_thread": 48.77768609411659,
+        "throughput_per_second": 137.12469904928065,
+        "scaling_efficiency": 0.9950920836984982,
+        "latency_per_thread": 0.8429500250004243,
+        "threads": 20,
+        "duration_seconds": 29.316381569999066,
+        "source_metrics": [
+          "throughput_abs",
+          "latency_mean_abs",
+          "throughput_per_thread",
+          "throughput_per_second",
+          "scaling_efficiency",
+          "latency_per_thread"
+        ],
+        "normalization_warning": null
+      },
+      "e0c34830-80ee-4185-a07d-6452cd47c7e7": {
+        "throughput_abs": 1055.9251276209113,
+        "latency_mean_abs": 16.66459895501325,
+        "throughput_per_thread": 52.796256381045566,
+        "throughput_per_second": 137.12469904928065,
+        "scaling_efficiency": 1.1520120545097432,
+        "latency_per_thread": 0.8332299477506625,
+        "threads": 20,
+        "duration_seconds": 29.316381569999066,
+        "source_metrics": [
+          "throughput_abs",
+          "latency_mean_abs",
+          "throughput_per_thread",
+          "throughput_per_second",
+          "scaling_efficiency",
+          "latency_per_thread"
+        ],
+        "normalization_warning": null
+      },
+      "f4c54e43-2999-47e3-a49c-8b2c89d64aad": {
+        "throughput_abs": 921.9098683574648,
+        "latency_mean_abs": 18.327206156288252,
+        "throughput_per_thread": 46.09549341787324,
+        "throughput_per_second": 137.12469904928065,
+        "scaling_efficiency": 0.9733728632731146,
+        "latency_per_thread": 0.9163603078144126,
+        "threads": 20,
+        "duration_seconds": 29.316381569999066,
+        "source_metrics": [
+          "throughput_abs",
+          "latency_mean_abs",
+          "throughput_per_thread",
+          "throughput_per_second",
+          "scaling_efficiency",
+          "latency_per_thread"
+        ],
+        "normalization_warning": null
+      }
+    },
+    "fe2fccb3-5bb4-45b0-8440-33e20c82e9da": {
+      "c5022087-55ed-4df8-a174-a6b8636b9eb9": {
+        "throughput_abs": 982.2450359409164,
+        "latency_mean_abs": 41.226659079829794,
+        "throughput_per_thread": 19.644900718818327,
+        "throughput_per_second": 207.9443871984869,
+        "scaling_efficiency": 0.40076696448085364,
+        "latency_per_thread": 0.8245331815965958,
+        "threads": 50,
+        "duration_seconds": 48.33022970899947,
+        "source_metrics": [
+          "throughput_abs",
+          "latency_mean_abs",
+          "throughput_per_thread",
+          "throughput_per_second",
+          "scaling_efficiency",
+          "latency_per_thread"
+        ],
+        "normalization_warning": null
+      },
+      "e0c34830-80ee-4185-a07d-6452cd47c7e7": {
+        "throughput_abs": 205.73420621847524,
+        "latency_mean_abs": 70.31494336393469,
+        "throughput_per_thread": 4.1146841243695045,
+        "throughput_per_second": 207.9443871984869,
+        "scaling_efficiency": 0.08978223148176294,
+        "latency_per_thread": 1.4062988672786938,
+        "threads": 50,
+        "duration_seconds": 48.33022970899947,
+        "source_metrics": [
+          "throughput_abs",
+          "latency_mean_abs",
+          "throughput_per_thread",
+          "throughput_per_second",
+          "scaling_efficiency",
+          "latency_per_thread"
+        ],
+        "normalization_warning": null
+      },
+      "f4c54e43-2999-47e3-a49c-8b2c89d64aad": {
+        "throughput_abs": 891.6225791205552,
+        "latency_mean_abs": 45.91021799090189,
+        "throughput_per_thread": 17.832451582411103,
+        "throughput_per_second": 207.9443871984869,
+        "scaling_efficiency": 0.37655794892132266,
+        "latency_per_thread": 0.9182043598180378,
+        "threads": 50,
+        "duration_seconds": 48.33022970899947,
+        "source_metrics": [
+          "throughput_abs",
+          "latency_mean_abs",
+          "throughput_per_thread",
+          "throughput_per_second",
+          "scaling_efficiency",
+          "latency_per_thread"
+        ],
+        "normalization_warning": null
+      }
+    }
+  },
+  "pairwise_comparisons": [
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "87768715-3b42-4e1e-ae2c-02198452bc5e",
+      "db_key": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+      "metric": "latency_ms",
+      "baseline_mean": 16.848126499176896,
+      "compared_mean": 46.33775590428823,
+      "pct_difference": 175.03209871169966,
+      "test_used": "mann_whitney_u",
+      "statistic": 412530,
+      "p_value": 0,
+      "is_significant": true,
+      "interpretation": "Сравниваемый тест медленнее на 175.0% (p=0.0000, большой эффект)",
+      "warning": null,
+      "effect_size": 1.517373166688385,
+      "effect_size_label": "large",
+      "ci_lower": 28.818584758491124,
+      "ci_upper": 30.160674051731544
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "87768715-3b42-4e1e-ae2c-02198452bc5e",
+      "db_key": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+      "metric": "throughput",
+      "baseline_mean": 980.3652725850784,
+      "compared_mean": 876.2200994777944,
+      "pct_difference": -10.62309896317202,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Недостаточно данных для статистического теста",
+      "warning": "Недостаточно данных для статистического теста: n_baseline=2, n_compared=5",
+      "effect_size": -3.1223572235537658,
+      "effect_size_label": "large",
+      "ci_lower": -482.4157913751983,
+      "ci_upper": 274.1254451606303
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "87768715-3b42-4e1e-ae2c-02198452bc5e",
+      "db_key": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+      "metric": "throughput_per_thread",
+      "baseline_mean": 49.01826362925392,
+      "compared_mean": 17.52440198955589,
+      "pct_difference": -64.2492395852688,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Недостаточно данных для статистического теста",
+      "warning": "Недостаточно данных для статистического теста: n_baseline=2, n_compared=5",
+      "effect_size": -23.762524603991512,
+      "effect_size_label": "large",
+      "ci_lower": -55.33742469534042,
+      "ci_upper": -7.650298584055648
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "87768715-3b42-4e1e-ae2c-02198452bc5e",
+      "db_key": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+      "metric": "scaling_efficiency",
+      "baseline_mean": 1,
+      "compared_mean": 0.3575076041473119,
+      "pct_difference": -64.2492395852688,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Сравнение scaling efficiency выполнено без статистического теста",
+      "warning": "Scaling efficiency рассчитывается как нормализованная производная метрика",
+      "effect_size": null,
+      "effect_size_label": null,
+      "ci_lower": null,
+      "ci_upper": null
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "87768715-3b42-4e1e-ae2c-02198452bc5e",
+      "db_key": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+      "metric": "latency_ms",
+      "baseline_mean": 17.826176344644693,
+      "compared_mean": 54.140317916373895,
+      "pct_difference": 203.71245560262074,
+      "test_used": "mann_whitney_u",
+      "statistic": 418998,
+      "p_value": 0,
+      "is_significant": true,
+      "interpretation": "Сравниваемый тест медленнее на 203.7% (p=0.0000, малый эффект)",
+      "warning": null,
+      "effect_size": 0.30626960802038006,
+      "effect_size_label": "small",
+      "ci_lower": 30.980151914300727,
+      "ci_upper": 41.64813122915768
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "87768715-3b42-4e1e-ae2c-02198452bc5e",
+      "db_key": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+      "metric": "throughput",
+      "baseline_mean": 916.5920820770202,
+      "compared_mean": 751.7426712945913,
+      "pct_difference": -17.985035437888147,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Недостаточно данных для статистического теста",
+      "warning": "Недостаточно данных для статистического теста: n_baseline=2, n_compared=3",
+      "effect_size": -0.3255397655337121,
+      "effect_size_label": "small",
+      "ci_lower": -1464.6831181854573,
+      "ci_upper": 1134.9842966205993
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "87768715-3b42-4e1e-ae2c-02198452bc5e",
+      "db_key": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+      "metric": "throughput_per_thread",
+      "baseline_mean": 45.82960410385101,
+      "compared_mean": 15.03485342589183,
+      "pct_difference": -67.19401417515525,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Недостаточно данных для статистического теста",
+      "warning": "Недостаточно данных для статистического теста: n_baseline=2, n_compared=3",
+      "effect_size": -2.274218185625424,
+      "effect_size_label": "large",
+      "ci_lower": -105.12700129958,
+      "ci_upper": 43.537499943661636
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "87768715-3b42-4e1e-ae2c-02198452bc5e",
+      "db_key": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+      "metric": "scaling_efficiency",
+      "baseline_mean": 1,
+      "compared_mean": 0.32805985824844736,
+      "pct_difference": -67.19401417515527,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Сравнение scaling efficiency выполнено без статистического теста",
+      "warning": "Scaling efficiency рассчитывается как нормализованная производная метрика",
+      "effect_size": null,
+      "effect_size_label": null,
+      "ci_lower": null,
+      "ci_upper": null
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "87768715-3b42-4e1e-ae2c-02198452bc5e",
+      "db_key": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+      "metric": "latency_ms",
+      "baseline_mean": 17.06516198057351,
+      "compared_mean": 34.43455664471532,
+      "pct_difference": 101.78277055860725,
+      "test_used": "mann_whitney_u",
+      "statistic": 96224,
+      "p_value": 4.461986109449935e-214,
+      "is_significant": true,
+      "interpretation": "Сравниваемый тест медленнее на 101.8% (p=0.0000, большой эффект)",
+      "warning": null,
+      "effect_size": 2.4676265380820683,
+      "effect_size_label": "large",
+      "ci_lower": 16.47686925314778,
+      "ci_upper": 18.261920075135844
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "87768715-3b42-4e1e-ae2c-02198452bc5e",
+      "db_key": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+      "metric": "throughput",
+      "baseline_mean": 947.129207257127,
+      "compared_mean": 865.8593157001425,
+      "pct_difference": -8.580655198285033,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Недостаточно данных для статистического теста",
+      "warning": "Недостаточно данных для статистического теста: n_baseline=2, n_compared=6",
+      "effect_size": -1.785892740611181,
+      "effect_size_label": "large",
+      "ci_lower": -133.8983182652575,
+      "ci_upper": -28.641464848711458
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "87768715-3b42-4e1e-ae2c-02198452bc5e",
+      "db_key": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+      "metric": "throughput_per_thread",
+      "baseline_mean": 47.356460362856346,
+      "compared_mean": 17.317186314002853,
+      "pct_difference": -63.43226207931401,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Недостаточно данных для статистического теста",
+      "warning": "Недостаточно данных для статистического теста: n_baseline=2, n_compared=6",
+      "effect_size": -32.422452079684085,
+      "effect_size_label": "large",
+      "ci_lower": -31.440500834272605,
+      "ci_upper": -28.63804726343438
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "87768715-3b42-4e1e-ae2c-02198452bc5e",
+      "db_key": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+      "metric": "scaling_efficiency",
+      "baseline_mean": 1,
+      "compared_mean": 0.36567737920685983,
+      "pct_difference": -63.432262079314015,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Сравнение scaling efficiency выполнено без статистического теста",
+      "warning": "Scaling efficiency рассчитывается как нормализованная производная метрика",
+      "effect_size": null,
+      "effect_size_label": null,
+      "ci_lower": null,
+      "ci_upper": null
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "c20d0b26-828f-4375-b5fa-a4bc91bc9655",
+      "db_key": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+      "metric": "latency_ms",
+      "baseline_mean": 16.848126499176896,
+      "compared_mean": 16.859000500008484,
+      "pct_difference": 0.06454130571799568,
+      "test_used": "mann_whitney_u",
+      "statistic": 4024099.5,
+      "p_value": 0.00019380960635978264,
+      "is_significant": true,
+      "interpretation": "Сравниваемый тест медленнее на 0.1% (p=0.0002)",
+      "warning": null,
+      "effect_size": 0.001261183959495732,
+      "effect_size_label": "negligible",
+      "ci_lower": -0.44601214480166423,
+      "ci_upper": 0.46776014646484104
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "c20d0b26-828f-4375-b5fa-a4bc91bc9655",
+      "db_key": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+      "metric": "throughput",
+      "baseline_mean": 980.3652725850784,
+      "compared_mean": 975.5537218823318,
+      "pct_difference": -0.4907916301501797,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Недостаточно данных для статистического теста",
+      "warning": "Недостаточно данных для статистического теста: n_baseline=2, n_compared=2",
+      "effect_size": -0.1207523215008812,
+      "effect_size_label": "negligible",
+      "ci_lower": -473.6694309660016,
+      "ci_upper": 464.04632956050847
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "c20d0b26-828f-4375-b5fa-a4bc91bc9655",
+      "db_key": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+      "metric": "throughput_per_thread",
+      "baseline_mean": 49.01826362925392,
+      "compared_mean": 48.77768609411659,
+      "pct_difference": -0.4907916301501912,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Недостаточно данных для статистического теста",
+      "warning": "Недостаточно данных для статистического теста: n_baseline=2, n_compared=2",
+      "effect_size": -0.12075232150088407,
+      "effect_size_label": "negligible",
+      "ci_lower": -23.68347154830012,
+      "ci_upper": 23.202316478025452
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "c20d0b26-828f-4375-b5fa-a4bc91bc9655",
+      "db_key": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+      "metric": "scaling_efficiency",
+      "baseline_mean": 1,
+      "compared_mean": 0.9950920836984982,
+      "pct_difference": -0.490791630150178,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Сравнение scaling efficiency выполнено без статистического теста",
+      "warning": "Scaling efficiency рассчитывается как нормализованная производная метрика",
+      "effect_size": null,
+      "effect_size_label": null,
+      "ci_lower": null,
+      "ci_upper": null
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "c20d0b26-828f-4375-b5fa-a4bc91bc9655",
+      "db_key": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+      "metric": "latency_ms",
+      "baseline_mean": 17.826176344644693,
+      "compared_mean": 16.66459895501325,
+      "pct_difference": -6.516133169412979,
+      "test_used": "mann_whitney_u",
+      "statistic": 5830939,
+      "p_value": 7.42866193458158e-83,
+      "is_significant": true,
+      "interpretation": "Сравниваемый тест быстрее на 6.5% (p=0.0000)",
+      "warning": null,
+      "effect_size": -0.031898613108112865,
+      "effect_size_label": "negligible",
+      "ci_lower": -3.075910277347031,
+      "ci_upper": 0.7527554980841449
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "c20d0b26-828f-4375-b5fa-a4bc91bc9655",
+      "db_key": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+      "metric": "throughput",
+      "baseline_mean": 916.5920820770202,
+      "compared_mean": 1055.9251276209113,
+      "pct_difference": 15.201205450974332,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Недостаточно данных для статистического теста",
+      "warning": "Недостаточно данных для статистического теста: n_baseline=2, n_compared=3",
+      "effect_size": 0.49194997213616587,
+      "effect_size_label": "small",
+      "ci_lower": -1256.5681317927636,
+      "ci_upper": 1535.2342228805458
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "c20d0b26-828f-4375-b5fa-a4bc91bc9655",
+      "db_key": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+      "metric": "throughput_per_thread",
+      "baseline_mean": 45.82960410385101,
+      "compared_mean": 52.796256381045566,
+      "pct_difference": 15.201205450974332,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Недостаточно данных для статистического теста",
+      "warning": "Недостаточно данных для статистического теста: n_baseline=2, n_compared=3",
+      "effect_size": 0.4919499721361658,
+      "effect_size_label": "small",
+      "ci_lower": -62.82840658963819,
+      "ci_upper": 76.7617111440273
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "c20d0b26-828f-4375-b5fa-a4bc91bc9655",
+      "db_key": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+      "metric": "scaling_efficiency",
+      "baseline_mean": 1,
+      "compared_mean": 1.1520120545097432,
+      "pct_difference": 15.20120545097432,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Сравнение scaling efficiency выполнено без статистического теста",
+      "warning": "Scaling efficiency рассчитывается как нормализованная производная метрика",
+      "effect_size": null,
+      "effect_size_label": null,
+      "ci_lower": null,
+      "ci_upper": null
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "c20d0b26-828f-4375-b5fa-a4bc91bc9655",
+      "db_key": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+      "metric": "latency_ms",
+      "baseline_mean": 17.06516198057351,
+      "compared_mean": 18.327206156288252,
+      "pct_difference": 7.395442112717222,
+      "test_used": "mann_whitney_u",
+      "statistic": 3304030,
+      "p_value": 0.9747048062614084,
+      "is_significant": false,
+      "interpretation": "Разница статистически незначима",
+      "warning": null,
+      "effect_size": 0.12363109767328656,
+      "effect_size_label": "negligible",
+      "ci_lower": 0.7242726992641414,
+      "ci_upper": 1.7998156521653423
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "c20d0b26-828f-4375-b5fa-a4bc91bc9655",
+      "db_key": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+      "metric": "throughput",
+      "baseline_mean": 947.129207257127,
+      "compared_mean": 921.9098683574648,
+      "pct_difference": -2.662713672688545,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Недостаточно данных для статистического теста",
+      "warning": "Недостаточно данных для статистического теста: n_baseline=2, n_compared=3",
+      "effect_size": -0.34513751969640477,
+      "effect_size_label": "small",
+      "ci_lower": -242.19653991693076,
+      "ci_upper": 191.75786211760646
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "c20d0b26-828f-4375-b5fa-a4bc91bc9655",
+      "db_key": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+      "metric": "throughput_per_thread",
+      "baseline_mean": 47.356460362856346,
+      "compared_mean": 46.09549341787325,
+      "pct_difference": -2.662713672688521,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Недостаточно данных для статистического теста",
+      "warning": "Недостаточно данных для статистического теста: n_baseline=2, n_compared=3",
+      "effect_size": -0.34513751969640166,
+      "effect_size_label": "small",
+      "ci_lower": -12.10982699584652,
+      "ci_upper": 9.587893105880328
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "c20d0b26-828f-4375-b5fa-a4bc91bc9655",
+      "db_key": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+      "metric": "scaling_efficiency",
+      "baseline_mean": 1,
+      "compared_mean": 0.9733728632731146,
+      "pct_difference": -2.6627136726885436,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Сравнение scaling efficiency выполнено без статистического теста",
+      "warning": "Scaling efficiency рассчитывается как нормализованная производная метрика",
+      "effect_size": null,
+      "effect_size_label": null,
+      "ci_lower": null,
+      "ci_upper": null
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "fe2fccb3-5bb4-45b0-8440-33e20c82e9da",
+      "db_key": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+      "metric": "latency_ms",
+      "baseline_mean": 16.848126499176896,
+      "compared_mean": 41.226659079829794,
+      "pct_difference": 144.6958068711313,
+      "test_used": "mann_whitney_u",
+      "statistic": 596410,
+      "p_value": 0,
+      "is_significant": true,
+      "interpretation": "Сравниваемый тест медленнее на 144.7% (p=0.0000, большой эффект)",
+      "warning": null,
+      "effect_size": 1.5055069301684296,
+      "effect_size_label": "large",
+      "ci_lower": 23.8543135036239,
+      "ci_upper": 24.902751657681897
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "fe2fccb3-5bb4-45b0-8440-33e20c82e9da",
+      "db_key": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+      "metric": "throughput",
+      "baseline_mean": 980.3652725850784,
+      "compared_mean": 982.2450359409164,
+      "pct_difference": 0.19174112021342313,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Недостаточно данных для статистического теста",
+      "warning": "Недостаточно данных для статистического теста: n_baseline=2, n_compared=7",
+      "effect_size": 0.04470239467866923,
+      "effect_size_label": "negligible",
+      "ci_lower": -315.6020839780082,
+      "ci_upper": 319.3616106896842
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "fe2fccb3-5bb4-45b0-8440-33e20c82e9da",
+      "db_key": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+      "metric": "throughput_per_thread",
+      "baseline_mean": 49.01826362925392,
+      "compared_mean": 19.644900718818324,
+      "pct_difference": -59.92330355191464,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Недостаточно данных для статистического теста",
+      "warning": "Недостаточно данных для статистического теста: n_baseline=2, n_compared=7",
+      "effect_size": -22.907906610101858,
+      "effect_size_label": "large",
+      "ci_lower": -52.287532768964226,
+      "ci_upper": -6.459193051906972
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "fe2fccb3-5bb4-45b0-8440-33e20c82e9da",
+      "db_key": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+      "metric": "scaling_efficiency",
+      "baseline_mean": 1,
+      "compared_mean": 0.40076696448085364,
+      "pct_difference": -59.92330355191464,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Сравнение scaling efficiency выполнено без статистического теста",
+      "warning": "Scaling efficiency рассчитывается как нормализованная производная метрика",
+      "effect_size": null,
+      "effect_size_label": null,
+      "ci_lower": null,
+      "ci_upper": null
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "fe2fccb3-5bb4-45b0-8440-33e20c82e9da",
+      "db_key": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+      "metric": "latency_ms",
+      "baseline_mean": 17.826176344644693,
+      "compared_mean": 70.31494336393469,
+      "pct_difference": 294.44770434495655,
+      "test_used": "mann_whitney_u",
+      "statistic": 347059,
+      "p_value": 0,
+      "is_significant": true,
+      "interpretation": "Сравниваемый тест медленнее на 294.4% (p=0.0000, малый эффект)",
+      "warning": null,
+      "effect_size": 0.3832757143097105,
+      "effect_size_label": "small",
+      "ci_lower": 40.48531700335387,
+      "ci_upper": 64.49221703522612
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "fe2fccb3-5bb4-45b0-8440-33e20c82e9da",
+      "db_key": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+      "metric": "throughput",
+      "baseline_mean": 916.5920820770202,
+      "compared_mean": 205.73420621847524,
+      "pct_difference": -77.55444212955926,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Недостаточно данных для статистического теста",
+      "warning": "Недостаточно данных для статистического теста: n_baseline=2, n_compared=1",
+      "effect_size": null,
+      "effect_size_label": null,
+      "ci_lower": null,
+      "ci_upper": null
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "fe2fccb3-5bb4-45b0-8440-33e20c82e9da",
+      "db_key": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+      "metric": "throughput_per_thread",
+      "baseline_mean": 45.82960410385101,
+      "compared_mean": 4.1146841243695045,
+      "pct_difference": -91.02177685182372,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Недостаточно данных для статистического теста",
+      "warning": "Недостаточно данных для статистического теста: n_baseline=2, n_compared=1",
+      "effect_size": null,
+      "effect_size_label": null,
+      "ci_lower": null,
+      "ci_upper": null
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "fe2fccb3-5bb4-45b0-8440-33e20c82e9da",
+      "db_key": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+      "metric": "scaling_efficiency",
+      "baseline_mean": 1,
+      "compared_mean": 0.08978223148176294,
+      "pct_difference": -91.02177685182372,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Сравнение scaling efficiency выполнено без статистического теста",
+      "warning": "Scaling efficiency рассчитывается как нормализованная производная метрика",
+      "effect_size": null,
+      "effect_size_label": null,
+      "ci_lower": null,
+      "ci_upper": null
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "fe2fccb3-5bb4-45b0-8440-33e20c82e9da",
+      "db_key": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+      "metric": "latency_ms",
+      "baseline_mean": 17.06516198057351,
+      "compared_mean": 45.91021799090189,
+      "pct_difference": 169.0289025276453,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Недостаточно данных для статистического теста",
+      "warning": "Недостаточно данных для статистического теста: n_baseline=2420, n_compared=9",
+      "effect_size": 4.732761916291698,
+      "effect_size_label": "large",
+      "ci_lower": 25.017316798076017,
+      "ci_upper": 32.672795222580746
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "fe2fccb3-5bb4-45b0-8440-33e20c82e9da",
+      "db_key": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+      "metric": "throughput",
+      "baseline_mean": 947.129207257127,
+      "compared_mean": 891.6225791205552,
+      "pct_difference": -5.860512769669322,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Недостаточно данных для статистического теста",
+      "warning": "Недостаточно данных для статистического теста: n_baseline=2, n_compared=9",
+      "effect_size": -0.6920008787055307,
+      "effect_size_label": "medium",
+      "ci_lower": -121.67513920471866,
+      "ci_upper": 10.661882931575164
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "fe2fccb3-5bb4-45b0-8440-33e20c82e9da",
+      "db_key": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+      "metric": "throughput_per_thread",
+      "baseline_mean": 47.356460362856346,
+      "compared_mean": 17.832451582411103,
+      "pct_difference": -62.34420510786774,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Недостаточно данных для статистического теста",
+      "warning": "Недостаточно данных для статистического теста: n_baseline=2, n_compared=9",
+      "effect_size": -18.33255799989344,
+      "effect_size_label": "large",
+      "ci_lower": -31.050514766200827,
+      "ci_upper": -27.99750279468966
+    },
+    {
+      "baseline_test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+      "compared_test_id": "fe2fccb3-5bb4-45b0-8440-33e20c82e9da",
+      "db_key": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+      "metric": "scaling_efficiency",
+      "baseline_mean": 1,
+      "compared_mean": 0.37655794892132266,
+      "pct_difference": -62.34420510786774,
+      "test_used": null,
+      "statistic": null,
+      "p_value": null,
+      "is_significant": false,
+      "interpretation": "Сравнение scaling efficiency выполнено без статистического теста",
+      "warning": "Scaling efficiency рассчитывается как нормализованная производная метрика",
+      "effect_size": null,
+      "effect_size_label": null,
+      "ci_lower": null,
+      "ci_upper": null
+    }
+  ],
+  "charts_data": {
+    "bar_chart": [
+      {
+        "test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+        "test_name": "Тест 11.04.2026, 17:50:26",
+        "db_key": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+        "latency_mean": 16.848126499176896,
+        "latency_p95": 21.899395300624743,
+        "latency_p99": 76.81755044881356,
+        "throughput_mean": 980.3652725850784,
+        "error_rate": 0
+      },
+      {
+        "test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+        "test_name": "Тест 11.04.2026, 17:50:26",
+        "db_key": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+        "latency_mean": 17.826176344644693,
+        "latency_p95": 17.172014849984404,
+        "latency_p99": 96.5199913206561,
+        "throughput_mean": 916.5920820770202,
+        "error_rate": 0
+      },
+      {
+        "test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+        "test_name": "Тест 11.04.2026, 17:50:26",
+        "db_key": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+        "latency_mean": 17.06516198057351,
+        "latency_p95": 23.29681884930323,
+        "latency_p99": 33.60830038986023,
+        "throughput_mean": 947.129207257127,
+        "error_rate": 0
+      },
+      {
+        "test_id": "87768715-3b42-4e1e-ae2c-02198452bc5e",
+        "test_name": "Тест 11.04.2026, 17:51:14",
+        "db_key": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+        "latency_mean": 46.33775590428823,
+        "latency_p95": 72.15055079941521,
+        "latency_p99": 124.37919661048001,
+        "throughput_mean": 876.2200994777944,
+        "error_rate": 0
+      },
+      {
+        "test_id": "87768715-3b42-4e1e-ae2c-02198452bc5e",
+        "test_name": "Тест 11.04.2026, 17:51:14",
+        "db_key": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+        "latency_mean": 54.140317916373895,
+        "latency_p95": 108.64326150021952,
+        "latency_p99": 1036.5119135504772,
+        "throughput_mean": 751.7426712945913,
+        "error_rate": 0
+      },
+      {
+        "test_id": "87768715-3b42-4e1e-ae2c-02198452bc5e",
+        "test_name": "Тест 11.04.2026, 17:51:14",
+        "db_key": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+        "latency_mean": 34.43455664471532,
+        "latency_p95": 50.17316999919785,
+        "latency_p99": 54.22087459892282,
+        "throughput_mean": 865.8593157001425,
+        "error_rate": 0
+      },
+      {
+        "test_id": "c20d0b26-828f-4375-b5fa-a4bc91bc9655",
+        "test_name": "Тест 11.04.2026, 17:52:53",
+        "db_key": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+        "latency_mean": 16.859000500008484,
+        "latency_p95": 23.53092175007987,
+        "latency_p99": 35.003050249997614,
+        "throughput_mean": 975.5537218823318,
+        "error_rate": 0
+      },
+      {
+        "test_id": "c20d0b26-828f-4375-b5fa-a4bc91bc9655",
+        "test_name": "Тест 11.04.2026, 17:52:53",
+        "db_key": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+        "latency_mean": 16.66459895501325,
+        "latency_p95": 15.86188250066698,
+        "latency_p99": 110.20838667966024,
+        "throughput_mean": 1055.9251276209113,
+        "error_rate": 0
+      },
+      {
+        "test_id": "c20d0b26-828f-4375-b5fa-a4bc91bc9655",
+        "test_name": "Тест 11.04.2026, 17:52:53",
+        "db_key": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+        "latency_mean": 18.327206156288252,
+        "latency_p95": 25.323412900434047,
+        "latency_p99": 111.10104705994672,
+        "throughput_mean": 921.9098683574648,
+        "error_rate": 0
+      },
+      {
+        "test_id": "fe2fccb3-5bb4-45b0-8440-33e20c82e9da",
+        "test_name": "Тест 11.04.2026, 17:54:34",
+        "db_key": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+        "latency_mean": 41.226659079829794,
+        "latency_p95": 53.88296430101036,
+        "latency_p99": 112.50208265959373,
+        "throughput_mean": 982.2450359409164,
+        "error_rate": 0
+      },
+      {
+        "test_id": "fe2fccb3-5bb4-45b0-8440-33e20c82e9da",
+        "test_name": "Тест 11.04.2026, 17:54:34",
+        "db_key": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+        "latency_mean": 70.31494336393469,
+        "latency_p95": 106.37542360018415,
+        "latency_p99": 1378.3074974401093,
+        "throughput_mean": 205.73420621847524,
+        "error_rate": 0
+      },
+      {
+        "test_id": "fe2fccb3-5bb4-45b0-8440-33e20c82e9da",
+        "test_name": "Тест 11.04.2026, 17:54:34",
+        "db_key": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+        "latency_mean": 45.91021799090189,
+        "latency_p95": 52.46300761459187,
+        "latency_p99": 53.70968062661567,
+        "throughput_mean": 891.6225791205552,
+        "error_rate": 0
+      }
+    ],
+    "box_plot": [
+      {
+        "test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+        "test_name": "Тест 11.04.2026, 17:50:26",
+        "db_key": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+        "min": 4.1693469993333565,
+        "q1": 13.588975749371457,
+        "median": 15.581589500470727,
+        "q3": 18.00726575038425,
+        "max": 99.70331199838256,
+        "sample_count": 2420
+      },
+      {
+        "test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+        "test_name": "Тест 11.04.2026, 17:50:26",
+        "db_key": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+        "min": 4.682066000896157,
+        "q1": 12.26680475019748,
+        "median": 13.34927549942222,
+        "q3": 14.593992749723839,
+        "max": 544.6775390009861,
+        "sample_count": 2420
+      },
+      {
+        "test_id": "f967fec9-5167-492a-9faa-d4e0e4f90825",
+        "test_name": "Тест 11.04.2026, 17:50:26",
+        "db_key": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+        "min": 3.5907429992221296,
+        "q1": 14.069758000005095,
+        "median": 16.36434600004577,
+        "q3": 19.10244600048827,
+        "max": 93.9351090000855,
+        "sample_count": 2420
+      },
+      {
+        "test_id": "87768715-3b42-4e1e-ae2c-02198452bc5e",
+        "test_name": "Тест 11.04.2026, 17:51:14",
+        "db_key": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+        "min": 4.138357000556425,
+        "q1": 38.04693199981557,
+        "median": 43.042736499955936,
+        "q3": 48.22084399893356,
+        "max": 379.38936300088244,
+        "sample_count": 6050
+      },
+      {
+        "test_id": "87768715-3b42-4e1e-ae2c-02198452bc5e",
+        "test_name": "Тест 11.04.2026, 17:51:14",
+        "db_key": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+        "min": 4.688611999881687,
+        "q1": 30.283497249911306,
+        "median": 34.46078149954701,
+        "q3": 38.01920349951615,
+        "max": 1906.3157519995002,
+        "sample_count": 3396
+      },
+      {
+        "test_id": "87768715-3b42-4e1e-ae2c-02198452bc5e",
+        "test_name": "Тест 11.04.2026, 17:51:14",
+        "db_key": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+        "min": 6.087040999773308,
+        "q1": 28.650361000018165,
+        "median": 36.20931500063307,
+        "q3": 42.65155874963966,
+        "max": 58.677402999819606,
+        "sample_count": 546
+      },
+      {
+        "test_id": "c20d0b26-828f-4375-b5fa-a4bc91bc9655",
+        "test_name": "Тест 11.04.2026, 17:52:53",
+        "db_key": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+        "min": 3.5569930005294736,
+        "q1": 13.50372725073612,
+        "median": 16.04465749915107,
+        "q3": 18.678117251056392,
+        "max": 110.82960599924263,
+        "sample_count": 3526
+      },
+      {
+        "test_id": "c20d0b26-828f-4375-b5fa-a4bc91bc9655",
+        "test_name": "Тест 11.04.2026, 17:52:53",
+        "db_key": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+        "min": 4.70083300024271,
+        "q1": 11.451527499502845,
+        "median": 12.349506499958807,
+        "q3": 13.411030500265042,
+        "max": 576.6478690002259,
+        "sample_count": 3734
+      },
+      {
+        "test_id": "c20d0b26-828f-4375-b5fa-a4bc91bc9655",
+        "test_name": "Тест 11.04.2026, 17:52:53",
+        "db_key": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+        "min": 4.07552099932218,
+        "q1": 13.760167250893574,
+        "median": 16.3326470001266,
+        "q3": 19.344748499861453,
+        "max": 122.69369600107893,
+        "sample_count": 2732
+      },
+      {
+        "test_id": "fe2fccb3-5bb4-45b0-8440-33e20c82e9da",
+        "test_name": "Тест 11.04.2026, 17:54:34",
+        "db_key": "c5022087-55ed-4df8-a174-a6b8636b9eb9",
+        "min": 3.9987739983189385,
+        "q1": 34.04289750051248,
+        "median": 38.82329000043683,
+        "q3": 43.93338550016779,
+        "max": 326.3955200000055,
+        "sample_count": 8643
+      },
+      {
+        "test_id": "fe2fccb3-5bb4-45b0-8440-33e20c82e9da",
+        "test_name": "Тест 11.04.2026, 17:54:34",
+        "db_key": "e0c34830-80ee-4185-a07d-6452cd47c7e7",
+        "min": 4.804002999662771,
+        "q1": 20.068243000423536,
+        "median": 26.604128999679233,
+        "q3": 30.50592100044014,
+        "max": 1718.5394619991712,
+        "sample_count": 1349
+      },
+      {
+        "test_id": "fe2fccb3-5bb4-45b0-8440-33e20c82e9da",
+        "test_name": "Тест 11.04.2026, 17:54:34",
+        "db_key": "f4c54e43-2999-47e3-a49c-8b2c89d64aad",
+        "min": 39.84701593922382,
+        "q1": 41.630293207709066,
+        "median": 47.79539991611944,
+        "q3": 48.87217824621447,
+        "max": 54.02134887962162,
+        "sample_count": 9
+      }
+    ],
+    "throughput_series": {
+      "f967fec9-5167-492a-9faa-d4e0e4f90825:c5022087-55ed-4df8-a174-a6b8636b9eb9": [
+        {
+          "timestamp": "2026-04-11T14:48:26.871940+00:00",
+          "throughput": 940.8509371021171,
+          "tps": 940.8509371021171,
+          "response_time": 17.57882964088205,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:48:27.948904+00:00",
+          "throughput": 1019.8796080680398,
+          "tps": 1019.8796080680398,
+          "response_time": 15.95967736723149,
+          "error_count": 0
+        }
+      ],
+      "f967fec9-5167-492a-9faa-d4e0e4f90825:e0c34830-80ee-4185-a07d-6452cd47c7e7": [
+        {
+          "timestamp": "2026-04-11T14:50:41.672838+00:00",
+          "throughput": 676.3809098155609,
+          "tps": 676.3809098155609,
+          "response_time": 27.14863890267112,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:50:42.739928+00:00",
+          "throughput": 1156.8032543384795,
+          "tps": 1156.8032543384795,
+          "response_time": 15.066411533215478,
+          "error_count": 0
+        }
+      ],
+      "f967fec9-5167-492a-9faa-d4e0e4f90825:f4c54e43-2999-47e3-a49c-8b2c89d64aad": [
+        {
+          "timestamp": "2026-04-11T14:50:49.891409+00:00",
+          "throughput": 940.5766728649875,
+          "tps": 940.5766728649875,
+          "response_time": 16.948762255602002,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:50:50.960998+00:00",
+          "throughput": 953.6817416492664,
+          "tps": 953.6817416492664,
+          "response_time": 17.192648936843486,
+          "error_count": 0
+        }
+      ],
+      "87768715-3b42-4e1e-ae2c-02198452bc5e:c5022087-55ed-4df8-a174-a6b8636b9eb9": [
+        {
+          "timestamp": "2026-04-11T14:49:14.242061+00:00",
+          "throughput": 875.0193666166546,
+          "tps": 875.0193666166546,
+          "response_time": 46.62187312912042,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:49:15.458023+00:00",
+          "throughput": 855.3211173749712,
+          "tps": 855.3211173749712,
+          "response_time": 46.965629418795956,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:49:16.633925+00:00",
+          "throughput": 916.5278258836926,
+          "tps": 916.5278258836926,
+          "response_time": 45.055904308660644,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:49:17.854378+00:00",
+          "throughput": 856.8395559828595,
+          "tps": 856.8395559828595,
+          "response_time": 48.16279325337678,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:51:25.630460+00:00",
+          "throughput": 877.3926315307942,
+          "tps": 877.3926315307942,
+          "response_time": 48.93775777776315,
+          "error_count": 0
+        }
+      ],
+      "87768715-3b42-4e1e-ae2c-02198452bc5e:e0c34830-80ee-4185-a07d-6452cd47c7e7": [
+        {
+          "timestamp": "2026-04-11T14:49:26.732104+00:00",
+          "throughput": 92.9255688495288,
+          "tps": 92.9255688495288,
+          "response_time": 149.73021359148862,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:49:27.861611+00:00",
+          "throughput": 1043.5782492766577,
+          "tps": 1043.5782492766577,
+          "response_time": 74.65543625982036,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:51:35.614899+00:00",
+          "throughput": 1118.7241957575877,
+          "tps": 1118.7241957575877,
+          "response_time": 38.69101214993175,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:51:36.882576+00:00",
+          "throughput": 1015.772493820771,
+          "tps": 1015.772493820771,
+          "response_time": 41.86577204660478,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:51:38.054095+00:00",
+          "throughput": 1116.3066670346755,
+          "tps": 1116.3066670346755,
+          "response_time": 38.869320180483925,
+          "error_count": 0
+        }
+      ],
+      "87768715-3b42-4e1e-ae2c-02198452bc5e:f4c54e43-2999-47e3-a49c-8b2c89d64aad": [
+        {
+          "timestamp": "2026-04-11T14:49:45.067717+00:00",
+          "throughput": 840.2436533651531,
+          "tps": 840.2436533651531,
+          "response_time": 44.01395107839498,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:51:45.692760+00:00",
+          "throughput": 826.3640812755264,
+          "tps": 826.3640812755264,
+          "response_time": 50.36233536417766,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:51:46.894982+00:00",
+          "throughput": 831.5193759140342,
+          "tps": 831.5193759140342,
+          "response_time": 49.35040513434679,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:51:48.083026+00:00",
+          "throughput": 937.5964289253594,
+          "tps": 937.5964289253594,
+          "response_time": 42.801978251802254,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:51:49.294417+00:00",
+          "throughput": 838.4020027764169,
+          "tps": 838.4020027764169,
+          "response_time": 50.09073657932415,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:51:50.478538+00:00",
+          "throughput": 921.0303519443653,
+          "tps": 921.0303519443653,
+          "response_time": 43.70313409443519,
+          "error_count": 0
+        }
+      ],
+      "c20d0b26-828f-4375-b5fa-a4bc91bc9655:c5022087-55ed-4df8-a174-a6b8636b9eb9": [
+        {
+          "timestamp": "2026-04-11T14:50:53.632592+00:00",
+          "throughput": 980.6875749839542,
+          "tps": 980.6875749839542,
+          "response_time": 16.31421920143761,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:50:55.806911+00:00",
+          "throughput": 970.4198687807095,
+          "tps": 970.4198687807095,
+          "response_time": 16.360501877023246,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:53:01.309282+00:00",
+          "throughput": 994.1956059442707,
+          "tps": 994.1956059442707,
+          "response_time": 16.394284710870892,
+          "error_count": 0
+        }
+      ],
+      "c20d0b26-828f-4375-b5fa-a4bc91bc9655:e0c34830-80ee-4185-a07d-6452cd47c7e7": [
+        {
+          "timestamp": "2026-04-11T14:51:03.493181+00:00",
+          "throughput": 771.4993216282799,
+          "tps": 771.4993216282799,
+          "response_time": 24.059170024592056,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:51:04.561638+00:00",
+          "throughput": 1153.972962214141,
+          "tps": 1153.972962214141,
+          "response_time": 15.150639733587647,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:51:05.628883+00:00",
+          "throughput": 1242.3030990203129,
+          "tps": 1242.3030990203129,
+          "response_time": 14.080712713976885,
+          "error_count": 0
+        }
+      ],
+      "c20d0b26-828f-4375-b5fa-a4bc91bc9655:f4c54e43-2999-47e3-a49c-8b2c89d64aad": [
+        {
+          "timestamp": "2026-04-11T14:51:12.951864+00:00",
+          "throughput": 819.9728279153903,
+          "tps": 819.9728279153903,
+          "response_time": 20.272216221391542,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:51:14.041212+00:00",
+          "throughput": 986.0169050516085,
+          "tps": 986.0169050516085,
+          "response_time": 16.23061942199169,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:51:15.175805+00:00",
+          "throughput": 959.7398721053956,
+          "tps": 959.7398721053956,
+          "response_time": 16.94487740596856,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:51:16.236201+00:00",
+          "throughput": 902.9858663542077,
+          "tps": 902.9858663542077,
+          "response_time": 18.13422309295928,
+          "error_count": 0
+        }
+      ],
+      "fe2fccb3-5bb4-45b0-8440-33e20c82e9da:c5022087-55ed-4df8-a174-a6b8636b9eb9": [
+        {
+          "timestamp": "2026-04-11T14:52:35.090456+00:00",
+          "throughput": 957.4214413528579,
+          "tps": 957.4214413528579,
+          "response_time": 40.07932416810988,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:52:36.267456+00:00",
+          "throughput": 1011.4770064217344,
+          "tps": 1011.4770064217344,
+          "response_time": 42.775012467264,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:52:37.461605+00:00",
+          "throughput": 923.1132569091221,
+          "tps": 923.1132569091221,
+          "response_time": 44.387290364480684,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:52:38.648311+00:00",
+          "throughput": 988.9879643643302,
+          "tps": 988.9879643643302,
+          "response_time": 40.61931053955594,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:52:41.486899+00:00",
+          "throughput": 965.9963899334892,
+          "tps": 965.9963899334892,
+          "response_time": 42.08198531226237,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:52:42.653365+00:00",
+          "throughput": 983.4116193876105,
+          "tps": 983.4116193876105,
+          "response_time": 40.50846785927441,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:52:43.823602+00:00",
+          "throughput": 1045.3075732172697,
+          "tps": 1045.3075732172697,
+          "response_time": 39.24557083896041,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:54:46.402336+00:00",
+          "throughput": 962.7954154543572,
+          "tps": 962.7954154543572,
+          "response_time": 44.196353288866334,
+          "error_count": 0
+        }
+      ],
+      "fe2fccb3-5bb4-45b0-8440-33e20c82e9da:e0c34830-80ee-4185-a07d-6452cd47c7e7": [
+        {
+          "timestamp": "2026-04-11T14:52:50.953744+00:00",
+          "throughput": 205.73420621847524,
+          "tps": 205.73420621847524,
+          "response_time": 101.06195879610452,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:52:52.142477+00:00",
+          "throughput": 1164.6282993487541,
+          "tps": 1164.6282993487541,
+          "response_time": 59.73292789817748,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:52:53.390962+00:00",
+          "throughput": 1122.4099803665908,
+          "tps": 1122.4099803665908,
+          "response_time": 35.44088346046935,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:52:55.669173+00:00",
+          "throughput": 1087.2730307422194,
+          "tps": 1087.2730307422194,
+          "response_time": 39.80792633223101,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:52:56.818602+00:00",
+          "throughput": 1243.1659491011253,
+          "tps": 1243.1659491011253,
+          "response_time": 34.933909858329244,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:52:58.259150+00:00",
+          "throughput": 1187.1850259513706,
+          "tps": 1187.1850259513706,
+          "response_time": 35.70879817363255,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:52:59.381060+00:00",
+          "throughput": 1004.4504452850539,
+          "tps": 1004.4504452850539,
+          "response_time": 39.94933771895909,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:55:01.116192+00:00",
+          "throughput": 1126.1693668192202,
+          "tps": 1126.1693668192202,
+          "response_time": 40.974497584291605,
+          "error_count": 0
+        }
+      ],
+      "fe2fccb3-5bb4-45b0-8440-33e20c82e9da:f4c54e43-2999-47e3-a49c-8b2c89d64aad": [
+        {
+          "timestamp": "2026-04-11T14:53:06.427103+00:00",
+          "throughput": 757.2646196426276,
+          "tps": 757.2646196426276,
+          "response_time": 54.02134887962162,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:53:07.615574+00:00",
+          "throughput": 1012.4411644918273,
+          "tps": 1012.4411644918273,
+          "response_time": 39.84701593922382,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:53:08.811007+00:00",
+          "throughput": 854.7350451241283,
+          "tps": 854.7350451241283,
+          "response_time": 48.18942724753192,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:53:10.085337+00:00",
+          "throughput": 970.2672446550026,
+          "tps": 970.2672446550026,
+          "response_time": 40.91634591458035,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:53:11.313127+00:00",
+          "throughput": 867.9633233747016,
+          "tps": 867.9633233747016,
+          "response_time": 47.79539991611944,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:53:12.487670+00:00",
+          "throughput": 954.3454612427536,
+          "tps": 954.3454612427536,
+          "response_time": 41.79445685006918,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:53:13.672442+00:00",
+          "throughput": 840.0148938796955,
+          "tps": 840.0148938796955,
+          "response_time": 48.87217824621447,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:53:14.811057+00:00",
+          "throughput": 955.7042128560381,
+          "tps": 955.7042128560381,
+          "response_time": 41.630293207709066,
+          "error_count": 0
+        },
+        {
+          "timestamp": "2026-04-11T14:53:15.997549+00:00",
+          "throughput": 811.8672468182225,
+          "tps": 811.8672468182225,
+          "response_time": 50.12549571704724,
+          "error_count": 0
+        }
+      ]
+    }
+  },
+  "analysis_report": {
+    "verdict": "Выявлена точка пересечения производительности: при нагрузке ниже 50 потоков лучше Sakila PostgreSQL (Pagila), а при более высокой нагрузке лидирует Sakila MySQL. Выбор СУБД зависит от ожидаемого уровня нагрузки",
+    "patterns": [
+      "Тест 11.04.2026, 17:50:26/Sakila MySQL: высокий p99/median — есть выбросы latency и длинный хвост распределения",
+      "Тест 11.04.2026, 17:50:26/Sakila MySQL: высокая вариативность latency — производительность нестабильна",
+      "Тест 11.04.2026, 17:50:26/Sakila PostgreSQL (Pagila): высокий p99/median — есть выбросы latency и длинный хвост распределения",
+      "Тест 11.04.2026, 17:50:26/Sakila PostgreSQL (Pagila): высокая вариативность latency — производительность нестабильна",
+      "Тест 11.04.2026, 17:51:14/Sakila PostgreSQL (Pagila): высокий p99/median — есть выбросы latency и длинный хвост распределения",
+      "Тест 11.04.2026, 17:51:14/Sakila PostgreSQL (Pagila): высокая вариативность latency — производительность нестабильна",
+      "Sakila MySQL: Тест 11.04.2026, 17:52:53 демонстрирует более стабильное время ответа. При близкой медиане Тест 11.04.2026, 17:50:26 испытывает заметную деградацию по p99, что часто связано с блокировками или неоптимальным планом выполнения",
+      "Тест 11.04.2026, 17:52:53/Sakila PostgreSQL (Pagila): высокий p99/median — есть выбросы latency и длинный хвост распределения",
+      "Тест 11.04.2026, 17:52:53/Sakila PostgreSQL (Pagila): высокая вариативность latency — производительность нестабильна",
+      "Тест 11.04.2026, 17:52:53/Sakila MariaDB: высокий p99/median — есть выбросы latency и длинный хвост распределения",
+      "Тест 11.04.2026, 17:52:53/Sakila MariaDB: высокая вариативность latency — производительность нестабильна",
+      "Sakila MariaDB: Тест 11.04.2026, 17:50:26 демонстрирует более стабильное время ответа. При близкой медиане Тест 11.04.2026, 17:52:53 испытывает заметную деградацию по p99, что часто связано с блокировками или неоптимальным планом выполнения",
+      "Тест 11.04.2026, 17:54:34/Sakila PostgreSQL (Pagila): высокий p99/median — есть выбросы latency и длинный хвост распределения",
+      "Тест 11.04.2026, 17:54:34/Sakila PostgreSQL (Pagila): высокая вариативность latency — производительность нестабильна",
+      "Выявлена точка пересечения производительности: при нагрузке ниже 50 потоков лучше Sakila PostgreSQL (Pagila), а при более высокой нагрузке лидирует Sakila MySQL. Выбор СУБД зависит от ожидаемого уровня нагрузки"
+    ],
+    "recommendations": [
+      "Sakila MySQL: подходит для high-throughput сценариев",
+      "Sakila PostgreSQL (Pagila): подходит для high-throughput сценариев",
+      "Sakila MariaDB: подходит для high-throughput сценариев",
+      "Sakila MariaDB: производительность предсказуема — подходит для production-нагрузок",
+      "Перед принятием архитектурного решения повторите сравнение после устранения предупреждений о нехватке данных",
+      "Планируйте выбор СУБД под ожидаемый уровень нагрузки: около 50 потоков происходит смена лидера"
+    ],
+    "hypotheses": [
+      "Sakila MySQL: возможная причина — при росте числа потоков система упирается в lock contention, пул соединений или I/O",
+      "Sakila PostgreSQL (Pagila): возможная причина — при росте числа потоков система упирается в lock contention, пул соединений или I/O",
+      "Sakila MariaDB: возможная причина — при росте числа потоков система упирается в lock contention, пул соединений или I/O"
+    ],
+    "sections": [
+      {
+        "title": "Краткое резюме",
+        "items": [
+          "Выполнено смешанное сравнение по 4 тестам. Из 36 попарных сравнений 7 показали статистически значимые различия.",
+          "Лучший throughput: «Тест 11.04.2026, 17:52:53» — 1055.9 req/s.",
+          "Лучшая latency: «Тест 11.04.2026, 17:52:53» — 16.66 мс (среднее).",
+          "Наиболее выраженное различие по latency между «Тест 11.04.2026, 17:50:26» и «Тест 11.04.2026, 17:51:14»: Cohen's d = 2.47 (large), разница 101.8%."
+        ]
+      },
+      {
+        "title": "Основной вердикт",
+        "items": [
+          "Выявлена точка пересечения производительности: при нагрузке ниже 50 потоков лучше Sakila PostgreSQL (Pagila), а при более высокой нагрузке лидирует Sakila MySQL. Выбор СУБД зависит от ожидаемого уровня нагрузки"
+        ]
+      },
+      {
+        "title": "Влияние параметров конфигурации",
+        "items": [
+          "В тесте «Тест 11.04.2026, 17:51:14» относительно baseline «Тест 11.04.2026, 17:50:26»: изменение числа виртуальных пользователей (20 → 50 (+150%)). Результаты: Throughput: снижение на 10.6% (980.4 → 876.2 req/s); Latency mean: рост на 175.0% (16.85 → 46.34 мс); Latency p99: рост на 61.9% (76.82 → 124.38 мс); Throughput: снижение на 18.0% (916.6 → 751.7 req/s) и ещё 6 изменений.",
+          "В тесте «Тест 11.04.2026, 17:52:53» относительно baseline «Тест 11.04.2026, 17:50:26»: изменение числа итераций (121 → 201 (+66%)). Результаты: Throughput: снижение на 0.5% (980.4 → 975.6 req/s); Latency mean: рост на 0.1% (16.85 → 16.86 мс); Latency p99: снижение на 54.4% (76.82 → 35.00 мс); Throughput: рост на 15.2% (916.6 → 1055.9 req/s) и ещё 6 изменений.",
+          "В тесте «Тест 11.04.2026, 17:54:34» относительно baseline «Тест 11.04.2026, 17:50:26»: изменение числа виртуальных пользователей (20 → 50 (+150%)), изменение числа итераций (121 → 201 (+66%)), изменение использования индексов (без индексов → с индексами). Результаты: Throughput: рост на 0.2% (980.4 → 982.2 req/s); Latency mean: рост на 144.7% (16.85 → 41.23 мс); Latency p99: рост на 46.5% (76.82 → 112.50 мс); Стабильность повысилась (CV: 0.55 → 0.43) и ещё 32 изменений."
+        ]
+      },
+      {
+        "title": "Выявленные паттерны",
+        "items": [
+          "Тест 11.04.2026, 17:50:26/Sakila MySQL: высокий p99/median — есть выбросы latency и длинный хвост распределения",
+          "Тест 11.04.2026, 17:50:26/Sakila MySQL: высокая вариативность latency — производительность нестабильна",
+          "Тест 11.04.2026, 17:50:26/Sakila PostgreSQL (Pagila): высокий p99/median — есть выбросы latency и длинный хвост распределения",
+          "Тест 11.04.2026, 17:50:26/Sakila PostgreSQL (Pagila): высокая вариативность latency — производительность нестабильна",
+          "Тест 11.04.2026, 17:51:14/Sakila PostgreSQL (Pagila): высокий p99/median — есть выбросы latency и длинный хвост распределения",
+          "Тест 11.04.2026, 17:51:14/Sakila PostgreSQL (Pagila): высокая вариативность latency — производительность нестабильна",
+          "Sakila MySQL: Тест 11.04.2026, 17:52:53 демонстрирует более стабильное время ответа. При близкой медиане Тест 11.04.2026, 17:50:26 испытывает заметную деградацию по p99, что часто связано с блокировками или неоптимальным планом выполнения",
+          "Тест 11.04.2026, 17:52:53/Sakila PostgreSQL (Pagila): высокий p99/median — есть выбросы latency и длинный хвост распределения",
+          "Тест 11.04.2026, 17:52:53/Sakila PostgreSQL (Pagila): высокая вариативность latency — производительность нестабильна",
+          "Тест 11.04.2026, 17:52:53/Sakila MariaDB: высокий p99/median — есть выбросы latency и длинный хвост распределения",
+          "Тест 11.04.2026, 17:52:53/Sakila MariaDB: высокая вариативность latency — производительность нестабильна",
+          "Sakila MariaDB: Тест 11.04.2026, 17:50:26 демонстрирует более стабильное время ответа. При близкой медиане Тест 11.04.2026, 17:52:53 испытывает заметную деградацию по p99, что часто связано с блокировками или неоптимальным планом выполнения",
+          "Тест 11.04.2026, 17:54:34/Sakila PostgreSQL (Pagila): высокий p99/median — есть выбросы latency и длинный хвост распределения",
+          "Тест 11.04.2026, 17:54:34/Sakila PostgreSQL (Pagila): высокая вариативность latency — производительность нестабильна",
+          "Выявлена точка пересечения производительности: при нагрузке ниже 50 потоков лучше Sakila PostgreSQL (Pagila), а при более высокой нагрузке лидирует Sakila MySQL. Выбор СУБД зависит от ожидаемого уровня нагрузки"
+        ]
+      },
+      {
+        "title": "Практическая значимость различий",
+        "items": [
+          "Sakila MySQL · latency: различие между «Тест 11.04.2026, 17:51:14» и «Тест 11.04.2026, 17:50:26» практически существенно (Cohen's d = 1.52, большой эффект). С 95% уверенностью разница составляет от 28.82 до 30.16 мс.",
+          "Sakila MariaDB · latency: различие между «Тест 11.04.2026, 17:51:14» и «Тест 11.04.2026, 17:50:26» практически существенно (Cohen's d = 2.47, большой эффект). С 95% уверенностью разница составляет от 16.48 до 18.26 мс.",
+          "Sakila MySQL · latency: несмотря на статистическую значимость (p=0.0002), практический эффект пренебрежимо мал (Cohen's d = 0.00).",
+          "Sakila PostgreSQL (Pagila) · latency: несмотря на статистическую значимость (p=0.0000), практический эффект пренебрежимо мал (Cohen's d = 0.03).",
+          "Sakila MySQL · latency: различие между «Тест 11.04.2026, 17:54:34» и «Тест 11.04.2026, 17:50:26» практически существенно (Cohen's d = 1.51, большой эффект). С 95% уверенностью разница составляет от 23.85 до 24.90 мс."
+        ]
+      },
+      {
+        "title": "Рекомендации",
+        "items": [
+          "Sakila MySQL: подходит для high-throughput сценариев",
+          "Sakila PostgreSQL (Pagila): подходит для high-throughput сценариев",
+          "Sakila MariaDB: подходит для high-throughput сценариев",
+          "Sakila MariaDB: производительность предсказуема — подходит для production-нагрузок",
+          "Перед принятием архитектурного решения повторите сравнение после устранения предупреждений о нехватке данных",
+          "Планируйте выбор СУБД под ожидаемый уровень нагрузки: около 50 потоков происходит смена лидера"
+        ]
+      },
+      {
+        "title": "Возможные причины различий",
+        "items": [
+          "Sakila MySQL: возможная причина — при росте числа потоков система упирается в lock contention, пул соединений или I/O",
+          "Sakila PostgreSQL (Pagila): возможная причина — при росте числа потоков система упирается в lock contention, пул соединений или I/O",
+          "Sakila MariaDB: возможная причина — при росте числа потоков система упирается в lock contention, пул соединений или I/O"
+        ]
+      },
+      {
+        "title": "Заключение",
+        "items": [
+          "Обнаружено 3 практически значимых различий из 7 статистически значимых. Результаты достаточно надёжны для принятия решения о выборе конфигурации.",
+          "В процессе анализа было получено 3 предупреждений — при принятии решения учитывайте возможные ограничения данных."
+        ]
+      }
+    ]
+  },
+  "db_key_labels": {
+    "c5022087-55ed-4df8-a174-a6b8636b9eb9": "Sakila MySQL",
+    "e0c34830-80ee-4185-a07d-6452cd47c7e7": "Sakila PostgreSQL (Pagila)",
+    "f4c54e43-2999-47e3-a49c-8b2c89d64aad": "Sakila MariaDB"
+  },
+  "parameter_impacts": [
+    {
+      "test_id": "87768715-3b42-4e1e-ae2c-02198452bc5e",
+      "test_name": "Тест 11.04.2026, 17:51:14",
+      "vs_baseline": "Тест 11.04.2026, 17:50:26",
+      "impacts": [
+        {
+          "parameter": "virtual_users",
+          "baseline_value": 20,
+          "compared_value": 50,
+          "change_description": "20 → 50 (+150%)",
+          "effects": [
+            "Throughput: снижение на 10.6% (980.4 → 876.2 req/s)",
+            "Latency mean: рост на 175.0% (16.85 → 46.34 мс)",
+            "Latency p99: рост на 61.9% (76.82 → 124.38 мс)",
+            "Throughput: снижение на 18.0% (916.6 → 751.7 req/s)",
+            "Latency mean: рост на 203.7% (17.83 → 54.14 мс)",
+            "Latency p99: рост на 973.9% (96.52 → 1036.51 мс)",
+            "Стабильность снизилась (CV: 2.20 → 2.80)",
+            "Throughput: снижение на 8.6% (947.1 → 865.9 req/s)",
+            "Latency mean: рост на 101.8% (17.07 → 34.43 мс)",
+            "Latency p99: рост на 61.3% (33.61 → 54.22 мс)"
+          ]
+        }
+      ],
+      "summary_text": "В тесте «Тест 11.04.2026, 17:51:14» относительно baseline «Тест 11.04.2026, 17:50:26»: изменение числа виртуальных пользователей (20 → 50 (+150%)). Результаты: Throughput: снижение на 10.6% (980.4 → 876.2 req/s); Latency mean: рост на 175.0% (16.85 → 46.34 мс); Latency p99: рост на 61.9% (76.82 → 124.38 мс); Throughput: снижение на 18.0% (916.6 → 751.7 req/s) и ещё 6 изменений."
+    },
+    {
+      "test_id": "c20d0b26-828f-4375-b5fa-a4bc91bc9655",
+      "test_name": "Тест 11.04.2026, 17:52:53",
+      "vs_baseline": "Тест 11.04.2026, 17:50:26",
+      "impacts": [
+        {
+          "parameter": "iterations",
+          "baseline_value": 121,
+          "compared_value": 201,
+          "change_description": "121 → 201 (+66%)",
+          "effects": [
+            "Throughput: снижение на 0.5% (980.4 → 975.6 req/s)",
+            "Latency mean: рост на 0.1% (16.85 → 16.86 мс)",
+            "Latency p99: снижение на 54.4% (76.82 → 35.00 мс)",
+            "Throughput: рост на 15.2% (916.6 → 1055.9 req/s)",
+            "Latency mean: снижение на 6.5% (17.83 → 16.66 мс)",
+            "Latency p99: рост на 14.2% (96.52 → 110.21 мс)",
+            "Throughput: снижение на 2.7% (947.1 → 921.9 req/s)",
+            "Latency mean: рост на 7.4% (17.07 → 18.33 мс)",
+            "Latency p99: рост на 230.6% (33.61 → 111.10 мс)",
+            "Стабильность снизилась (CV: 0.36 → 0.70)"
+          ]
+        }
+      ],
+      "summary_text": "В тесте «Тест 11.04.2026, 17:52:53» относительно baseline «Тест 11.04.2026, 17:50:26»: изменение числа итераций (121 → 201 (+66%)). Результаты: Throughput: снижение на 0.5% (980.4 → 975.6 req/s); Latency mean: рост на 0.1% (16.85 → 16.86 мс); Latency p99: снижение на 54.4% (76.82 → 35.00 мс); Throughput: рост на 15.2% (916.6 → 1055.9 req/s) и ещё 6 изменений."
+    },
+    {
+      "test_id": "fe2fccb3-5bb4-45b0-8440-33e20c82e9da",
+      "test_name": "Тест 11.04.2026, 17:54:34",
+      "vs_baseline": "Тест 11.04.2026, 17:50:26",
+      "impacts": [
+        {
+          "parameter": "virtual_users",
+          "baseline_value": 20,
+          "compared_value": 50,
+          "change_description": "20 → 50 (+150%)",
+          "effects": [
+            "Throughput: рост на 0.2% (980.4 → 982.2 req/s)",
+            "Latency mean: рост на 144.7% (16.85 → 41.23 мс)",
+            "Latency p99: рост на 46.5% (76.82 → 112.50 мс)",
+            "Стабильность повысилась (CV: 0.55 → 0.43)",
+            "Throughput: снижение на 77.6% (916.6 → 205.7 req/s)",
+            "Latency mean: рост на 294.4% (17.83 → 70.31 мс)",
+            "Latency p99: рост на 1328.0% (96.52 → 1378.31 мс)",
+            "Стабильность снизилась (CV: 2.20 → 3.17)",
+            "Throughput: снижение на 5.9% (947.1 → 891.6 req/s)",
+            "Latency mean: рост на 169.0% (17.07 → 45.91 мс)",
+            "Latency p99: рост на 59.8% (33.61 → 53.71 мс)",
+            "Стабильность повысилась (CV: 0.36 → 0.11)"
+          ]
+        },
+        {
+          "parameter": "iterations",
+          "baseline_value": 121,
+          "compared_value": 201,
+          "change_description": "121 → 201 (+66%)",
+          "effects": [
+            "Throughput: рост на 0.2% (980.4 → 982.2 req/s)",
+            "Latency mean: рост на 144.7% (16.85 → 41.23 мс)",
+            "Latency p99: рост на 46.5% (76.82 → 112.50 мс)",
+            "Стабильность повысилась (CV: 0.55 → 0.43)",
+            "Throughput: снижение на 77.6% (916.6 → 205.7 req/s)",
+            "Latency mean: рост на 294.4% (17.83 → 70.31 мс)",
+            "Latency p99: рост на 1328.0% (96.52 → 1378.31 мс)",
+            "Стабильность снизилась (CV: 2.20 → 3.17)",
+            "Throughput: снижение на 5.9% (947.1 → 891.6 req/s)",
+            "Latency mean: рост на 169.0% (17.07 → 45.91 мс)",
+            "Latency p99: рост на 59.8% (33.61 → 53.71 мс)",
+            "Стабильность повысилась (CV: 0.36 → 0.11)"
+          ]
+        },
+        {
+          "parameter": "use_indexes",
+          "baseline_value": false,
+          "compared_value": true,
+          "change_description": "без индексов → с индексами",
+          "effects": [
+            "Throughput: рост на 0.2% (980.4 → 982.2 req/s)",
+            "Latency mean: рост на 144.7% (16.85 → 41.23 мс)",
+            "Latency p99: рост на 46.5% (76.82 → 112.50 мс)",
+            "Стабильность повысилась (CV: 0.55 → 0.43)",
+            "Throughput: снижение на 77.6% (916.6 → 205.7 req/s)",
+            "Latency mean: рост на 294.4% (17.83 → 70.31 мс)",
+            "Latency p99: рост на 1328.0% (96.52 → 1378.31 мс)",
+            "Стабильность снизилась (CV: 2.20 → 3.17)",
+            "Throughput: снижение на 5.9% (947.1 → 891.6 req/s)",
+            "Latency mean: рост на 169.0% (17.07 → 45.91 мс)",
+            "Latency p99: рост на 59.8% (33.61 → 53.71 мс)",
+            "Стабильность повысилась (CV: 0.36 → 0.11)"
+          ]
+        }
+      ],
+      "summary_text": "В тесте «Тест 11.04.2026, 17:54:34» относительно baseline «Тест 11.04.2026, 17:50:26»: изменение числа виртуальных пользователей (20 → 50 (+150%)), изменение числа итераций (121 → 201 (+66%)), изменение использования индексов (без индексов → с индексами). Результаты: Throughput: рост на 0.2% (980.4 → 982.2 req/s); Latency mean: рост на 144.7% (16.85 → 41.23 мс); Latency p99: рост на 46.5% (76.82 → 112.50 мс); Стабильность повысилась (CV: 0.55 → 0.43) и ещё 32 изменений."
+    }
+  ]
+}
