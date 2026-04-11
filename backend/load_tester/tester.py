@@ -8,8 +8,6 @@ import psutil
 from typing import Dict, List, Optional, Callable, Any
 from datetime import datetime, timezone
 from sqlalchemy import text
-from backend.core.config import settings
-from backend.core.docker import resolve_host
 from backend.database.connection import DatabaseConnection
 from backend.database.dialects import get_dialect
 from backend.database.queries import QueryManager
@@ -991,45 +989,6 @@ class LoadTester:
             query_id=f"scenario:{scenario.get('name', 'unknown')}"
         )
         return stats
-
-    async def run_full_scenario_test_suite(
-        self,
-        scenario_id: str,
-        db_types: List[str] = None,
-        iterations: int = 100,
-        virtual_users: int = 10,
-        warmup_time: int = 5,
-        use_indexes: bool = False,
-        scenario_repository = None
-    ) -> List[Dict]:
-        """Запуск полного теста на основе сценария из БД"""
-        from backend.database.repository import ScenarioRepository
-
-        if db_types is None:
-            db_types = ['mysql', 'postgresql']
-
-        # Загружаем сценарий - используем переданный репозиторий или создаем новый
-        if scenario_repository is not None:
-            scenario_repo = scenario_repository
-        else:
-            # Fallback: создаем репозиторий с дефолтным URL
-            fallback_host = resolve_host('localhost')
-            db_url = settings.history_db_url or f'postgresql+asyncpg://postgres:postgres@{fallback_host}:5433/project_data'
-            scenario_repo = ScenarioRepository(db_url)
-        
-        scenario = await scenario_repo.get_scenario_for_execution(scenario_id)
-
-        if not scenario:
-            raise ValueError(f"Scenario {scenario_id} not found")
-
-        return await self.run_resolved_scenario_test_suite(
-            scenario=scenario,
-            db_types=db_types,
-            iterations=iterations,
-            virtual_users=virtual_users,
-            warmup_time=warmup_time,
-            use_indexes=use_indexes,
-        )
 
     async def run_resolved_scenario_test_suite(
         self,

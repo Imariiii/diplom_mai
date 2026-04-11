@@ -12,12 +12,10 @@ backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Глобальные переменные для репозиториев
 test_repository = None
-scenario_repository = None
 connection_repository = None
 profile_repository = None
 scenario_bundle_repository = None
 HISTORY_ENABLED = False
-SCENARIOS_ENABLED = False
 
 
 def get_history_db_url():
@@ -33,12 +31,10 @@ def get_history_db_url():
 def initialize_repositories():
     """Инициализировать репозитории"""
     global test_repository
-    global scenario_repository
     global connection_repository
     global profile_repository
     global scenario_bundle_repository
     global HISTORY_ENABLED
-    global SCENARIOS_ENABLED
 
     print("[HISTORY_DB] === ИНИЦИАЛИЗАЦИЯ БД ИСТОРИИ ===")
     try:
@@ -63,18 +59,6 @@ def initialize_repositories():
         test_repository = None
         HISTORY_ENABLED = False
     print(f"[HISTORY_DB] === ИТОГ: HISTORY_ENABLED = {HISTORY_ENABLED} ===")
-
-    print("[SCENARIO_REPO] Инициализация ScenarioRepository...")
-    try:
-        from backend.database.repository import ScenarioRepository
-        history_db_url = get_history_db_url()
-        scenario_repository = ScenarioRepository(history_db_url) if history_db_url else None
-        SCENARIOS_ENABLED = HISTORY_ENABLED and scenario_repository is not None
-        print(f"[SCENARIO_REPO] ✅ Сценарии инициализированы: SCENARIOS_ENABLED = {SCENARIOS_ENABLED}")
-    except Exception as e:
-        print(f"[SCENARIO_REPO] ❌ Ошибка инициализации: {e}")
-        scenario_repository = None
-        SCENARIOS_ENABLED = False
 
     print("[CONNECTION_REPO] Инициализация ConnectionRepository...")
     try:
@@ -123,4 +107,4 @@ def initialize_repositories():
 def init():
     """Явная инициализация репозиториев - вызвать из main.py"""
     initialize_repositories()
-    return test_repository, scenario_repository
+    return test_repository, scenario_bundle_repository

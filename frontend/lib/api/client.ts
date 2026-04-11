@@ -12,10 +12,12 @@ import type {
   ConnectionGroupsResponse,
   ConnectionSchemaPreview,
   ConnectionProfileAssignRequest,
-  GenerateScenariosRequest,
-  GenerateScenariosResponse,
-  CreateScenarioIndexRequest,
-  ScenarioIndex,
+  ScenarioTemplate,
+  ScenarioTemplateCreateRequest,
+  ScenarioTemplateUpdateRequest,
+  ScenarioBundleCloneRequest,
+  ScenarioBundleSaveRequest,
+  ScenarioBundleSummary,
   ScenarioTemplateListResponse,
   SchemaProfileListResponse,
   SchemaProfileDetail,
@@ -134,130 +136,6 @@ class ApiClient {
     })
   }
 
-  // ==================== Сценарии тестирования ====================
-
-  async getScenarios(params?: {
-    targetConnectionId?: string
-    includeGlobal?: boolean
-    includeBuiltin?: boolean
-  }): Promise<{ scenarios: any[] }> {
-    const queryParams = new URLSearchParams()
-    if (params?.targetConnectionId) queryParams.set('target_connection_id', params.targetConnectionId)
-    if (params?.includeGlobal !== undefined) queryParams.set('include_global', String(params.includeGlobal))
-    if (params?.includeBuiltin !== undefined) queryParams.set('include_builtin', String(params.includeBuiltin))
-    const queryString = queryParams.toString()
-    return this.request(`/scenarios${queryString ? `?${queryString}` : ''}`)
-  }
-
-  async getScenario(id: string): Promise<any> {
-    return this.request(`/scenarios/${id}`)
-  }
-
-  async getEnabledScenarios(): Promise<{ scenarios: any[] }> {
-    return this.request('/scenarios')
-  }
-
-  async createScenario(scenario: any): Promise<any> {
-    return this.request('/scenarios', {
-      method: 'POST',
-      body: JSON.stringify(scenario),
-    })
-  }
-
-  async updateScenario(id: string, scenario: any): Promise<any> {
-    return this.request(`/scenarios/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(scenario),
-    })
-  }
-
-  async deleteScenario(id: string): Promise<{ deleted: boolean; scenario_id: string }> {
-    return this.request(`/scenarios/${id}`, { method: 'DELETE' })
-  }
-
-  async cloneScenario(id: string, newName?: string): Promise<any> {
-    return this.request(`/scenarios/${id}/clone`, {
-      method: 'POST',
-      body: JSON.stringify({ new_name: newName }),
-    })
-  }
-
-  async generateScenarios(data: GenerateScenariosRequest): Promise<GenerateScenariosResponse> {
-    return this.request<GenerateScenariosResponse>('/scenarios/generate', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    })
-  }
-
-  // Индексы сценария
-  async getScenarioIndexes(scenarioId: string): Promise<{ indexes: ScenarioIndex[] }> {
-    return this.request(`/scenarios/${scenarioId}/indexes`)
-  }
-
-  async createScenarioIndex(scenarioId: string, index: CreateScenarioIndexRequest): Promise<ScenarioIndex> {
-    return this.request(`/scenarios/${scenarioId}/indexes`, {
-      method: 'POST',
-      body: JSON.stringify(index),
-    })
-  }
-
-  async updateScenarioIndex(scenarioId: string, indexId: string, index: Partial<CreateScenarioIndexRequest>): Promise<ScenarioIndex> {
-    return this.request(`/scenarios/${scenarioId}/indexes/${indexId}`, {
-      method: 'PUT',
-      body: JSON.stringify(index),
-    })
-  }
-
-  async deleteScenarioIndex(scenarioId: string, indexId: string): Promise<{ deleted: boolean; index_id: string }> {
-    return this.request(`/scenarios/${scenarioId}/indexes/${indexId}`, { method: 'DELETE' })
-  }
-
-  // Запросы сценария
-  async getScenarioQueries(scenarioId: string): Promise<{ queries: any[] }> {
-    return this.request(`/scenarios/${scenarioId}/queries`)
-  }
-
-  async createScenarioQuery(scenarioId: string, query: any): Promise<any> {
-    return this.request(`/scenarios/${scenarioId}/queries`, {
-      method: 'POST',
-      body: JSON.stringify(query),
-    })
-  }
-
-  async updateScenarioQuery(scenarioId: string, queryId: string, query: any): Promise<any> {
-    return this.request(`/scenarios/${scenarioId}/queries/${queryId}`, {
-      method: 'PUT',
-      body: JSON.stringify(query),
-    })
-  }
-
-  async deleteScenarioQuery(scenarioId: string, queryId: string): Promise<{ deleted: boolean; query_id: string }> {
-    return this.request(`/scenarios/${scenarioId}/queries/${queryId}`, { method: 'DELETE' })
-  }
-
-  // Параметры запроса
-  async getScenarioQueryParams(scenarioId: string, queryId: string): Promise<{ params: any[] }> {
-    return this.request(`/scenarios/${scenarioId}/queries/${queryId}/params`)
-  }
-
-  async createScenarioParam(scenarioId: string, queryId: string, param: any): Promise<any> {
-    return this.request(`/scenarios/${scenarioId}/queries/${queryId}/params`, {
-      method: 'POST',
-      body: JSON.stringify(param),
-    })
-  }
-
-  async updateScenarioParam(scenarioId: string, queryId: string, paramId: string, param: any): Promise<any> {
-    return this.request(`/scenarios/${scenarioId}/queries/${queryId}/params/${paramId}`, {
-      method: 'PUT',
-      body: JSON.stringify(param),
-    })
-  }
-
-  async deleteScenarioParam(scenarioId: string, queryId: string, paramId: string): Promise<{ deleted: boolean; param_id: string }> {
-    return this.request(`/scenarios/${scenarioId}/queries/${queryId}/params/${paramId}`, { method: 'DELETE' })
-  }
-
   // ==================== Database State Management ====================
 
   async getDatabaseState(connectionId: string): Promise<any> {
@@ -369,6 +247,26 @@ class ApiClient {
     return this.request<ScenarioTemplateListResponse>('/api/schema-profiles/templates')
   }
 
+  async createScenarioTemplate(data: ScenarioTemplateCreateRequest): Promise<ScenarioTemplate> {
+    return this.request<ScenarioTemplate>(`/api/schema-profiles/templates`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async updateScenarioTemplate(templateId: string, data: ScenarioTemplateUpdateRequest): Promise<ScenarioTemplate> {
+    return this.request<ScenarioTemplate>(`/api/schema-profiles/templates/${templateId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async deleteScenarioTemplate(templateId: string): Promise<{ deleted: boolean; template_id: string }> {
+    return this.request(`/api/schema-profiles/templates/${templateId}`, {
+      method: 'DELETE',
+    })
+  }
+
   async getSchemaProfiles(): Promise<SchemaProfileListResponse> {
     return this.request<SchemaProfileListResponse>('/api/schema-profiles')
   }
@@ -395,6 +293,54 @@ class ApiClient {
     return this.request<ProfileBundleGenerateResponse>(`/api/schema-profiles/${profileId}/bundles/generate`, {
       method: 'POST',
       body: JSON.stringify(data),
+    })
+  }
+
+  async createBundleVariant(
+    profileId: string,
+    data: ScenarioBundleSaveRequest
+  ): Promise<ScenarioBundleSummary> {
+    return this.request<ScenarioBundleSummary>(`/api/schema-profiles/${profileId}/bundles`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async getBundleVariant(profileId: string, bundleId: string): Promise<ScenarioBundleSummary> {
+    return this.request<ScenarioBundleSummary>(`/api/schema-profiles/${profileId}/bundles/${bundleId}`)
+  }
+
+  async updateBundleVariant(
+    profileId: string,
+    bundleId: string,
+    data: ScenarioBundleSaveRequest
+  ): Promise<ScenarioBundleSummary> {
+    return this.request<ScenarioBundleSummary>(`/api/schema-profiles/${profileId}/bundles/${bundleId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async cloneBundleVariant(
+    profileId: string,
+    bundleId: string,
+    data: ScenarioBundleCloneRequest
+  ): Promise<ScenarioBundleSummary> {
+    return this.request<ScenarioBundleSummary>(`/api/schema-profiles/${profileId}/bundles/${bundleId}/clone`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async activateBundleVariant(profileId: string, bundleId: string): Promise<ScenarioBundleSummary> {
+    return this.request<ScenarioBundleSummary>(`/api/schema-profiles/${profileId}/bundles/${bundleId}/activate`, {
+      method: 'POST',
+    })
+  }
+
+  async deleteBundleVariant(profileId: string, bundleId: string): Promise<{ deleted: boolean; bundle_id: string }> {
+    return this.request<{ deleted: boolean; bundle_id: string }>(`/api/schema-profiles/${profileId}/bundles/${bundleId}`, {
+      method: 'DELETE',
     })
   }
 }

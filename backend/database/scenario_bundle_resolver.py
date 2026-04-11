@@ -21,11 +21,14 @@ class ScenarioBundleResolver:
     async def resolve_for_connections(
         self,
         connection_ids: List[str],
-        scenario_template_id: str,
+        scenario_template_id: Optional[str] = None,
+        bundle_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Разрешить logical template в bundle и проверить совместимость профилей."""
+        """Разрешить template/bundle в конкретный SQL bundle и проверить совместимость профилей."""
         if not connection_ids:
             raise ValueError("Не выбраны подключения для теста")
+        if not scenario_template_id and not bundle_id:
+            raise ValueError("Не указан scenario_template_id или bundle_id")
 
         connections = await self.connection_repository.bulk_get_connections(connection_ids)
         if len(connections) != len(connection_ids):
@@ -50,20 +53,30 @@ class ScenarioBundleResolver:
             )
 
         schema_profile_id = next(iter(profile_ids))
-        bundle = await self.bundle_repository.get_bundle_for_profile_template(
-            schema_profile_id=schema_profile_id,
-            scenario_template_id=scenario_template_id,
-        )
+        bundle = None
+        if bundle_id:
+            bundle = await self.bundle_repository.get_bundle(bundle_id)
+            if not bundle:
+                raise ValueError(f"Bundle '{bundle_id}' не найден")
+            if str(bundle.schema_profile_id) != schema_profile_id:
+                raise ValueError("Выбранный bundle не соответствует profile выбранных подключений")
+            if scenario_template_id and bundle.scenario_template_id != scenario_template_id:
+                raise ValueError("Bundle не соответствует выбранному logical template")
+        elif scenario_template_id:
+            bundle = await self.bundle_repository.get_bundle_for_profile_template(
+                schema_profile_id=schema_profile_id,
+                scenario_template_id=scenario_template_id,
+            )
         if not bundle:
             profile_name = connections[0].schema_profile.name if connections[0].schema_profile else schema_profile_id
             raise ValueError(
-                f"Для профиля '{profile_name}' не найден bundle сценария '{scenario_template_id}'"
+                f"Для профиля '{profile_name}' не найден active bundle сценария '{scenario_template_id}'"
             )
 
         return {
             "schema_profile_id": schema_profile_id,
             "schema_profile_name": bundle.schema_profile.name if bundle.schema_profile else None,
-            "scenario_template_id": scenario_template_id,
+            "scenario_template_id": bundle.scenario_template_id,
             "bundle": self.bundle_to_execution_dict(bundle.to_dict()),
         }
 
@@ -72,10 +85,14 @@ class ScenarioBundleResolver:
         return {
             "id": bundle["id"],
             "name": bundle["name"],
+            "description": bundle.get("description"),
             "scenario_type": bundle["scenario_template_id"],
             "queries": bundle.get("queries", []),
             "indexes": bundle.get("indexes", []),
             "schema_profile_id": bundle.get("schema_profile_id"),
             "schema_profile_name": bundle.get("schema_profile_name"),
             "scenario_template_id": bundle.get("scenario_template_id"),
+            "scenario_template_name": bundle.get("scenario_template_name"),
+            "generation_source": bundle.get("generation_source"),
+            "is_builtin": bundle.get("is_builtin"),
         }

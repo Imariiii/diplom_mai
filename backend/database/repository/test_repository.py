@@ -128,6 +128,23 @@ class TestRepository(BaseRepository):
 
             return test_run
 
+    async def update_test_run_config(
+        self,
+        test_run_id: str,
+        config: Dict[str, Any],
+    ) -> Optional[TestRun]:
+        """Обновить config тестового прогона."""
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(TestRun).where(TestRun.id == uuid.UUID(test_run_id))
+            )
+            test_run = result.scalar_one_or_none()
+            if test_run:
+                test_run.config = config
+                await session.commit()
+                await session.refresh(test_run)
+            return test_run
+
     async def delete_test_run(self, test_run_id: str) -> bool:
         """Удалить тестовый прогон"""
         async with self.SessionLocal() as session:

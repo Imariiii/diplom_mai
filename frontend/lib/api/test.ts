@@ -8,9 +8,12 @@ import { apiClient } from "./client"
 export interface TestRequest {
   query_id?: string | null
   db_types?: string[]
+  connection_ids?: string[]
+  bundle_id?: string
   iterations?: number
   virtual_users?: number
   scenario?: string
+  use_indexes?: boolean
   warmup_time?: number
   test_name?: string
 }

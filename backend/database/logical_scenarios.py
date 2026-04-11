@@ -1,7 +1,9 @@
 """
 Справочник логических сценариев нагрузки и built-in профилей схемы.
 """
-from typing import Dict, List
+import re
+import uuid
+from typing import Dict, Iterable, List
 
 
 LOGICAL_SCENARIO_TEMPLATES: List[Dict[str, str]] = [
@@ -51,3 +53,17 @@ BUILTIN_SCHEMA_PROFILES: List[Dict[str, str]] = [
 
 
 LOGICAL_SCENARIO_TEMPLATE_IDS = [template["id"] for template in LOGICAL_SCENARIO_TEMPLATES]
+BUILTIN_LOGICAL_SCENARIO_TEMPLATE_IDS = set(LOGICAL_SCENARIO_TEMPLATE_IDS)
+
+
+def build_custom_template_id(name: str, existing_ids: Iterable[str] = ()) -> str:
+    """Построить machine id для пользовательского logical template."""
+    normalized = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+    base_id = f"custom_{normalized}" if normalized else f"custom_{uuid.uuid4().hex[:8]}"
+    candidate = base_id
+    suffix = 2
+    existing = set(existing_ids)
+    while candidate in existing or candidate in BUILTIN_LOGICAL_SCENARIO_TEMPLATE_IDS:
+        candidate = f"{base_id}_{suffix}"
+        suffix += 1
+    return candidate

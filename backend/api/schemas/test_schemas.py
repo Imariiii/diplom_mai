@@ -2,17 +2,7 @@
 Pydantic схемы для запросов тестирования
 """
 from pydantic import BaseModel
-from typing import List, Optional, Literal
-
-TestScenario = Literal[
-    "read_only",      # 100% SELECT
-    "write_only",     # 100% INSERT/UPDATE/DELETE
-    "mixed_light",    # 80% SELECT, 20% UPDATE
-    "mixed_heavy",    # 50% SELECT, 50% UPDATE
-    "oltp",           # OLTP-подобная нагрузка
-    "olap",           # OLAP-подобная нагрузка
-    "custom"          # Пользовательский сценарий
-]
+from typing import List, Optional
 
 
 class TestRequest(BaseModel):
@@ -20,6 +10,7 @@ class TestRequest(BaseModel):
     query_id: Optional[str] = None
     db_types: Optional[List[str]] = None  # ["mysql", "postgresql"] - для обратной совместимости
     connection_ids: Optional[List[str]] = None  # ID подключений из БД
+    bundle_id: Optional[str] = None
     iterations: int = 10
     virtual_users: Optional[int] = 10
     scenario: Optional[str] = "mixed_light"
@@ -33,6 +24,7 @@ class AsyncTestRequest(BaseModel):
     query_id: Optional[str] = None
     db_types: Optional[List[str]] = None  # ["mysql", "postgresql"] - для обратной совместимости
     connection_ids: Optional[List[str]] = None  # ID подключений из БД
+    bundle_id: Optional[str] = None
     iterations: int = 10
     virtual_users: Optional[int] = 10
     scenario: Optional[str] = "mixed_light"

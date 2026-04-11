@@ -24,7 +24,7 @@ from backend.websocket_manager import manager, TestStreamingCallback
 from backend.database.state_manager import DatabaseStateManager
 
 # Импорт роутов из api модуля
-from backend.api.routes import test_routes, scenario_routes, database_state_routes, history_routes, settings_routes, connection_routes, comparison_routes, profile_routes
+from backend.api.routes import test_routes, database_state_routes, history_routes, settings_routes, connection_routes, comparison_routes, profile_routes
 
 # Используем централизованную инициализацию
 from backend import initialize
@@ -93,14 +93,12 @@ def get_db_connection() -> DatabaseConnection:
 # Явная инициализация репозиториев
 initialize.init()
 test_repository = initialize.test_repository
-scenario_repository = initialize.scenario_repository
 connection_repository = initialize.connection_repository
 profile_repository = initialize.profile_repository
 scenario_bundle_repository = initialize.scenario_bundle_repository
 HISTORY_ENABLED = initialize.HISTORY_ENABLED
-SCENARIOS_ENABLED = initialize.SCENARIOS_ENABLED
 
-print(f"[INIT] HISTORY_ENABLED = {HISTORY_ENABLED}, SCENARIOS_ENABLED = {SCENARIOS_ENABLED}")
+print(f"[INIT] HISTORY_ENABLED = {HISTORY_ENABLED}")
 
 # CORS middleware
 app.add_middleware(
@@ -174,9 +172,6 @@ async def websocket_test_endpoint(websocket: WebSocket, test_id: str):
 
 # Тестовые роуты
 app.include_router(test_routes.router)
-
-# Роуты сценариев
-app.include_router(scenario_routes.router)
 
 # Роуты состояния БД
 app.include_router(database_state_routes.router)

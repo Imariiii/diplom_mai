@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any
 from sqlalchemy import (
     Column, String, Integer, Float, DateTime, ForeignKey,
-    Text, JSON, BigInteger, Index, UniqueConstraint, create_engine
+    Text, JSON, BigInteger, Index, create_engine, text
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.declarative import declarative_base
@@ -71,6 +71,7 @@ class ScenarioTemplate(Base):
     description = Column(Text, nullable=True)
     is_builtin = Column(String(1), nullable=False, default='t')
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     bundles = relationship("ScenarioBundle", back_populates="scenario_template")
 
@@ -85,6 +86,7 @@ class ScenarioTemplate(Base):
             'description': self.description,
             'is_builtin': self.is_builtin == 't',
             'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
 
 
@@ -407,14 +409,16 @@ class DatabaseConnectionConfig(Base):
 
 
 class ScenarioBundle(Base):
-    """Канонический SQL bundle для пары профиль + логический сценарий."""
+    """SQL bundle-вариант для пары профиль + логический сценарий."""
     __tablename__ = 'scenario_bundles'
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     schema_profile_id = Column(UUID(as_uuid=True), ForeignKey('schema_profiles.id', ondelete='CASCADE'), nullable=False)
     scenario_template_id = Column(String(50), ForeignKey('scenario_templates.id', ondelete='CASCADE'), nullable=False)
     name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
     generation_source = Column(String(50), nullable=False, default='generated_from_reference')
+    is_builtin = Column(String(1), nullable=False, default='f')
     is_active = Column(String(1), nullable=False, default='t')
     generated_from_connection_id = Column(
         UUID(as_uuid=True),
@@ -436,10 +440,17 @@ class ScenarioBundle(Base):
     indexes = relationship("ScenarioBundleIndex", back_populates="bundle", cascade="all, delete-orphan")
 
     __table_args__ = (
-        UniqueConstraint('schema_profile_id', 'scenario_template_id', name='uq_scenario_bundles_profile_template'),
         Index('idx_scenario_bundles_profile_id', 'schema_profile_id'),
         Index('idx_scenario_bundles_template_id', 'scenario_template_id'),
+        Index('idx_scenario_bundles_builtin', 'is_builtin'),
         Index('idx_scenario_bundles_active', 'is_active'),
+        Index(
+            'uq_scenario_bundles_profile_template_active',
+            'schema_profile_id',
+            'scenario_template_id',
+            unique=True,
+            postgresql_where=text("is_active = 't'"),
+        ),
     )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -450,7 +461,9 @@ class ScenarioBundle(Base):
             'scenario_template_id': self.scenario_template_id,
             'scenario_template_name': self.scenario_template.name if self.scenario_template else None,
             'name': self.name,
+            'description': self.description,
             'generation_source': self.generation_source,
+            'is_builtin': self.is_builtin == 't',
             'is_active': self.is_active == 't',
             'generated_from_connection_id': (
                 str(self.generated_from_connection_id) if self.generated_from_connection_id else None
@@ -566,172 +579,6 @@ class ScenarioBundleIndex(Base):
         return {
             'id': str(self.id),
             'bundle_id': str(self.bundle_id),
-            'table_name': self.table_name,
-            'column_names': self.column_names,
-            'index_type': self.index_type,
-            'index_name': self.index_name,
-            'is_unique': self.is_unique == 't',
-            'condition': self.condition,
-            'description': self.description,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-        }
-
-
-class TestScenario(Base):
-    """Модель для хранения сценариев тестирования"""
-    __tablename__ = 'test_scenarios'
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String(255), nullable=False, unique=True)
-    description = Column(Text, nullable=True)
-    scenario_type = Column(String(50), nullable=False)  # read_only, write_only, mixed_light, mixed_heavy, oltp, olap, custom
-    target_connection_id = Column(UUID(as_uuid=True), ForeignKey('db_connection_configs.id', ondelete='CASCADE'), nullable=True)
-    is_builtin = Column(String(1), nullable=False, default='f')  # 't' - системный (нельзя удалить), 'f' - пользовательский
-    is_active = Column(String(1), nullable=False, default='t')  # 't' - активен, 'f' - неактивен
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    
-    # Relationships
-    target_connection = relationship("DatabaseConnectionConfig")
-    queries = relationship("ScenarioQuery", back_populates="scenario", cascade="all, delete-orphan", order_by="ScenarioQuery.order_index")
-    indexes = relationship("ScenarioIndex", back_populates="scenario", cascade="all, delete-orphan")
-    
-    # Indexes
-    __table_args__ = (
-        Index('idx_test_scenarios_type', 'scenario_type'),
-        Index('idx_test_scenarios_builtin', 'is_builtin'),
-        Index('idx_test_scenarios_target_connection_id', 'target_connection_id'),
-    )
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'id': str(self.id),
-            'name': self.name,
-            'description': self.description,
-            'scenario_type': self.scenario_type,
-            'target_connection_id': str(self.target_connection_id) if self.target_connection_id else None,
-            'is_builtin': self.is_builtin == 't',
-            'is_active': self.is_active == 't',
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-            'queries': [q.to_dict() for q in self.queries] if self.queries else [],
-            'indexes': [idx.to_dict() for idx in self.indexes] if self.indexes else [],
-        }
-
-
-class ScenarioQuery(Base):
-    """Модель для хранения SQL-запросов в сценарии"""
-    __tablename__ = 'scenario_queries'
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    scenario_id = Column(UUID(as_uuid=True), ForeignKey('test_scenarios.id', ondelete='CASCADE'), nullable=False)
-    sql_template = Column(Text, nullable=False)  # SQL с placeholders: "SELECT * FROM film WHERE film_id = {film_id}"
-    query_type = Column(String(20), nullable=False)  # select, insert, update, delete
-    weight = Column(Integer, nullable=False, default=1)  # Вес для распределения нагрузки (1-100)
-    order_index = Column(Integer, nullable=False, default=0)  # Порядок выполнения
-    description = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    
-    # Relationships
-    scenario = relationship("TestScenario", back_populates="queries")
-    params = relationship("ScenarioParam", back_populates="query", cascade="all, delete-orphan")
-    
-    # Indexes
-    __table_args__ = (
-        Index('idx_scenario_queries_scenario_id', 'scenario_id'),
-        Index('idx_scenario_queries_type', 'query_type'),
-    )
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'id': str(self.id),
-            'scenario_id': str(self.scenario_id),
-            'sql_template': self.sql_template,
-            'query_type': self.query_type,
-            'weight': self.weight,
-            'order_index': self.order_index,
-            'description': self.description,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'params': [p.to_dict() for p in self.params] if self.params else [],
-        }
-
-
-class ScenarioParam(Base):
-    """Модель для хранения параметров SQL-запросов"""
-    __tablename__ = 'scenario_params'
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    query_id = Column(UUID(as_uuid=True), ForeignKey('scenario_queries.id', ondelete='CASCADE'), nullable=False)
-    param_name = Column(String(100), nullable=False)  # Имя placeholder'а: "film_id"
-    param_type = Column(String(50), nullable=False)  # random_int, random_string, random_date, sequential_int, uuid, random_from_table
-    # Для числовых типов
-    min_value = Column(Integer, nullable=True)
-    max_value = Column(Integer, nullable=True)
-    # Для строковых типов
-    string_pattern = Column(String(255), nullable=True)  # Например: "user_{random}"
-    string_length = Column(Integer, nullable=True)  # Длина случайной строки
-    # Для random_from_table - выбор случайного ID из таблицы
-    table_ref = Column(String(100), nullable=True)  # Таблица: "film"
-    column_ref = Column(String(100), nullable=True)  # Колонка: "film_id"
-    # Для sequential_int
-    current_value = Column(Integer, nullable=True, default=0)  # Текущее значение счётчика
-    step = Column(Integer, nullable=True, default=1)  # Шаг инкремента
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    
-    # Relationships
-    query = relationship("ScenarioQuery", back_populates="params")
-    
-    # Indexes
-    __table_args__ = (
-        Index('idx_scenario_params_query_id', 'query_id'),
-        Index('idx_scenario_params_name', 'param_name'),
-    )
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'id': str(self.id),
-            'query_id': str(self.query_id),
-            'param_name': self.param_name,
-            'param_type': self.param_type,
-            'min_value': self.min_value,
-            'max_value': self.max_value,
-            'string_pattern': self.string_pattern,
-            'string_length': self.string_length,
-            'table_ref': self.table_ref,
-            'column_ref': self.column_ref,
-            'current_value': self.current_value,
-            'step': self.step,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-        }
-
-
-class ScenarioIndex(Base):
-    """Модель для хранения индексов, создаваемых перед тестом"""
-    __tablename__ = 'scenario_indexes'
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    scenario_id = Column(UUID(as_uuid=True), ForeignKey('test_scenarios.id', ondelete='CASCADE'), nullable=False)
-    table_name = Column(String(100), nullable=False)
-    column_names = Column(String(500), nullable=False)  # "col1,col2"
-    index_type = Column(String(50), nullable=False, default='btree')
-    index_name = Column(String(255), nullable=True)
-    is_unique = Column(String(1), nullable=False, default='f')
-    condition = Column(Text, nullable=True)
-    description = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-
-    # Relationships
-    scenario = relationship("TestScenario", back_populates="indexes")
-
-    __table_args__ = (
-        Index('idx_scenario_indexes_scenario_id', 'scenario_id'),
-        Index('idx_scenario_indexes_table_name', 'table_name'),
-    )
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'id': str(self.id),
-            'scenario_id': str(self.scenario_id),
             'table_name': self.table_name,
             'column_names': self.column_names,
             'index_type': self.index_type,

@@ -148,8 +148,7 @@ LEGACY_SCENARIO_INDEX_HINTS: Dict[str, List[Dict[str, Any]]] = {
 class ScenarioGenerator:
     """Генератор сценариев тестирования на базе метаданных схемы."""
 
-    def __init__(self, scenario_repository, connection_repo=None, bundle_repository: Optional[ScenarioBundleRepository] = None):
-        self.scenario_repository = scenario_repository
+    def __init__(self, connection_repo=None, bundle_repository: Optional[ScenarioBundleRepository] = None):
         self.connection_repo = connection_repo
         self.bundle_repository = bundle_repository
         self.schema_analyzer = SchemaAnalyzer(connection_repo=connection_repo)
@@ -161,81 +160,6 @@ class ScenarioGenerator:
         preview["available_scenario_types"] = self._get_available_scenario_types(metadata)
         preview["matching_templates"] = self._collect_matching_templates(metadata)
         return preview
-
-    async def generate_scenarios(
-        self,
-        connection_id: str,
-        scenario_types: Optional[List[str]] = None,
-        replace_existing: bool = True,
-    ) -> List[Dict[str, Any]]:
-        """Сгенерировать и сохранить сценарии для указанного подключения."""
-        metadata = await self.schema_analyzer.analyze_connection(connection_id)
-        selected_types = self._normalize_scenario_types(scenario_types)
-
-        if replace_existing:
-            await self.scenario_repository.delete_generated_scenarios_for_connection(
-                connection_id=connection_id,
-                scenario_types=selected_types,
-            )
-
-        generated_scenarios: List[Dict[str, Any]] = []
-        for scenario_type in selected_types:
-            queries, indexes = self._build_scenario_assets(metadata, scenario_type)
-            if not queries:
-                continue
-
-            scenario = await self.scenario_repository.create_scenario(
-                name=self._build_scenario_name(metadata.connection_name, connection_id, scenario_type),
-                description=(
-                    f"Автоматически сгенерированный сценарий для подключения "
-                    f"'{metadata.connection_name}' по типу '{scenario_type}'"
-                ),
-                scenario_type=scenario_type,
-                is_builtin=False,
-                target_connection_id=connection_id,
-            )
-
-            for order_index, query in enumerate(queries):
-                created_query = await self.scenario_repository.add_query_to_scenario(
-                    scenario_id=str(scenario.id),
-                    sql_template=query["sql_template"],
-                    query_type=query["query_type"],
-                    weight=query["weight"],
-                    order_index=order_index,
-                    description=query["description"],
-                )
-                for param in query["params"]:
-                    await self.scenario_repository.add_param_to_query(
-                        query_id=str(created_query.id),
-                        param_name=param["param_name"],
-                        param_type=param["param_type"],
-                        min_value=param.get("min_value"),
-                        max_value=param.get("max_value"),
-                        string_pattern=param.get("string_pattern"),
-                        string_length=param.get("string_length"),
-                        table_ref=param.get("table_ref"),
-                        column_ref=param.get("column_ref"),
-                        current_value=param.get("current_value", 0),
-                        step=param.get("step", 1),
-                    )
-
-            for index in indexes:
-                await self.scenario_repository.add_index_to_scenario(
-                    scenario_id=str(scenario.id),
-                    table_name=index["table_name"],
-                    column_names=index["column_names"],
-                    index_type=index.get("index_type", "btree"),
-                    index_name=index.get("index_name"),
-                    is_unique=index.get("is_unique", False),
-                    condition=index.get("condition"),
-                    description=index.get("description"),
-                )
-
-            full_scenario = await self.scenario_repository.get_scenario(str(scenario.id))
-            if full_scenario:
-                generated_scenarios.append(full_scenario.to_dict())
-
-        return generated_scenarios
 
     async def build_query_sets_for_connection(
         self,
@@ -272,10 +196,14 @@ class ScenarioGenerator:
             if not queries:
                 continue
 
-            bundle = await self.bundle_repository.upsert_bundle(
+            bundle = await self.bundle_repository.upsert_generated_bundle(
                 schema_profile_id=schema_profile_id,
                 scenario_template_id=scenario_type,
-                name=f"{metadata.connection_name}::{scenario_type}",
+                name=f"{scenario_type}::{metadata.connection_name}::canonical",
+                description=(
+                    f"Канонический bundle, сгенерированный по эталонной БД "
+                    f"'{metadata.connection_name}'"
+                ),
                 generation_source=generation_source,
                 generated_from_connection_id=reference_connection_id,
                 queries=queries,
@@ -315,10 +243,6 @@ class ScenarioGenerator:
                     matches.append(template.id)
             matching[table.name] = matches
         return matching
-
-    def _build_scenario_name(self, connection_name: str, connection_id: str, scenario_type: str) -> str:
-        """Сформировать уникальное имя автоматически сгенерированного сценария."""
-        return f"auto::{connection_name}::{scenario_type}::{connection_id[:8]}"
 
     def _build_queries_for_scenario(self, metadata: SchemaMetadata, scenario_type: str) -> List[Dict[str, Any]]:
         """Построить набор конкретных SQL-запросов для одного типа сценария."""

@@ -117,7 +117,6 @@ async def get_connection_schema(
         from backend.database.schema_profile_resolver import SchemaProfileResolver
 
         generator = ScenarioGenerator(
-            scenario_repository=None,
             connection_repo=repo,
         )
         resolver = SchemaProfileResolver(

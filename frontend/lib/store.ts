@@ -45,6 +45,7 @@ export const useAppStore = create<AppState>((set) => ({
     databases: [],
     testMode: "scenario",       // По умолчанию: режим со сценарием
     scenario: "mixed_light",     // По умолчанию: 80% SELECT, 20% UPDATE (как TPC-C)
+    bundleId: undefined,
     useIndexes: false,
     selectedQueryId: "",         // Выбранный запрос из списка
     customSql: "",               // Пользовательский SQL

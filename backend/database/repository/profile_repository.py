@@ -4,10 +4,10 @@
 import uuid
 from typing import List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from backend.database.logical_scenarios import BUILTIN_SCHEMA_PROFILES, LOGICAL_SCENARIO_TEMPLATES
-from backend.database.models import Base, ScenarioTemplate, SchemaProfile
+from backend.database.models import Base, ScenarioBundle, ScenarioTemplate, SchemaProfile
 from backend.database.repository.base import BaseRepository, get_local_now
 
 
@@ -144,7 +144,7 @@ class ProfileRepository(BaseRepository):
         """Получить список logical templates."""
         async with self.SessionLocal() as session:
             result = await session.execute(
-                select(ScenarioTemplate).order_by(ScenarioTemplate.id)
+                select(ScenarioTemplate).order_by(ScenarioTemplate.is_builtin.desc(), ScenarioTemplate.name)
             )
             return list(result.scalars().all())
 
@@ -152,3 +152,59 @@ class ProfileRepository(BaseRepository):
         """Получить logical template по id."""
         async with self.SessionLocal() as session:
             return await session.get(ScenarioTemplate, template_id)
+
+    async def create_template(
+        self,
+        template_id: str,
+        name: str,
+        description: Optional[str] = None,
+        is_builtin: bool = False,
+    ) -> ScenarioTemplate:
+        """Создать новый logical template."""
+        async with self.SessionLocal() as session:
+            template = ScenarioTemplate(
+                id=template_id,
+                name=name,
+                description=description,
+                is_builtin='t' if is_builtin else 'f',
+            )
+            session.add(template)
+            await session.commit()
+            await session.refresh(template)
+            return template
+
+    async def update_template(
+        self,
+        template_id: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> Optional[ScenarioTemplate]:
+        """Обновить logical template."""
+        async with self.SessionLocal() as session:
+            template = await session.get(ScenarioTemplate, template_id)
+            if not template:
+                return None
+
+            if name is not None:
+                template.name = name
+            if description is not None:
+                template.description = description
+            template.updated_at = get_local_now()
+            await session.commit()
+            await session.refresh(template)
+            return template
+
+    async def delete_template(self, template_id: str) -> bool:
+        """Удалить пользовательский logical template."""
+        async with self.SessionLocal() as session:
+            template = await session.get(ScenarioTemplate, template_id)
+            if not template or template.is_builtin == 't':
+                return False
+            await session.execute(
+                delete(ScenarioBundle).where(ScenarioBundle.scenario_template_id == template_id)
+            )
+            await session.execute(
+                delete(ScenarioTemplate).where(ScenarioTemplate.id == template_id)
+            )
+            await session.commit()
+            return True

@@ -7,7 +7,6 @@ import uuid
 import asyncio
 
 from backend.api.schemas import AsyncTestRequest
-from backend.database.logical_scenarios import LOGICAL_SCENARIO_TEMPLATE_IDS
 from backend.database.scenario_bundle_resolver import ScenarioBundleResolver
 from backend.load_tester.tester import LoadTester
 from backend.websocket_manager import manager, TestStreamingCallback
@@ -27,6 +26,23 @@ def get_active_tests():
     """Получить хранилище активных тестов из main.py"""
     from backend.main import active_tests
     return active_tests
+
+
+def _build_bundle_config_snapshot(bundle: Dict) -> Dict:
+    """Собрать bundle snapshot для истории и comparison."""
+    return {
+        "id": bundle.get("id"),
+        "name": bundle.get("name"),
+        "description": bundle.get("description"),
+        "scenario_template_id": bundle.get("scenario_template_id"),
+        "scenario_template_name": bundle.get("scenario_template_name"),
+        "schema_profile_id": bundle.get("schema_profile_id"),
+        "schema_profile_name": bundle.get("schema_profile_name"),
+        "generation_source": bundle.get("generation_source"),
+        "is_builtin": bundle.get("is_builtin"),
+        "queries": bundle.get("queries", []),
+        "indexes": bundle.get("indexes", []),
+    }
 
 
 @router.post("/async")
@@ -87,7 +103,6 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
     from backend.initialize import (
         HISTORY_ENABLED, 
         test_repository, 
-        scenario_repository,
         connection_repository,
         scenario_bundle_repository,
     )
@@ -165,27 +180,10 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         await streaming_callback.on_test_start()
         
         scenario = request.scenario or "mixed_light"
-        is_scenario_uuid = False
-        
-        try:
-            uuid.UUID(scenario)
-            is_scenario_uuid = True
-        except (ValueError, TypeError):
-            is_scenario_uuid = False
-        
-        if is_scenario_uuid:
-            results = await test_tester.run_full_scenario_test_suite(
-                scenario_id=scenario,
-                db_types=db_keys,
-                iterations=request.iterations,
-                virtual_users=request.virtual_users,
-                warmup_time=request.warmup_time,
-                use_indexes=request.use_indexes,
-                scenario_repository=scenario_repository
-            )
-        elif scenario in LOGICAL_SCENARIO_TEMPLATE_IDS:
+
+        if request.bundle_id or scenario != "custom":
             if not connection_ids or not connection_repository or not scenario_bundle_repository:
-                raise ValueError("Logical scenario требует connection_ids и доступного bundle repository")
+                raise ValueError("Scenario bundle требует connection_ids и доступного bundle repository")
 
             bundle_resolver = ScenarioBundleResolver(
                 connection_repository=connection_repository,
@@ -193,12 +191,32 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
             )
             resolved = await bundle_resolver.resolve_for_connections(
                 connection_ids=connection_ids,
-                scenario_template_id=scenario,
+                scenario_template_id=scenario if scenario != "custom" else None,
+                bundle_id=request.bundle_id,
             )
+            resolved_bundle = resolved["bundle"]
+            resolved_config = dict(active_tests[test_id]["config"])
+            resolved_config.update({
+                "scenario": resolved["scenario_template_id"],
+                "scenario_template_id": resolved["scenario_template_id"],
+                "resolved_bundle_id": resolved_bundle["id"],
+                "resolved_bundle_name": resolved_bundle["name"],
+                "resolved_bundle_description": resolved_bundle.get("description"),
+                "resolved_profile_id": resolved["schema_profile_id"],
+                "resolved_profile_name": resolved["schema_profile_name"],
+                "resolved_bundle_snapshot": _build_bundle_config_snapshot(resolved_bundle),
+            })
+            active_tests[test_id]["config"] = resolved_config
             active_tests[test_id]["resolved_profile"] = resolved["schema_profile_name"]
-            active_tests[test_id]["resolved_bundle_id"] = resolved["bundle"]["id"]
+            active_tests[test_id]["resolved_bundle_id"] = resolved_bundle["id"]
+            if HISTORY_ENABLED and test_repository:
+                try:
+                    await test_repository.update_test_run_config(test_id, resolved_config)
+                except Exception as exc:
+                    print(f"[HISTORY_DB] ⚠ Не удалось обновить config теста {test_id}: {exc}")
+
             results = await test_tester.run_resolved_scenario_test_suite(
-                scenario=resolved["bundle"],
+                scenario=resolved_bundle,
                 db_types=db_keys,
                 iterations=request.iterations,
                 virtual_users=request.virtual_users,

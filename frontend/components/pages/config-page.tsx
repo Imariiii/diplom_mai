@@ -166,6 +166,7 @@ export function ConfigPage() {
 
       const asyncResponse = await apiClient.runAsyncTest({
         connection_ids: testConfig.databases,
+        bundle_id: testConfig.testMode === "scenario" ? selectedBundle?.id : undefined,
         iterations: testConfig.iterations,
         virtual_users: testConfig.virtualUsers,
         scenario: testConfig.testMode === "scenario" ? testConfig.scenario : "custom",
@@ -234,7 +235,7 @@ export function ConfigPage() {
   const hasMissingProfiles = selectedConnections.some((connection) => !connection.schema_profile_id)
   const hasMixedProfiles = selectedProfileIds.length > 1
   const selectedBundle = selectedProfileDetail?.bundles.find(
-    (bundle) => bundle.scenario_template_id === testConfig.scenario
+    (bundle) => bundle.scenario_template_id === testConfig.scenario && bundle.is_active
   )
 
   const canRunTest = () => {
@@ -295,8 +296,13 @@ export function ConfigPage() {
           onScenarioChange={(id) => {
             setTestConfig({
               scenario: id,
+              bundleId: selectedProfileDetail?.bundles.find(
+                (bundle) => bundle.scenario_template_id === id && bundle.is_active
+              )?.id,
               useIndexes: (
-                selectedProfileDetail?.bundles.find((bundle) => bundle.scenario_template_id === id)?.indexes?.length ?? 0
+                selectedProfileDetail?.bundles.find(
+                  (bundle) => bundle.scenario_template_id === id && bundle.is_active
+                )?.indexes?.length ?? 0
               ) > 0 ? testConfig.useIndexes : false,
             })
           }}

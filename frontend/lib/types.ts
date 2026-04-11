@@ -3,15 +3,8 @@ export type TestMode =
   | "scenario"       // Режим со сценарием тестирования
   | "custom_query"   // Режим с конкретным SQL запросом
 
-// Сценарии нагрузочного тестирования
-export type TestScenario = 
-  | "read_only"      // 100% SELECT
-  | "write_only"     // 100% INSERT/UPDATE/DELETE
-  | "mixed_light"    // 80% SELECT, 20% UPDATE (как TPC-C)
-  | "mixed_heavy"    // 50% SELECT, 50% UPDATE
-  | "oltp"           // OLTP-подобная нагрузка
-  | "olap"           // OLAP-подобная нагрузка (аналитические запросы)
-  | "custom"         // Пользовательский сценарий
+// Logical template id или пользовательский custom template id
+export type TestScenario = string
 
 export interface ScenarioConfig {
   id: TestScenario
@@ -25,7 +18,8 @@ export interface ScenarioConfig {
 export interface TestConfig {
   databases: string[]           // Выбранные СУБД
   testMode: TestMode            // Режим тестирования
-  scenario: string               // ID сценария тестирования (для режима scenario) - UUID из БД или строковый сценарий
+  scenario: string              // ID logical template
+  bundleId?: string             // Опционально: явный bundle variant
   useIndexes: boolean           // Создавать индексы сценария перед тестом
   selectedQueryId: string       // ID выбранного запроса (для режима custom_query)
   customSql: string             // Пользовательский SQL запрос
@@ -146,52 +140,39 @@ export interface TimeSeriesPoint {
 }
 
 
-// ==================== Сценарии тестирования (Scenario Entity) ====================
-
-export interface Scenario {
-  id: string
-  name: string
-  description: string | null
-  scenario_type: string
-  target_connection_id?: string | null
-  is_builtin: boolean | 't' | 'f'
-  is_active?: boolean
-  created_at: string
-  updated_at: string | null
-  queries_count?: number  // Количество запросов в сценарии
-  queries?: ScenarioQuery[]
-  indexes?: ScenarioIndex[]
-}
+// ==================== Bundle-centric сценарии ====================
 
 export interface ScenarioQuery {
-  id: string
-  scenario_id: string
+  id?: string
+  bundle_id?: string
   sql_template: string
-  query_type: 'select' | 'insert' | 'update' | 'delete'
+  query_type: 'select' | 'insert' | 'update' | 'delete' | string
   description: string | null
   weight: number
-  execution_order: number
-  created_at: string
+  order_index: number
+  created_at?: string | null
   params?: ScenarioParam[]
 }
 
 export interface ScenarioParam {
-  id: string
-  query_id: string
+  id?: string
+  query_id?: string
   param_name: string
-  param_type: 'random_int' | 'random_from_table' | 'sequential_int' | 'uuid' | 'fixed' | 'random_string' | 'random_date'
+  param_type: 'random_int' | 'random_from_table' | 'sequential_int' | 'uuid' | 'fixed' | 'random_string' | 'random_date' | string
   min_value: number | null
   max_value: number | null
+  string_pattern?: string | null
   table_ref: string | null
   column_ref: string | null
-  fixed_value: string | null
   string_length: number | null
-  created_at: string
+  current_value?: number | null
+  step?: number | null
+  created_at?: string | null
 }
 
 export interface ScenarioIndex {
-  id: string
-  scenario_id: string
+  id?: string
+  bundle_id?: string
   table_name: string
   column_names: string
   index_type: string
@@ -199,7 +180,7 @@ export interface ScenarioIndex {
   is_unique: boolean
   condition: string | null
   description: string | null
-  created_at: string
+  created_at?: string | null
 }
 
 export interface IndexInfoDetail {
@@ -222,42 +203,6 @@ export interface IndexInfo {
   drop_details?: IndexInfoDetail[]
   errors?: string[]
   drop_errors?: string[]
-}
-
-export interface CreateScenarioRequest {
-  name: string
-  description?: string
-  scenario_type: string
-  target_connection_id?: string
-}
-
-export interface CreateScenarioQueryRequest {
-  sql_template: string
-  query_type: 'select' | 'insert' | 'update' | 'delete'
-  description?: string
-  weight?: number
-  execution_order?: number
-}
-
-export interface CreateScenarioParamRequest {
-  param_name: string
-  param_type: 'random_int' | 'random_from_table' | 'sequential_int' | 'uuid' | 'fixed' | 'random_string' | 'random_date'
-  min_value?: number
-  max_value?: number
-  table_ref?: string
-  column_ref?: string
-  fixed_value?: string
-  string_length?: number
-}
-
-export interface CreateScenarioIndexRequest {
-  table_name: string
-  column_names: string
-  index_type?: string
-  index_name?: string
-  is_unique?: boolean
-  condition?: string
-  description?: string
 }
 
 // ==================== Database State Management Types ====================
@@ -401,27 +346,27 @@ export interface ConnectionSchemaPreview {
   matching_templates: Record<string, string[]>
 }
 
-export interface GenerateScenariosRequest {
-  connection_id: string
-  scenario_types?: string[]
-  replace_existing?: boolean
-}
-
-export interface GenerateScenariosResponse {
-  scenarios: Scenario[]
-  generated_count: number
-}
-
 export interface ScenarioTemplate {
-  id: TestScenario
+  id: string
   name: string
   description: string | null
   is_builtin: boolean
   created_at?: string | null
+  updated_at?: string | null
 }
 
 export interface ScenarioTemplateListResponse {
   templates: ScenarioTemplate[]
+}
+
+export interface ScenarioTemplateCreateRequest {
+  name: string
+  description?: string
+}
+
+export interface ScenarioTemplateUpdateRequest {
+  name?: string
+  description?: string
 }
 
 export interface SchemaProfileSummary {
@@ -463,13 +408,30 @@ export interface ScenarioBundleSummary {
   scenario_template_id: string
   scenario_template_name?: string | null
   name: string
+  description?: string | null
   generation_source: string
+  is_builtin: boolean
   is_active: boolean
   generated_from_connection_id?: string | null
   created_at?: string | null
   updated_at?: string | null
   queries: ScenarioQuery[]
   indexes: ScenarioIndex[]
+}
+
+export interface ScenarioBundleSaveRequest {
+  scenario_template_id: string
+  name: string
+  description?: string
+  generation_source?: string
+  generated_from_connection_id?: string
+  is_active: boolean
+  queries: ScenarioQuery[]
+  indexes: ScenarioIndex[]
+}
+
+export interface ScenarioBundleCloneRequest {
+  name: string
 }
 
 export interface SchemaProfileDetail extends SchemaProfileSummary {

@@ -59,24 +59,6 @@ export {
 } from "./api/comparison"
 
 export {
-  getScenarios,
-  getScenario,
-  getEnabledScenarios,
-  createScenario,
-  updateScenario,
-  deleteScenario,
-  cloneScenario,
-  getScenarioQueries,
-  createScenarioQuery,
-  updateScenarioQuery,
-  deleteScenarioQuery,
-  getScenarioQueryParams,
-  createScenarioParam,
-  updateScenarioParam,
-  deleteScenarioParam,
-} from "./api/scenario"
-
-export {
   getDatabaseState,
   createBackup,
   restoreBackup,

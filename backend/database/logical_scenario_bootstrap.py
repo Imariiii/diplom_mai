@@ -33,7 +33,6 @@ class LogicalScenarioBootstrap:
             profile_repository=profile_repository,
         )
         self.generator = ScenarioGenerator(
-            scenario_repository=None,
             connection_repo=connection_repository,
             bundle_repository=bundle_repository,
         )
@@ -87,19 +86,29 @@ class LogicalScenarioBootstrap:
 
     async def _ensure_builtin_bundles(self) -> None:
         profiles = await self.profile_repository.list_profiles()
-        templates = await self.profile_repository.list_templates()
+        templates = [
+            template
+            for template in await self.profile_repository.list_templates()
+            if template.is_builtin == 't'
+        ]
 
         for profile in profiles:
             if not profile.reference_connection_id:
                 continue
 
             existing_bundles = await self.bundle_repository.list_bundles(schema_profile_id=str(profile.id))
-            existing_template_ids = {bundle.scenario_template_id for bundle in existing_bundles}
+            existing_builtin_template_ids = {
+                bundle.scenario_template_id
+                for bundle in existing_bundles
+                if bundle.is_builtin == 't'
+            }
             missing_or_incomplete_template_ids = [
                 template.id for template in templates
-                if template.id not in existing_template_ids
+                if template.id not in existing_builtin_template_ids
                 or any(
-                    bundle.scenario_template_id == template.id and not bundle.indexes
+                    bundle.scenario_template_id == template.id
+                    and bundle.is_builtin == 't'
+                    and (not bundle.queries or not bundle.indexes)
                     for bundle in existing_bundles
                 )
             ]

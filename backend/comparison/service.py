@@ -32,9 +32,9 @@ from backend.comparison.statistics import (
 class ComparisonService:
     """Сервис для анализа и сравнения нескольких тестовых прогонов"""
 
-    def __init__(self, repository, scenario_repository=None, connection_repository=None):
+    def __init__(self, repository, scenario_bundle_repository=None, connection_repository=None):
         self.repository = repository
-        self.scenario_repository = scenario_repository
+        self.scenario_bundle_repository = scenario_bundle_repository
         self.connection_repository = connection_repository
         self.report_generator = ComparisonReportGenerator()
 
@@ -947,7 +947,7 @@ class ComparisonService:
     async def _build_test_info(self, test_data: Dict[str, Any]) -> ComparisonTestInfo:
         """Преобразовать словарь теста в схему ответа с развёрнутой информацией"""
         config = test_data.get("config", {}) or {}
-        scenario_info = await self._resolve_scenario_info(config.get("scenario"))
+        scenario_info = await self._resolve_scenario_info(config)
         connections = await self._resolve_connections(config.get("connection_ids"))
 
         return ComparisonTestInfo(
@@ -962,40 +962,66 @@ class ComparisonService:
             connections=connections,
         )
 
-    async def _resolve_scenario_info(self, scenario_ref: Optional[str]) -> Optional[ScenarioInfo]:
-        """Разрешить сценарий по UUID или имени"""
-        if not scenario_ref or not self.scenario_repository:
+    async def _resolve_scenario_info(self, config: Dict[str, Any]) -> Optional[ScenarioInfo]:
+        """Разрешить сценарий из snapshot config или активного bundle."""
+        if not config:
             return None
 
-        try:
-            scenario = None
+        snapshot = config.get("resolved_bundle_snapshot")
+        if snapshot:
+            return self._scenario_info_from_snapshot(snapshot)
+
+        bundle_id = config.get("resolved_bundle_id") or config.get("bundle_id")
+        if bundle_id and self.scenario_bundle_repository:
             try:
-                UUID(scenario_ref)
-                scenario = await self.scenario_repository.get_scenario(scenario_ref)
-            except (ValueError, AttributeError):
-                scenario = await self.scenario_repository.get_scenario_by_name(scenario_ref)
+                bundle = await self.scenario_bundle_repository.get_bundle(bundle_id)
+                if bundle:
+                    return self._scenario_info_from_snapshot(bundle.to_dict())
+            except Exception as exc:
+                print(f"[COMPARISON] Не удалось загрузить bundle '{bundle_id}': {exc}")
 
-            if not scenario:
-                return None
+        profile_id = config.get("resolved_profile_id")
+        template_id = config.get("scenario_template_id") or config.get("scenario")
+        if profile_id and template_id and self.scenario_bundle_repository:
+            try:
+                bundle = await self.scenario_bundle_repository.get_bundle_for_profile_template(
+                    schema_profile_id=profile_id,
+                    scenario_template_id=template_id,
+                    bundle_id=bundle_id,
+                )
+                if bundle:
+                    return self._scenario_info_from_snapshot(bundle.to_dict())
+            except Exception as exc:
+                print(
+                    f"[COMPARISON] Не удалось разрешить active bundle для profile={profile_id}, "
+                    f"template={template_id}: {exc}"
+                )
 
-            queries = []
-            for q in (scenario.queries or []):
-                queries.append(ScenarioQueryInfo(
-                    sql_template=q.sql_template,
-                    query_type=q.query_type,
-                    weight=q.weight,
-                    description=q.description,
-                ))
-
+        if template_id:
             return ScenarioInfo(
-                name=scenario.name,
-                description=scenario.description,
-                scenario_type=scenario.scenario_type,
-                queries=queries,
+                name=config.get("resolved_bundle_name") or template_id,
+                description=config.get("resolved_bundle_description"),
+                scenario_type=template_id,
+                queries=[],
             )
-        except Exception as exc:
-            print(f"[COMPARISON] Не удалось разрешить сценарий '{scenario_ref}': {exc}")
-            return None
+        return None
+
+    def _scenario_info_from_snapshot(self, snapshot: Dict[str, Any]) -> ScenarioInfo:
+        queries = [
+            ScenarioQueryInfo(
+                sql_template=query.get("sql_template", ""),
+                query_type=query.get("query_type", "unknown"),
+                weight=query.get("weight", 1),
+                description=query.get("description"),
+            )
+            for query in snapshot.get("queries", []) or []
+        ]
+        return ScenarioInfo(
+            name=snapshot.get("name", "Без названия"),
+            description=snapshot.get("description"),
+            scenario_type=snapshot.get("scenario_template_id") or snapshot.get("scenario_type", "unknown"),
+            queries=queries,
+        )
 
     async def _resolve_connections(self, connection_ids: Optional[List[str]]) -> List[ConnectionInfo]:
         """Разрешить имена подключений по ID"""
