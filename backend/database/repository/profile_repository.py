@@ -6,7 +6,7 @@ from typing import List, Optional
 
 from sqlalchemy import delete, select
 
-from backend.database.logical_scenarios import BUILTIN_SCHEMA_PROFILES, LOGICAL_SCENARIO_TEMPLATES
+from backend.database.logical_scenarios import LOGICAL_SCENARIO_TEMPLATES
 from backend.database.models import Base, ScenarioBundle, ScenarioTemplate, SchemaProfile
 from backend.database.repository.base import BaseRepository, get_local_now
 
@@ -34,31 +34,6 @@ class ProfileRepository(BaseRepository):
                         id=template_data["id"],
                         name=template_data["name"],
                         description=template_data["description"],
-                        is_builtin='t',
-                    )
-                )
-            await session.commit()
-
-    async def seed_builtin_profiles(self) -> None:
-        """Создать встроенные профили данных."""
-        async with self.SessionLocal() as session:
-            for profile_data in BUILTIN_SCHEMA_PROFILES:
-                result = await session.execute(
-                    select(SchemaProfile).where(SchemaProfile.name == profile_data["name"])
-                )
-                existing = result.scalar_one_or_none()
-                if existing:
-                    existing.description = profile_data["description"]
-                    existing.detection_mode = "hybrid"
-                    existing.is_builtin = 't'
-                    existing.updated_at = get_local_now()
-                    continue
-                session.add(
-                    SchemaProfile(
-                        id=uuid.uuid4(),
-                        name=profile_data["name"],
-                        description=profile_data["description"],
-                        detection_mode="hybrid",
                         is_builtin='t',
                     )
                 )

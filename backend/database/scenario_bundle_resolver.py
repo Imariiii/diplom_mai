@@ -34,25 +34,57 @@ class ScenarioBundleResolver:
         if len(connections) != len(connection_ids):
             raise ValueError("Не удалось загрузить все выбранные подключения")
 
-        profile_ids = {str(connection.schema_profile_id) for connection in connections if connection.schema_profile_id}
-        missing_profile_connections = [connection.name for connection in connections if not connection.schema_profile_id]
-        if missing_profile_connections:
-            raise ValueError(
-                "Для части подключений не назначен schema_profile: "
-                + ", ".join(missing_profile_connections)
-            )
+        logical_database_ids = {
+            str(connection.logical_database_id)
+            for connection in connections
+            if connection.logical_database_id
+        }
+        if logical_database_ids:
+            if len(logical_database_ids) != 1 or any(not connection.logical_database_id for connection in connections):
+                raise ValueError(
+                    "Нельзя запускать тест сразу для нескольких logical database "
+                    "или смешивать их с подключениями без logical database"
+                )
 
-        if len(profile_ids) != 1:
-            profile_names = sorted({
-                connection.schema_profile.name if connection.schema_profile else "unknown"
+            logical_database = connections[0].logical_database
+            if not logical_database or not logical_database.schema_profile_id:
+                raise ValueError(
+                    f"Для logical database '{connections[0].logical_database.name if connections[0].logical_database else logical_database_ids.pop()}' "
+                    "не назначен schema_profile"
+                )
+
+            schema_profile_id = str(logical_database.schema_profile_id)
+            inconsistent_connections = [
+                connection.name
                 for connection in connections
-            })
-            raise ValueError(
-                "Нельзя запускать тест сразу для разных профилей модели данных: "
-                + ", ".join(profile_names)
-            )
+                if connection.schema_profile_id and str(connection.schema_profile_id) != schema_profile_id
+            ]
+            if inconsistent_connections:
+                raise ValueError(
+                    "Для части подключений logical database не синхронизирован schema_profile: "
+                    + ", ".join(inconsistent_connections)
+                )
+        else:
+            profile_ids = {str(connection.schema_profile_id) for connection in connections if connection.schema_profile_id}
+            missing_profile_connections = [connection.name for connection in connections if not connection.schema_profile_id]
+            if missing_profile_connections:
+                raise ValueError(
+                    "Для части подключений не назначен schema_profile: "
+                    + ", ".join(missing_profile_connections)
+                )
 
-        schema_profile_id = next(iter(profile_ids))
+            if len(profile_ids) != 1:
+                profile_names = sorted({
+                    connection.schema_profile.name if connection.schema_profile else "unknown"
+                    for connection in connections
+                })
+                raise ValueError(
+                    "Нельзя запускать тест сразу для разных профилей модели данных: "
+                    + ", ".join(profile_names)
+                )
+
+            schema_profile_id = next(iter(profile_ids))
+
         bundle = None
         if bundle_id:
             bundle = await self.bundle_repository.get_bundle(bundle_id)

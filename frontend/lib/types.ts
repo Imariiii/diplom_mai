@@ -231,6 +231,55 @@ export interface RestoreSettings {
 }
 
 
+// ==================== Logical Database Types ====================
+
+export interface LogicalDatabase {
+  id: string
+  name: string
+  description: string | null
+  schema_profile_id?: string | null
+  schema_profile_name?: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface LogicalDatabaseWithConnections extends LogicalDatabase {
+  connections: DatabaseConnection[]
+}
+
+export interface LogicalDatabaseDetail extends LogicalDatabaseWithConnections {
+  bundles: ScenarioBundleSummary[]
+}
+
+export interface LogicalDatabaseCreateRequest {
+  name: string
+  description?: string
+  schema_profile_id?: string
+}
+
+export interface LogicalDatabaseUpdateRequest {
+  name?: string
+  description?: string
+  schema_profile_id?: string
+}
+
+export interface LogicalDatabaseProfileAssignRequest {
+  schema_profile_id?: string
+  profile_name?: string
+  description?: string
+  reference_connection_id?: string
+  profile_source?: string
+}
+
+export interface LogicalDatabaseListResponse {
+  databases: LogicalDatabaseWithConnections[]
+}
+
+export interface LogicalDatabaseBundlesGenerateResponse {
+  logical_database: LogicalDatabaseDetail
+  generated_count: number
+}
+
 // ==================== Database Connection Management Types ====================
 
 export type SupportedDbmsType = "mysql" | "mariadb" | "postgresql"
@@ -244,6 +293,8 @@ export interface DatabaseConnection {
   user: string
   database: string
   group: string | null
+  logical_database_id?: string | null
+  logical_database_name?: string | null
   schema_profile_id?: string | null
   schema_profile_name?: string | null
   detected_profile_name?: string | null
@@ -264,6 +315,7 @@ export interface ConnectionCreateRequest {
   password: string
   database: string
   group?: string
+  logical_database_id?: string
   extra_params?: Record<string, unknown>
 }
 
@@ -276,6 +328,7 @@ export interface ConnectionUpdateRequest {
   password?: string
   database?: string
   group?: string
+  logical_database_id?: string
   is_active?: boolean
   extra_params?: Record<string, unknown>
 }

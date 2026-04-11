@@ -40,18 +40,6 @@ LOGICAL_SCENARIO_TEMPLATES: List[Dict[str, str]] = [
 ]
 
 
-BUILTIN_SCHEMA_PROFILES: List[Dict[str, str]] = [
-    {
-        "name": "sakila_like",
-        "description": "Каталог фильмов и аренды: Sakila, Pagila и совместимые схемы.",
-    },
-    {
-        "name": "olist_like",
-        "description": "E-commerce и заказы маркетплейса: Olist и совместимые схемы.",
-    },
-]
-
-
 LOGICAL_SCENARIO_TEMPLATE_IDS = [template["id"] for template in LOGICAL_SCENARIO_TEMPLATES]
 BUILTIN_LOGICAL_SCENARIO_TEMPLATE_IDS = set(LOGICAL_SCENARIO_TEMPLATE_IDS)
 

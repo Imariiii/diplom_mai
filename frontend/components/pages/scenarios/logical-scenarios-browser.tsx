@@ -17,6 +17,7 @@ import {
 
 import { apiClient } from "@/lib/api"
 import type {
+  LogicalDatabase,
   ScenarioBundleSummary,
   ScenarioBundleSaveRequest,
   ScenarioIndex,
@@ -90,6 +91,8 @@ function bundleToDraft(bundle: ScenarioBundleSummary): ScenarioBundleSaveRequest
 export function LogicalScenariosBrowser() {
   const [templates, setTemplates] = useState<ScenarioTemplate[]>([])
   const [profiles, setProfiles] = useState<SchemaProfileSummary[]>([])
+  const [logicalDatabases, setLogicalDatabases] = useState<LogicalDatabase[]>([])
+  const [selectedLogicalDbId, setSelectedLogicalDbId] = useState<string>("")
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("")
   const [selectedProfileId, setSelectedProfileId] = useState<string>("")
   const [selectedProfileDetail, setSelectedProfileDetail] = useState<SchemaProfileDetail | null>(null)
@@ -102,6 +105,11 @@ export function LogicalScenariosBrowser() {
   const selectedTemplate = useMemo(
     () => templates.find((template) => template.id === selectedTemplateId) || null,
     [templates, selectedTemplateId]
+  )
+
+  const selectedLogicalDatabase = useMemo(
+    () => logicalDatabases.find((database) => database.id === selectedLogicalDbId) || null,
+    [logicalDatabases, selectedLogicalDbId]
   )
 
   const variants = useMemo(() => {
@@ -191,24 +199,40 @@ export function LogicalScenariosBrowser() {
     }
   }
 
-  const reloadAll = async (preferredTemplateId?: string, preferredProfileId?: string, preferredBundleId?: string) => {
+  const reloadAll = async (
+    preferredTemplateId?: string,
+    preferredProfileId?: string,
+    preferredBundleId?: string,
+    preferredLogicalDbId?: string
+  ) => {
     setLoading(true)
     try {
-      const [templatesResponse, profilesResponse] = await Promise.all([
+      const [templatesResponse, profilesResponse, logicalDatabasesResponse] = await Promise.all([
         apiClient.getScenarioTemplates(),
         apiClient.getSchemaProfiles(),
+        apiClient.getLogicalDatabases(),
       ])
       const nextTemplates = templatesResponse.templates
       const nextProfiles = profilesResponse.profiles
+      const nextLogicalDatabases = logicalDatabasesResponse.databases
       setTemplates(nextTemplates)
       setProfiles(nextProfiles)
+      setLogicalDatabases(nextLogicalDatabases)
 
       const nextTemplateId = preferredTemplateId || nextTemplates[0]?.id || ""
-      const nextProfileId = preferredProfileId || nextProfiles[0]?.id || ""
+      const nextLogicalDbId = preferredLogicalDbId ?? selectedLogicalDbId
+      const logicalDatabaseProfileId = nextLogicalDatabases.find(
+        (database) => database.id === nextLogicalDbId
+      )?.schema_profile_id
+      const nextProfileId = logicalDatabaseProfileId || preferredProfileId || nextProfiles[0]?.id || ""
       setSelectedTemplateId(nextTemplateId)
+      setSelectedLogicalDbId(nextLogicalDbId)
       setSelectedProfileId(nextProfileId)
       if (nextProfileId) {
         await loadProfile(nextProfileId, nextTemplateId, preferredBundleId)
+      } else {
+        setSelectedProfileDetail(null)
+        setDraftBundle(null)
       }
     } catch (error) {
       console.error("Ошибка загрузки logical templates:", error)
@@ -230,6 +254,23 @@ export function LogicalScenariosBrowser() {
   const handleProfileChange = async (profileId: string) => {
     setSelectedProfileId(profileId)
     await loadProfile(profileId, selectedTemplateId)
+  }
+
+  const handleLogicalDatabaseChange = async (logicalDbId: string) => {
+    const nextLogicalDbId = logicalDbId === "none" ? "" : logicalDbId
+    setSelectedLogicalDbId(nextLogicalDbId)
+
+    const logicalDatabase = logicalDatabases.find((database) => database.id === nextLogicalDbId)
+    const nextProfileId = logicalDatabase?.schema_profile_id || ""
+    setSelectedProfileId(nextProfileId)
+
+    if (nextProfileId) {
+      await loadProfile(nextProfileId, selectedTemplateId)
+      return
+    }
+
+    setSelectedProfileDetail(null)
+    setDraftBundle(null)
   }
 
   const handleVariantChange = (bundleId: string) => {
@@ -512,7 +553,7 @@ export function LogicalScenariosBrowser() {
             Выберите logical template и профиль модели данных, затем редактируйте active variant или создавайте новый
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <CardContent className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <div className="space-y-2">
             <Label>Шаблон сценария</Label>
             <Select value={selectedTemplateId} onValueChange={(value) => void handleTemplateChange(value)}>
@@ -551,8 +592,34 @@ export function LogicalScenariosBrowser() {
           </div>
 
           <div className="space-y-2">
+            <Label>База данных</Label>
+            <Select value={selectedLogicalDbId || "none"} onValueChange={(value) => void handleLogicalDatabaseChange(value)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Выберите базу данных" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Без контекста базы данных</SelectItem>
+                {logicalDatabases.map((database) => (
+                  <SelectItem key={database.id} value={database.id}>
+                    {database.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedLogicalDatabase && (
+              <p className="text-sm text-muted-foreground">
+                Профиль: {selectedLogicalDatabase.schema_profile_name || "не назначен"}
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-2">
             <Label>Профиль модели данных</Label>
-            <Select value={selectedProfileId} onValueChange={(value) => void handleProfileChange(value)}>
+            <Select
+              value={selectedProfileId}
+              onValueChange={(value) => void handleProfileChange(value)}
+              disabled={Boolean(selectedLogicalDatabase?.schema_profile_id)}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Выберите профиль данных" />
               </SelectTrigger>
@@ -566,6 +633,11 @@ export function LogicalScenariosBrowser() {
             </Select>
             {selectedProfileDetail?.description && (
               <p className="text-sm text-muted-foreground">{selectedProfileDetail.description}</p>
+            )}
+            {selectedLogicalDatabase?.schema_profile_id && (
+              <p className="text-xs text-muted-foreground">
+                Профиль зафиксирован выбранной базой данных
+              </p>
             )}
           </div>
         </CardContent>

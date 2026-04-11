@@ -15,6 +15,7 @@ class ConnectionCreateRequest(BaseModel):
     password: str = Field(..., min_length=1, description="Пароль (в открытом виде, будет зашифрован)")
     database: str = Field(..., min_length=1, max_length=100, description="Имя базы данных")
     group: Optional[str] = Field(default='default', max_length=100, description="Группа подключений")
+    logical_database_id: Optional[str] = Field(default=None, description="ID логической базы данных")
     extra_params: Optional[Dict[str, Any]] = Field(default=None, description="Дополнительные параметры подключения")
 
 
@@ -28,6 +29,7 @@ class ConnectionUpdateRequest(BaseModel):
     password: Optional[str] = Field(default=None, min_length=1)
     database: Optional[str] = Field(default=None, min_length=1, max_length=100)
     group: Optional[str] = Field(default=None, max_length=100)
+    logical_database_id: Optional[str] = Field(default=None, description="ID логической базы данных")
     is_active: Optional[bool] = Field(default=None)
     extra_params: Optional[Dict[str, Any]] = Field(default=None)
 
@@ -42,6 +44,8 @@ class ConnectionResponse(BaseModel):
     user: str
     database: str
     group: Optional[str] = None
+    logical_database_id: Optional[str] = None
+    logical_database_name: Optional[str] = None
     schema_profile_id: Optional[str] = None
     schema_profile_name: Optional[str] = None
     detected_profile_name: Optional[str] = None

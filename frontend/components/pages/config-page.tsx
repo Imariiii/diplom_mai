@@ -6,7 +6,13 @@ import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/lib/store"
 import { apiClient, type Query } from "@/lib/api"
 import { toast } from "sonner"
-import type { TestRun, ScenarioTemplate, DatabaseConnection, SchemaProfileDetail } from "@/lib/types"
+import type {
+  TestRun,
+  ScenarioTemplate,
+  DatabaseConnection,
+  LogicalDatabaseDetail,
+  SchemaProfileDetail,
+} from "@/lib/types"
 import { DatabaseStatePanel } from "@/components/database-state-panel"
 import { ConnectionManager } from "./config/connection-manager"
 import { ConnectionStatusCard } from "./config/connection-status-card"
@@ -31,6 +37,7 @@ export function ConfigPage() {
   const [scenariosLoading, setScenariosLoading] = useState(true)
   const [connections, setConnections] = useState<DatabaseConnection[]>([])
   const [selectedProfileDetail, setSelectedProfileDetail] = useState<SchemaProfileDetail | null>(null)
+  const [selectedLogicalDatabaseDetail, setSelectedLogicalDatabaseDetail] = useState<LogicalDatabaseDetail | null>(null)
   const [healthStatus, setHealthStatus] = useState<Record<string, boolean>>({})
   const [useCustomSql, setUseCustomSql] = useState(false)
 
@@ -69,6 +76,33 @@ export function ConfigPage() {
     const selectedConnections = connections.filter((connection) =>
       testConfig.databases.includes(connection.id)
     )
+    const logicalDatabaseIds = Array.from(
+      new Set(
+        selectedConnections
+          .map((connection) => connection.logical_database_id)
+          .filter((value): value is string => Boolean(value))
+      )
+    )
+
+    if (
+      logicalDatabaseIds.length === 1 &&
+      selectedConnections.length > 0 &&
+      selectedConnections.every((connection) => connection.logical_database_id === logicalDatabaseIds[0])
+    ) {
+      apiClient
+        .getLogicalDatabaseDetail(logicalDatabaseIds[0])
+        .then((logicalDatabase) => {
+          setSelectedLogicalDatabaseDetail(logicalDatabase)
+          setSelectedProfileDetail(null)
+        })
+        .catch(() => {
+          setSelectedLogicalDatabaseDetail(null)
+          setSelectedProfileDetail(null)
+        })
+      return
+    }
+
+    setSelectedLogicalDatabaseDetail(null)
     const profileIds = Array.from(
       new Set(
         selectedConnections
@@ -234,7 +268,13 @@ export function ConfigPage() {
   )
   const hasMissingProfiles = selectedConnections.some((connection) => !connection.schema_profile_id)
   const hasMixedProfiles = selectedProfileIds.length > 1
-  const selectedBundle = selectedProfileDetail?.bundles.find(
+  const selectedBundles = selectedLogicalDatabaseDetail?.bundles || selectedProfileDetail?.bundles || []
+  const selectedProfileName =
+    selectedLogicalDatabaseDetail?.schema_profile_name ||
+    selectedProfileDetail?.name ||
+    selectedConnections[0]?.schema_profile_name ||
+    null
+  const selectedBundle = selectedBundles.find(
     (bundle) => bundle.scenario_template_id === testConfig.scenario && bundle.is_active
   )
 
@@ -290,17 +330,17 @@ export function ConfigPage() {
           scenarios={scenarios}
           selectedScenarioId={testConfig.scenario}
           useIndexes={testConfig.useIndexes}
-          selectedProfileName={selectedProfileDetail?.name || null}
+          selectedProfileName={selectedProfileName}
           selectedBundleName={selectedBundle?.name || null}
           indexesCount={selectedBundle?.indexes?.length ?? 0}
           onScenarioChange={(id) => {
             setTestConfig({
               scenario: id,
-              bundleId: selectedProfileDetail?.bundles.find(
+              bundleId: selectedBundles.find(
                 (bundle) => bundle.scenario_template_id === id && bundle.is_active
               )?.id,
               useIndexes: (
-                selectedProfileDetail?.bundles.find(
+                selectedBundles.find(
                   (bundle) => bundle.scenario_template_id === id && bundle.is_active
                 )?.indexes?.length ?? 0
               ) > 0 ? testConfig.useIndexes : false,
@@ -372,7 +412,7 @@ export function ConfigPage() {
         iterations={testConfig.iterations}
         warmupTime={testConfig.warmupTime}
         connections={connections}
-        selectedProfileName={hasMixedProfiles ? null : (selectedProfileDetail?.name || selectedConnections[0]?.schema_profile_name || null)}
+        selectedProfileName={hasMixedProfiles ? null : selectedProfileName}
         selectedBundleName={selectedBundle?.name || null}
       />
 

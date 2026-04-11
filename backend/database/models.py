@@ -15,6 +15,49 @@ from sqlalchemy.orm import relationship, sessionmaker
 Base = declarative_base()
 
 
+class LogicalDatabase(Base):
+    """Логическая база данных — датасет / модель данных без привязки к конкретной СУБД."""
+    __tablename__ = 'logical_databases'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), nullable=False, unique=True)
+    description = Column(Text, nullable=True)
+    schema_profile_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('schema_profiles.id', ondelete='SET NULL'),
+        nullable=True,
+    )
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    schema_profile = relationship(
+        "SchemaProfile",
+        back_populates="logical_databases",
+        foreign_keys=[schema_profile_id],
+    )
+    connections = relationship(
+        "DatabaseConnectionConfig",
+        back_populates="logical_database",
+        foreign_keys="DatabaseConnectionConfig.logical_database_id",
+    )
+
+    __table_args__ = (
+        Index('idx_logical_databases_name', 'name'),
+        Index('idx_logical_databases_schema_profile_id', 'schema_profile_id'),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'id': str(self.id),
+            'name': self.name,
+            'description': self.description,
+            'schema_profile_id': str(self.schema_profile_id) if self.schema_profile_id else None,
+            'schema_profile_name': self.schema_profile.name if self.schema_profile else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class SchemaProfile(Base):
     """Профиль модели данных для группы совместимых БД."""
     __tablename__ = 'schema_profiles'
@@ -41,6 +84,11 @@ class SchemaProfile(Base):
         "DatabaseConnectionConfig",
         back_populates="schema_profile",
         foreign_keys="DatabaseConnectionConfig.schema_profile_id",
+    )
+    logical_databases = relationship(
+        "LogicalDatabase",
+        back_populates="schema_profile",
+        foreign_keys="LogicalDatabase.schema_profile_id",
     )
     bundles = relationship("ScenarioBundle", back_populates="schema_profile", cascade="all, delete-orphan")
 
@@ -340,6 +388,11 @@ class DatabaseConnectionConfig(Base):
     user = Column(String(100), nullable=False)
     password_encrypted = Column(Text, nullable=False)
     database = Column(String(100), nullable=False)
+    logical_database_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('logical_databases.id', ondelete='SET NULL'),
+        nullable=True,
+    )
     schema_profile_id = Column(
         UUID(as_uuid=True),
         ForeignKey('schema_profiles.id', ondelete='SET NULL'),
@@ -353,6 +406,11 @@ class DatabaseConnectionConfig(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
+    logical_database = relationship(
+        "LogicalDatabase",
+        back_populates="connections",
+        foreign_keys=[logical_database_id],
+    )
     schema_profile = relationship(
         "SchemaProfile",
         back_populates="connections",
@@ -365,6 +423,7 @@ class DatabaseConnectionConfig(Base):
         Index('idx_db_conn_configs_group', 'group'),
         Index('idx_db_conn_configs_active', 'is_active'),
         Index('idx_db_conn_configs_schema_profile_id', 'schema_profile_id'),
+        Index('idx_db_conn_configs_logical_db_id', 'logical_database_id'),
     )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -377,6 +436,8 @@ class DatabaseConnectionConfig(Base):
             'port': self.port,
             'user': self.user,
             'database': self.database,
+            'logical_database_id': str(self.logical_database_id) if self.logical_database_id else None,
+            'logical_database_name': self.logical_database.name if self.logical_database else None,
             'schema_profile_id': str(self.schema_profile_id) if self.schema_profile_id else None,
             'schema_profile_name': self.schema_profile.name if self.schema_profile else None,
             'detected_profile_name': self.detected_profile_name,

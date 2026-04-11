@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from backend.database.repository.connection_repository import ConnectionRepository
 from backend.database.dialects import get_dialect, is_registered_dbms_type
+from backend.database.logical_database_provisioner import LogicalDatabaseProvisioner
 from backend.api.schemas.connection_schemas import (
     ConnectionCreateRequest,
     ConnectionUpdateRequest,
@@ -39,6 +40,30 @@ def get_profile_repo():
     if not hasattr(initialize, 'profile_repository') or initialize.profile_repository is None:
         raise HTTPException(status_code=500, detail="ProfileRepository не инициализирован")
     return initialize.profile_repository
+
+
+def get_bundle_repo():
+    """Получить репозиторий SQL bundle'ов."""
+    if not hasattr(initialize, 'scenario_bundle_repository') or initialize.scenario_bundle_repository is None:
+        raise HTTPException(status_code=500, detail="ScenarioBundleRepository не инициализирован")
+    return initialize.scenario_bundle_repository
+
+
+def get_logical_db_repo():
+    """Получить репозиторий logical database."""
+    if not hasattr(initialize, 'logical_database_repository') or initialize.logical_database_repository is None:
+        raise HTTPException(status_code=500, detail="LogicalDatabaseRepository не инициализирован")
+    return initialize.logical_database_repository
+
+
+def get_logical_db_provisioner() -> LogicalDatabaseProvisioner:
+    """Собрать provisioner для auto profile / auto bundle generation."""
+    return LogicalDatabaseProvisioner(
+        connection_repository=get_connection_repo(),
+        logical_database_repository=get_logical_db_repo(),
+        profile_repository=get_profile_repo(),
+        bundle_repository=get_bundle_repo(),
+    )
 
 
 def _connection_to_response(config) -> ConnectionResponse:
@@ -180,8 +205,23 @@ async def create_connection(
             password=data.password,
             database=data.database,
             group=data.group or 'default',
+            logical_database_id=data.logical_database_id,
             extra_params=data.extra_params,
         )
+        if data.logical_database_id:
+            try:
+                await get_logical_db_provisioner().ensure_logical_database_ready(
+                    logical_database_id=data.logical_database_id,
+                    reference_connection_id=str(config.id),
+                )
+                refreshed = await repo.get_connection_by_id(str(config.id))
+                if refreshed:
+                    config = refreshed
+            except Exception as provision_error:
+                print(
+                    "[CONNECTIONS] Предупреждение: auto-provision logical database не выполнен: "
+                    f"{provision_error}"
+                )
         return _connection_to_response(config)
     except HTTPException:
         raise
@@ -209,11 +249,31 @@ async def update_connection(
             password=data.password,
             database=data.database,
             group=data.group,
+            logical_database_id=data.logical_database_id,
             is_active=data.is_active,
             extra_params=data.extra_params,
         )
         if not config:
             raise HTTPException(status_code=404, detail="Подключение не найдено")
+        target_logical_database_id = (
+            data.logical_database_id
+            if data.logical_database_id is not None
+            else (str(config.logical_database_id) if config.logical_database_id else None)
+        )
+        if target_logical_database_id:
+            try:
+                await get_logical_db_provisioner().ensure_logical_database_ready(
+                    logical_database_id=target_logical_database_id,
+                    reference_connection_id=str(config.id),
+                )
+                refreshed = await repo.get_connection_by_id(connection_id)
+                if refreshed:
+                    config = refreshed
+            except Exception as provision_error:
+                print(
+                    "[CONNECTIONS] Предупреждение: auto-provision logical database не выполнен: "
+                    f"{provision_error}"
+                )
         return _connection_to_response(config)
     except HTTPException:
         raise
@@ -233,6 +293,17 @@ async def assign_connection_profile(
         config = await repo.get_connection_by_id(connection_id)
         if not config:
             raise HTTPException(status_code=404, detail="Подключение не найдено")
+        if config.logical_database_id:
+            logical_database_name = (
+                config.logical_database.name if getattr(config, "logical_database", None) else "logical database"
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Подключение входит в logical database '{logical_database_name}'. "
+                    "Назначайте schema_profile на уровне logical database."
+                ),
+            )
 
         profile_repo = get_profile_repo()
         profile = None

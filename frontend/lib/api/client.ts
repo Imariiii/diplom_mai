@@ -24,6 +24,13 @@ import type {
   ProfileBundleGenerateRequest,
   ProfileBundleGenerateResponse,
   SchemaProfileSummary,
+  LogicalDatabaseListResponse,
+  LogicalDatabaseDetail,
+  LogicalDatabaseBundlesGenerateResponse,
+  LogicalDatabaseProfileAssignRequest,
+  LogicalDatabaseWithConnections,
+  LogicalDatabaseCreateRequest,
+  LogicalDatabaseUpdateRequest,
 } from '@/lib/types'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
@@ -238,6 +245,56 @@ class ApiClient {
   async testSavedConnection(id: string): Promise<ConnectionTestResponse> {
     return this.request<ConnectionTestResponse>(`/api/connections/${id}/test`, {
       method: 'POST',
+    })
+  }
+
+  // ==================== Логические базы данных ====================
+
+  async getLogicalDatabases(): Promise<LogicalDatabaseListResponse> {
+    return this.request<LogicalDatabaseListResponse>('/api/logical-databases/')
+  }
+
+  async getLogicalDatabaseDetail(id: string): Promise<LogicalDatabaseDetail> {
+    return this.request<LogicalDatabaseDetail>(`/api/logical-databases/${id}`)
+  }
+
+  async createLogicalDatabase(data: LogicalDatabaseCreateRequest): Promise<LogicalDatabaseWithConnections> {
+    return this.request<LogicalDatabaseWithConnections>('/api/logical-databases/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async updateLogicalDatabase(id: string, data: LogicalDatabaseUpdateRequest): Promise<LogicalDatabaseWithConnections> {
+    return this.request<LogicalDatabaseWithConnections>(`/api/logical-databases/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async deleteLogicalDatabase(id: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/api/logical-databases/${id}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async assignLogicalDatabaseProfile(
+    id: string,
+    data: LogicalDatabaseProfileAssignRequest
+  ): Promise<LogicalDatabaseDetail> {
+    return this.request<LogicalDatabaseDetail>(`/api/logical-databases/${id}/profile`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async generateLogicalDatabaseBundles(
+    id: string,
+    data: ProfileBundleGenerateRequest
+  ): Promise<LogicalDatabaseBundlesGenerateResponse> {
+    return this.request<LogicalDatabaseBundlesGenerateResponse>(`/api/logical-databases/${id}/bundles/generate`, {
+      method: 'POST',
+      body: JSON.stringify(data),
     })
   }
 
