@@ -35,10 +35,15 @@ Brazilian E-Commerce Public Dataset by Olist~\cite{olist_dataset} --- публи
         Набор данных & Профиль & Предметная область & Таблиц & Тип ПК \\
         \hline
         Sakila (MySQL) & sakila\_like & Видеопрокат & 16 & INT \\
+        \hline
         Pagila (PostgreSQL) & sakila\_like & Видеопрокат & 16 & INT \\
+        \hline
         Sakila (MariaDB) & sakila\_like & Видеопрокат & 16 & INT \\
+        \hline
         Olist (PostgreSQL) & olist\_like & Электронная торговля & 9 & CHAR(32) \\
+        \hline
         Olist (MySQL) & olist\_like & Электронная торговля & 9 & CHAR(32) \\
+        \hline
         Olist (MariaDB) & olist\_like & Электронная торговля & 9 & CHAR(32) \\
         \hline
     \end{tabularx}
@@ -69,7 +74,9 @@ Brazilian E-Commerce Public Dataset by Olist~\cite{olist_dataset} --- публи
         СУБД & Среднее, мс & Медиана, мс & p95, мс & p99, мс & TPS \\
         \hline
         MySQL & 16{,}85 & 15{,}58 & 21{,}90 & 76{,}82 & 980{,}4 \\
+        \hline
         PostgreSQL (Pagila) & 17{,}83 & 13{,}35 & 17{,}17 & 96{,}52 & 916{,}6 \\
+        \hline
         MariaDB & 17{,}07 & 16{,}36 & 23{,}30 & 33{,}61 & 947{,}1 \\
         \hline
     \end{tabularx}
@@ -88,7 +95,9 @@ Brazilian E-Commerce Public Dataset by Olist~\cite{olist_dataset} --- публи
         СУБД & Среднее, мс & Медиана, мс & p95, мс & p99, мс & TPS \\
         \hline
         MySQL & 46{,}34 & 43{,}04 & 72{,}15 & 124{,}38 & 876{,}2 \\
+        \hline
         PostgreSQL (Pagila) & 54{,}14 & 34{,}46 & 108{,}64 & 1~036{,}51 & 751{,}7 \\
+        \hline
         MariaDB & 34{,}43 & 36{,}21 & 50{,}17 & 54{,}22 & 865{,}9 \\
         \hline
     \end{tabularx}
@@ -117,12 +126,19 @@ Brazilian E-Commerce Public Dataset by Olist~\cite{olist_dataset} --- публи
         СУБД & Сравнение & Δ латентность, \% & p-знач. & $d$ (ES) & Эффект \\
         \hline
         MySQL & VU~20→50 (iter~121) & +175{,}0 & $<$0{,}001 & 1{,}52 & большой \\
+        \hline
         PostgreSQL & VU~20→50 (iter~121) & +203{,}7 & $<$0{,}001 & 0{,}31 & малый \\
+        \hline
         MariaDB & VU~20→50 (iter~121) & +101{,}8 & $<$0{,}001 & 2{,}47 & большой \\
+        \hline
         MySQL & iter~121→201 (VU~20) & +0{,}1 & 0{,}0002 & 0{,}001 & пренебр. \\
+        \hline
         PostgreSQL & iter~121→201 (VU~20) & $-$6{,}5 & $<$0{,}001 & 0{,}03 & пренебр. \\
+        \hline
         MariaDB & iter~121→201 (VU~20) & +7{,}4 & 0{,}97 & 0{,}12 & пренебр. \\
+        \hline
         MySQL & VU~20→50 (iter~201) & +144{,}7 & $<$0{,}001 & 1{,}51 & большой \\
+        \hline
         PostgreSQL & VU~20→50 (iter~201) & +294{,}4 & $<$0{,}001 & 0{,}38 & малый \\
         \hline
     \end{tabularx}
@@ -143,7 +159,9 @@ Brazilian E-Commerce Public Dataset by Olist~\cite{olist_dataset} --- публи
         СУБД & Среднее, мс & Медиана, мс & p95, мс & p99, мс & TPS \\
         \hline
         PostgreSQL & 766{,}38 & 406{,}05 & 2~478{,}87 & 2~689{,}13 & 11{,}89 \\
+        \hline
         MySQL & 1~270{,}43 & 675{,}99 & 3~659{,}32 & 4~230{,}99 & 7{,}08 \\
+        \hline
         MariaDB & 1~248{,}49 & 699{,}94 & 3~460{,}25 & 3~992{,}78 & 7{,}03 \\
         \hline
     \end{tabularx}
@@ -166,7 +184,9 @@ Brazilian E-Commerce Public Dataset by Olist~\cite{olist_dataset} --- публи
         СУБД & Среднее, мс & Медиана, мс & p95, мс & p99, мс & TPS \\
         \hline
         PostgreSQL & 1~879{,}83 & 1~285{,}72 & 4~411{,}34 & 5~164{,}80 & 12{,}03 \\
+        \hline
         MySQL & 3~150{,}68 & 1~775{,}84 & 8~213{,}07 & 9~203{,}39 & 7{,}08 \\
+        \hline
         MariaDB & 3~145{,}30 & 1~775{,}18 & 7~896{,}57 & 8~846{,}12 & 7{,}30 \\
         \hline
     \end{tabularx}
@@ -195,13 +215,21 @@ Brazilian E-Commerce Public Dataset by Olist~\cite{olist_dataset} --- публи
         СУБД & Сравнение & Δ латентность, \% & p-знач. & $d$ (ES) & Эффект \\
         \hline
         PostgreSQL & VU~10→25 (iter~100) & +135{,}0 & $<$0{,}001 & 0{,}93 & большой \\
+        \hline
         MySQL & VU~10→25 (iter~100) & +146{,}3 & $<$0{,}001 & 0{,}87 & большой \\
+        \hline
         MariaDB & VU~10→25 (iter~100) & +158{,}7 & $<$0{,}001 & 0{,}92 & большой \\
+        \hline
         PostgreSQL & VU~10→25 (iter~161) & +145{,}3 & $<$0{,}001 & 0{,}94 & большой \\
+        \hline
         MySQL & VU~10→25 (iter~161) & +148{,}0 & $<$0{,}001 & 0{,}83 & большой \\
+        \hline
         MariaDB & VU~10→25 (iter~161) & +151{,}9 & $<$0{,}001 & 0{,}98 & большой \\
+        \hline
         PostgreSQL & iter~161→100 (VU~10) & $-$1{,}0 & 0{,}37 & 0{,}01 & пренебр. \\
+        \hline
         MySQL & iter~161→100 (VU~10) & $-$8{,}3 & 0{,}027 & 0{,}09 & пренебр. \\
+        \hline
         MariaDB & iter~161→100 (VU~10) & $-$10{,}9 & $<$0{,}001 & 0{,}12 & пренебр. \\
         \hline
     \end{tabularx}
