@@ -145,10 +145,6 @@ REST API системы разделено на восемь модулей ма
         \hline
         schema-profiles & GET /.../\{id\}/bundles & конфигурации сценариев нагрузки профиля \\
         \hline
-        schema-profiles & POST /.../\{id\}/bundles/generate & Генерация конфигурации сценария нагрузки для профиля схемы \\
-        \hline
-        logical-databases & GET /api/logical-databases & Список логических БД \\
-        \hline
     \end{tabularx}
 \end{table}
 
@@ -159,11 +155,15 @@ REST API системы разделено на восемь модулей ма
     \label{tab:api_endpoints_continue}
     \begin{tabularx}{\textwidth}{|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|}
         \hline
+        schema-profiles & POST /.../\{id\}/bundles/generate & Генерация конфигурации сценария нагрузки для профиля схемы \\
+        \hline
+        logical-databases & GET /api/logical-databases & Список логических БД \\
+        \hline
         logical-databases & POST /api/logical-databases & Создание логической БД \\
         \hline
         logical-databases & POST /.../\{id\}/assign-profile & Привязка профиля \\
         \hline
-        logical-databases & POST /.../\{id\}/bundles/generate & Генерация конфигурации сценарии нагрузки для профиля, привязанного к логической БД \\
+        logical-databases & POST /.../\{id\}/bundles/generate & Генерация конфигурации сценария нагрузки для профиля, привязанного к логической БД \\
         \hline
         settings & GET /api/settings/restore & Настройки восстановления \\
         \hline
