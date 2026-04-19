@@ -16,6 +16,8 @@ class BackupInfo:
     tables: Set[str]
     backup_tables: Set[str]
     row_counts: Dict[str, int]
+    strategy_name: Optional[str] = None
+    owner_key: Optional[str] = None
     sequences: Optional[Dict[str, Dict]] = None  # Для PostgreSQL
     auto_increments: Optional[Dict[str, int]] = None  # Для MySQL
     created_at: datetime = None
@@ -24,6 +26,8 @@ class BackupInfo:
     def __post_init__(self):
         if self.created_at is None:
             self.created_at = datetime.utcnow()
+        if self.strategy_name is None:
+            self.strategy_name = "native" if self.file_path else "sql"
 
 
 @dataclass

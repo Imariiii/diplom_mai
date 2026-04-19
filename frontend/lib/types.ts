@@ -217,6 +217,8 @@ export interface DatabaseState {
   }>
   has_pending_backups: boolean
   backup_tables: string[]
+  pending_backup_count: number
+  pending_backup_strategy: "sql" | "native" | null
   status: 'clean' | 'modified' | 'backup_exists'
 }
 

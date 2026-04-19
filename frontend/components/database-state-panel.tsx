@@ -13,6 +13,13 @@ import { AlertCircle, Database, RefreshCw, Trash2, Settings, CheckCircle, AlertT
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Separator } from "@/components/ui/separator"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -235,7 +242,9 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
             <Alert variant="default" className="bg-amber-50 border-amber-200">
               <AlertCircle className="h-4 w-4 text-amber-600" />
               <AlertDescription className="text-amber-700">
-                {state.backup_tables.length} резервных таблиц ожидают обработки
+                {state.pending_backup_strategy === "native"
+                  ? `Ожидает обработки native-бэкап${state.pending_backup_count > 1 ? ` (${state.pending_backup_count})` : ""}`
+                  : `${state.pending_backup_count} резервных таблиц ожидают обработки`}
               </AlertDescription>
             </Alert>
           )}
@@ -333,8 +342,22 @@ export function DatabaseStatePanel({ className }: DatabaseStatePanelProps) {
                     <div className="space-y-2">
                       <Label>Стратегия резервного копирования</Label>
                       <p className="text-sm text-muted-foreground">
-                        Текущая: <span className="font-medium">{settings.strategy}</span>
+                        SQL — копирование таблиц внутри БД, Native — pg_dump / mysqldump
                       </p>
+                      <Select
+                        value={settings.strategy}
+                        onValueChange={(value: "sql" | "native") =>
+                          handleUpdateSettings({ strategy: value })
+                        }
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="sql">SQL (CREATE TABLE AS SELECT)</SelectItem>
+                          <SelectItem value="native">Native (pg_dump / mysqldump)</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-2">
                       <Label>Порог предупреждения</Label>

@@ -110,6 +110,14 @@ class DbmsDialect(ABC):
     def get_enable_constraints_sql(self) -> str:
         """SQL для обратного включения проверок FK."""
 
+    def get_disable_strict_mode_sql(self) -> Optional[str]:
+        """SQL для отключения strict sql_mode (MySQL/MariaDB). None = не требуется."""
+        return None
+
+    def get_enable_strict_mode_sql(self) -> Optional[str]:
+        """SQL для восстановления strict sql_mode. None = не требуется."""
+        return None
+
     @abstractmethod
     def get_fk_dependencies_sql(self) -> str:
         """SQL для чтения FK-зависимостей таблиц."""

@@ -109,6 +109,12 @@ class MySQLDialect(DbmsDialect):
     def get_enable_constraints_sql(self) -> str:
         return "SET FOREIGN_KEY_CHECKS = 1"
 
+    def get_disable_strict_mode_sql(self) -> str:
+        return "SET SESSION sql_mode = ''"
+
+    def get_enable_strict_mode_sql(self) -> str:
+        return "SET SESSION sql_mode = @@GLOBAL.sql_mode"
+
     def get_fk_dependencies_sql(self) -> str:
         return """
             SELECT

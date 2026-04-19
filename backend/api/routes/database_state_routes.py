@@ -65,7 +65,13 @@ async def _get_connection_context(
 async def _build_database_state(connection_id: str, repo: ConnectionRepository) -> Dict[str, Any]:
     """Получить состояние БД с метаданными подключения"""
     context = await _get_connection_context(connection_id, repo)
-    state = await get_db_state_manager().get_database_state(context["engine"], context["dbms_type"])
+    state_manager = get_db_state_manager()
+    state_manager.refresh_config()
+    state = await state_manager.get_database_state(
+        context["engine"],
+        context["dbms_type"],
+        scope_key=connection_id,
+    )
     state["connection_id"] = context["connection_id"]
     state["connection_name"] = context["connection_name"]
     return state
@@ -79,6 +85,7 @@ async def _create_backup_for_connection(
     """Создать backup для конкретного подключения"""
     context = await _get_connection_context(connection_id, repo)
     state_manager = get_db_state_manager()
+    state_manager.refresh_config()
 
     if backup_request.tables:
         tables = set(backup_request.tables)
@@ -90,7 +97,8 @@ async def _create_backup_for_connection(
     if not backup_info:
         raise HTTPException(status_code=500, detail="Не удалось создать backup")
 
-    backup_key = f"{context['dbms_type']}:{backup_info.backup_id}"
+    backup_info.owner_key = connection_id
+    backup_key = state_manager._make_backup_key(connection_id, backup_info.backup_id)
     state_manager._active_backups[backup_key] = backup_info
 
     return BackupResponse(
@@ -109,8 +117,13 @@ async def _restore_backup_for_connection(
 ) -> RestoreResponse:
     """Восстановить backup для конкретного подключения"""
     context = await _get_connection_context(connection_id, repo)
-    restore_result = await get_db_state_manager().manual_restore(
-        context["engine"], context["dbms_type"], restore_request.backup_id
+    state_manager = get_db_state_manager()
+    state_manager.refresh_config()
+    restore_result = await state_manager.manual_restore(
+        context["engine"],
+        context["dbms_type"],
+        restore_request.backup_id,
+        scope_key=connection_id,
     )
 
     return RestoreResponse(
@@ -127,7 +140,13 @@ async def _cleanup_backups_for_connection(
 ) -> CleanupResponse:
     """Очистить backup-таблицы для конкретного подключения"""
     context = await _get_connection_context(connection_id, repo)
-    deleted = await get_db_state_manager().cleanup_all_backups(context["engine"], context["dbms_type"])
+    state_manager = get_db_state_manager()
+    state_manager.refresh_config()
+    deleted = await state_manager.cleanup_all_backups(
+        context["engine"],
+        context["dbms_type"],
+        scope_key=connection_id,
+    )
     return CleanupResponse(deleted_tables=deleted)
 
 
@@ -139,8 +158,10 @@ async def _estimate_backup_for_connection(
     """Оценить размер backup для конкретного подключения"""
     context = await _get_connection_context(connection_id, repo)
     table_list = [table for table in tables.split(",") if table]
+    state_manager = get_db_state_manager()
+    state_manager.refresh_config()
 
-    size_estimate = await get_db_state_manager()._strategy.estimate_size(
+    size_estimate = await state_manager._strategy.estimate_size(
         context["engine"],
         set(table_list),
     )

@@ -4,6 +4,8 @@ API роуты для настроек системы
 from fastapi import APIRouter, HTTPException
 from typing import Optional
 
+from backend.api.schemas.backup_schemas import RestoreSettings as RestoreSettingsSchema
+
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
@@ -24,12 +26,9 @@ async def get_restore_settings():
 
 
 @router.put("/restore")
-async def update_restore_settings(request):
+async def update_restore_settings(request: RestoreSettingsSchema):
     """Обновить настройки восстановления"""
     from backend.config import update_restore_config
-    from backend.api.schemas import RestoreSettings
-    
-    request = RestoreSettings(**request)
     
     updates = {}
     if request.auto_restore is not None:

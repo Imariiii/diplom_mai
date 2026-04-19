@@ -30,6 +30,10 @@ async def restore_backup_logic(
     
     # Определяем порядок восстановления
     restore_order = await get_restore_order(engine, tables)
+    print(
+        f"[RESTORE:SQL] [{dbms_type}] Порядок восстановления ({len(restore_order)} таблиц): "
+        f"{restore_order}"
+    )
     
     # Используем одно соединение для всех операций восстановления
     # Это важно для MySQL, где SET FOREIGN_KEY_CHECKS сессионный
@@ -37,22 +41,43 @@ async def restore_backup_logic(
         # Отключаем constraints
         await conn.execute(text(dialect.get_disable_constraints_sql()))
         await conn.commit()
+        print(f"[RESTORE:SQL] [{dbms_type}] FK constraints отключены")
+        
+        disable_sql = dialect.get_disable_strict_mode_sql()
+        enable_sql = dialect.get_enable_strict_mode_sql()
+        if disable_sql:
+            await conn.execute(text(disable_sql))
+            await conn.commit()
+            print(f"[RESTORE:SQL] [{dbms_type}] Strict sql_mode отключён")
         
         try:
             # Восстанавливаем таблицы в правильном порядке
-            for table in restore_order:
+            for idx, table in enumerate(restore_order, 1):
                 backup_table = get_backup_table_name_func(table)
+                expected_rows = backup_info.row_counts.get(table)
                 await do_restore_table(dbms_type, table, backup_table, conn)
+                rows_info = f"{expected_rows:,} строк" if expected_rows is not None else "?"
+                print(
+                    f"[RESTORE:SQL] [{dbms_type}] [{idx}/{len(restore_order)}] "
+                    f"{backup_table} → {table} ({rows_info})"
+                )
             
             # Восстанавливаем sequences / AUTO_INCREMENT
             auto_values = backup_info.sequences if dbms_type == 'postgresql' else backup_info.auto_increments
             if auto_values:
                 await dialect.restore_auto_values(conn, auto_values)
                 await conn.commit()
+                label = "sequences" if dbms_type == "postgresql" else "AUTO_INCREMENT"
+                print(f"[RESTORE:SQL] [{dbms_type}] Восстановлены {label} для {len(auto_values)} таблиц")
         finally:
+            if enable_sql:
+                await conn.execute(text(enable_sql))
+                await conn.commit()
+                print(f"[RESTORE:SQL] [{dbms_type}] Strict sql_mode восстановлен")
             # Включаем constraints обратно
             await conn.execute(text(dialect.get_enable_constraints_sql()))
             await conn.commit()
+            print(f"[RESTORE:SQL] [{dbms_type}] FK constraints включены")
 
 
 async def get_restore_order(engine: AsyncEngine, tables: set) -> List[str]:
