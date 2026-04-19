@@ -1,30 +1,64 @@
 "use client"
 
-import { useEffect, useState, startTransition } from "react"
-import { ChevronLeft, Code, Database, Download, Loader2, Scale, Server, Settings } from "lucide-react"
+import { useEffect, useMemo, useState, startTransition } from "react"
+import {
+  ChevronLeft,
+  Download,
+  Loader2,
+  Scale,
+  SlidersHorizontal,
+  AlertTriangle,
+  LayoutDashboard,
+  BarChart3,
+  Table2,
+  Sigma,
+  FileText,
+  Settings2,
+} from "lucide-react"
 
-import { analyzeComparison, type AnalysisReportConfig, type ComparisonResult, type ComparisonTestInfo } from "@/lib/api"
+import {
+  analyzeComparison,
+  type AnalysisReportConfig,
+  type ComparisonResult,
+} from "@/lib/api"
 import { useAppStore } from "@/lib/store"
+
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
+import { Separator } from "@/components/ui/separator"
 import { ExecutiveSummary } from "@/components/comparison/executive-summary"
 import { ParameterImpact } from "@/components/comparison/parameter-impact"
 import { ComparisonTable } from "@/components/comparison/comparison-table"
 import { ComparisonCharts } from "@/components/comparison/comparison-charts"
 import { StatisticalSummary } from "@/components/comparison/statistical-summary"
 import { AnalysisReport } from "@/components/comparison/analysis-report"
+import { TestConfigSection } from "@/components/comparison/test-config-section"
+
+const COMPARISON_TYPE_LABELS: Record<ComparisonResult["comparison_type"], string> = {
+  cross_database: "Сравнение СУБД",
+  scalability: "Анализ масштабируемости",
+  mixed: "Смешанное сравнение",
+  temporal: "Временное сравнение",
+}
 
 export function ComparisonPage() {
-  const {
-    comparisonTestIds,
-    comparisonBaselineId,
-    setCurrentPage,
-  } = useAppStore()
+  const { comparisonTestIds, comparisonBaselineId, setCurrentPage } = useAppStore()
 
   const [result, setResult] = useState<ComparisonResult | null>(null)
   const [loading, setLoading] = useState(true)
@@ -36,88 +70,89 @@ export function ComparisonPage() {
     include_hypotheses: true,
   })
   const [useNormalizedView, setUseNormalizedView] = useState(true)
+  const [activeTab, setActiveTab] = useState("overview")
 
   useEffect(() => {
     let cancelled = false
-
     const run = async () => {
       if (comparisonTestIds.length < 2) {
         setError("Выберите минимум два теста для сравнения на странице истории")
         setLoading(false)
         return
       }
-
       setLoading(true)
       setError(null)
-
       try {
         const response = await analyzeComparison({
           test_ids: comparisonTestIds,
           baseline_id: comparisonBaselineId || comparisonTestIds[0],
         })
-
         if (!cancelled) {
-          startTransition(() => {
-            setResult(response)
-          })
+          startTransition(() => setResult(response))
         }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "Ошибка анализа сравнения")
         }
       } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
+        if (!cancelled) setLoading(false)
       }
     }
-
     run()
-
     return () => {
       cancelled = true
     }
   }, [comparisonTestIds, comparisonBaselineId])
 
-  const toggleReportConfig = (key: keyof AnalysisReportConfig, checked: boolean) => {
-    setReportConfig((current) => ({
-      ...current,
-      [key]: checked,
-    }))
-  }
-
-  const exportJson = () => {
-    if (!result) return
-
-    const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" })
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement("a")
-    anchor.href = url
-    anchor.download = `comparison-${result.baseline_id}.json`
-    anchor.click()
-    URL.revokeObjectURL(url)
-  }
-
   const supportsNormalizedView = Boolean(
     result && (result.comparison_type === "scalability" || result.comparison_type === "mixed")
   )
 
+  const exportJson = () => {
+    if (!result) return
+    const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `comparison-${result.baseline_id}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const toggleReport = (key: keyof AnalysisReportConfig, checked: boolean) =>
+    setReportConfig((current) => ({ ...current, [key]: checked }))
+
+  const tabs = useMemo(
+    () => [
+      { value: "overview", label: "Обзор", icon: LayoutDashboard },
+      { value: "charts", label: "Графики", icon: BarChart3 },
+      { value: "table", label: "Таблица", icon: Table2 },
+      { value: "stats", label: "Статистика", icon: Sigma },
+      { value: "report", label: "Отчёт", icon: FileText },
+    ],
+    []
+  )
+
   if (loading) {
     return (
-      <div className="p-6 flex items-center justify-center h-[calc(100vh-3.5rem)]">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="flex h-[calc(100vh-3.5rem)] items-center justify-center p-6">
+        <div className="flex flex-col items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-8 w-8 animate-spin" />
+          <p className="text-sm">Анализируем результаты...</p>
+        </div>
       </div>
     )
   }
 
   if (error || !result) {
     return (
-      <div className="p-6 space-y-4">
-        <Button variant="ghost" onClick={() => setCurrentPage("history")}>
+      <div className="mx-auto max-w-3xl space-y-4 p-6">
+        <Button variant="ghost" size="sm" onClick={() => setCurrentPage("history")}>
           <ChevronLeft className="mr-2 h-4 w-4" />
           Назад к истории
         </Button>
         <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
           <AlertTitle>Не удалось загрузить сравнение</AlertTitle>
           <AlertDescription>{error || "Данные анализа отсутствуют"}</AlertDescription>
         </Alert>
@@ -126,277 +161,203 @@ export function ComparisonPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      {/* 1. Header */}
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <div className="bg-background">
+      {/* Sticky top bar */}
+      <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="mx-auto flex max-w-[1400px] flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:justify-between md:px-6">
+          <div className="flex items-center gap-3 min-w-0">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0 h-8 px-2"
+              onClick={() => setCurrentPage("history")}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              <span className="sr-only">Назад</span>
+            </Button>
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <Scale className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h1 className="text-base font-semibold leading-none tracking-tight md:text-lg">
+                  Сравнение тестов
+                </h1>
+                <span className="hidden rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground sm:inline-block">
+                  {COMPARISON_TYPE_LABELS[result.comparison_type]}
+                </span>
+              </div>
+              <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                {result.tests.map((t) => t.name).join(" · ")}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <SlidersHorizontal className="mr-2 h-3.5 w-3.5" />
+                  Конфигурация
+                </Button>
+              </SheetTrigger>
+              <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
+                <SheetHeader>
+                  <SheetTitle>Конфигурация тестов</SheetTitle>
+                  <SheetDescription>
+                    Параметры прогонов, подключения и сценарии
+                  </SheetDescription>
+                </SheetHeader>
+                <div className="mt-4 px-4 pb-6">
+                  <TestConfigSection result={result} />
+                </div>
+              </SheetContent>
+            </Sheet>
+
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Settings2 className="mr-2 h-3.5 w-3.5" />
+                  Вид
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-72">
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="text-sm font-medium">Параметры отображения</h4>
+                    <p className="text-xs text-muted-foreground">
+                      Управляйте нормализацией и видимыми секциями отчёта
+                    </p>
+                  </div>
+                  <Separator />
+                  {supportsNormalizedView && (
+                    <div className="flex items-center justify-between gap-2">
+                      <Label htmlFor="normalized-view" className="text-sm font-normal">
+                        Нормализованный вид
+                      </Label>
+                      <Switch
+                        id="normalized-view"
+                        checked={useNormalizedView}
+                        onCheckedChange={setUseNormalizedView}
+                      />
+                    </div>
+                  )}
+                  <Separator />
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Секции отчёта
+                    </p>
+                    {(
+                      [
+                        ["include_verdict", "Вердикт"],
+                        ["include_patterns", "Паттерны"],
+                        ["include_recommendations", "Рекомендации"],
+                        ["include_hypotheses", "Гипотезы"],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <div key={key} className="flex items-center justify-between gap-2">
+                        <Label htmlFor={key} className="text-sm font-normal">
+                          {label}
+                        </Label>
+                        <Switch
+                          id={key}
+                          checked={reportConfig[key]}
+                          onCheckedChange={(c) => toggleReport(key, c)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+
+            <Button size="sm" onClick={exportJson}>
+              <Download className="mr-2 h-3.5 w-3.5" />
+              Экспорт
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <div className="mx-auto max-w-[1400px] space-y-6 px-4 py-6 md:px-6">
+        <ExecutiveSummary result={result} />
+
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+          <TabsList className="h-auto w-full justify-start overflow-x-auto rounded-lg border border-border bg-card p-1">
+            {tabs.map((t) => {
+              const Icon = t.icon
+              return (
+                <TabsTrigger
+                  key={t.value}
+                  value={t.value}
+                  className="gap-2 px-3 py-1.5 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {t.label}
+                </TabsTrigger>
+              )
+            })}
+          </TabsList>
+
+          <TabsContent value="overview" className="space-y-6 focus-visible:outline-none">
+            <ParameterImpact result={result} />
+            {result.warnings.length > 0 && (
+              <WarningsCard warnings={result.warnings} />
+            )}
+          </TabsContent>
+
+          <TabsContent value="charts" className="space-y-4 focus-visible:outline-none">
+            <ComparisonCharts
+              result={result}
+              useNormalized={supportsNormalizedView && useNormalizedView}
+            />
+          </TabsContent>
+
+          <TabsContent value="table" className="focus-visible:outline-none">
+            <ComparisonTable
+              result={result}
+              useNormalized={supportsNormalizedView && useNormalizedView}
+            />
+          </TabsContent>
+
+          <TabsContent value="stats" className="focus-visible:outline-none">
+            <StatisticalSummary result={result} />
+          </TabsContent>
+
+          <TabsContent value="report" className="focus-visible:outline-none">
+            <AnalysisReport
+              report={result.analysis_report}
+              config={reportConfig}
+              comparisonType={result.comparison_type}
+            />
+          </TabsContent>
+        </Tabs>
+      </div>
+    </div>
+  )
+}
+
+function WarningsCard({ warnings }: { warnings: string[] }) {
+  return (
+    <div className="rounded-xl border border-warning/30 bg-warning/5 p-4">
+      <div className="mb-2 flex items-center gap-2">
+        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-warning/15 text-warning">
+          <AlertTriangle className="h-3.5 w-3.5" />
+        </div>
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold">
-            <Scale className="h-6 w-6 text-primary" />
-            Сравнение тестов
-          </h1>
-          <p className="text-muted-foreground">
-            Метрики, статистическая значимость и графики по выбранным прогонам
+          <p className="text-sm font-medium">Предупреждения анализа</p>
+          <p className="text-xs text-muted-foreground">
+            Обратите внимание — возможно влияние на достоверность
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="ghost" onClick={() => setCurrentPage("history")}>
-            <ChevronLeft className="mr-2 h-4 w-4" />
-            История
-          </Button>
-          <Button onClick={exportJson}>
-            <Download className="mr-2 h-4 w-4" />
-            Экспорт JSON
-          </Button>
-        </div>
       </div>
-
-      {/* 2. Executive Summary */}
-      <ExecutiveSummary result={result} />
-
-      {/* 3. Test configuration cards */}
-      <TestConfigSection result={result} />
-
-      {/* 4. Parameter Impact */}
-      <ParameterImpact result={result} />
-
-      {/* 5. View controls */}
-      <Card className="bg-card border-border">
-        <CardContent className="flex flex-wrap items-center gap-4 py-3">
-          {supportsNormalizedView && (
-            <div className="flex items-center gap-2">
-              <Switch
-                id="normalized-view"
-                checked={useNormalizedView}
-                onCheckedChange={setUseNormalizedView}
-              />
-              <Label htmlFor="normalized-view" className="text-sm">Нормализованный вид</Label>
-            </div>
-          )}
-          <div className="flex items-center gap-2">
-            <Switch
-              id="report-verdict"
-              checked={reportConfig.include_verdict}
-              onCheckedChange={(checked) => toggleReportConfig("include_verdict", checked)}
-            />
-            <Label htmlFor="report-verdict" className="text-sm">Вердикт</Label>
-          </div>
-          <div className="flex items-center gap-2">
-            <Switch
-              id="report-patterns"
-              checked={reportConfig.include_patterns}
-              onCheckedChange={(checked) => toggleReportConfig("include_patterns", checked)}
-            />
-            <Label htmlFor="report-patterns" className="text-sm">Паттерны</Label>
-          </div>
-          <div className="flex items-center gap-2">
-            <Switch
-              id="report-recommendations"
-              checked={reportConfig.include_recommendations}
-              onCheckedChange={(checked) => toggleReportConfig("include_recommendations", checked)}
-            />
-            <Label htmlFor="report-recommendations" className="text-sm">Рекомендации</Label>
-          </div>
-          <div className="flex items-center gap-2">
-            <Switch
-              id="report-hypotheses"
-              checked={reportConfig.include_hypotheses}
-              onCheckedChange={(checked) => toggleReportConfig("include_hypotheses", checked)}
-            />
-            <Label htmlFor="report-hypotheses" className="text-sm">Гипотезы</Label>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* 6. Charts */}
-      <ComparisonCharts result={result} useNormalized={supportsNormalizedView && useNormalizedView} />
-
-      {/* 7. Detailed metrics table */}
-      <ComparisonTable result={result} useNormalized={supportsNormalizedView && useNormalizedView} />
-
-      {/* 8. Statistical tests */}
-      <StatisticalSummary result={result} />
-
-      {/* 9. Analysis report */}
-      <AnalysisReport report={result.analysis_report} config={reportConfig} comparisonType={result.comparison_type} />
+      <ul className="mt-3 grid gap-1.5 pl-9 text-sm text-muted-foreground md:grid-cols-2">
+        {warnings.map((w) => (
+          <li key={w} className="leading-relaxed">
+            — {w}
+          </li>
+        ))}
+      </ul>
     </div>
   )
-}
-
-function TestConfigSection({ result }: { result: ComparisonResult }) {
-  const [isOpen, setIsOpen] = useState(false)
-  const baselineTest = result.tests.find((t) => t.id === result.baseline_id)
-
-  return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <Card className="bg-card border-border">
-        <CardHeader className="pb-3">
-          <CollapsibleTrigger asChild>
-            <button className="flex items-center justify-between w-full hover:opacity-80 transition-opacity">
-              <CardTitle className="text-base">Конфигурация тестов</CardTitle>
-              <div className="flex gap-2 items-center">
-                <Badge variant="secondary">{getComparisonTypeLabel(result.comparison_type)}</Badge>
-                <Badge variant="outline">{isOpen ? "Свернуть" : "Развернуть"}</Badge>
-              </div>
-            </button>
-          </CollapsibleTrigger>
-          <CardDescription>
-            {result.tests.map((t) => t.name).join(" · ")}
-            {baselineTest && <span className="ml-2 text-xs">(baseline: {baselineTest.name})</span>}
-          </CardDescription>
-        </CardHeader>
-        <CollapsibleContent>
-          <CardContent>
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-              {result.tests.map((test) => (
-                <TestInfoCard
-                  key={test.id}
-                  test={test}
-                  isBaseline={test.id === result.baseline_id}
-                  baselineConfig={baselineTest?.config}
-                />
-              ))}
-            </div>
-          </CardContent>
-        </CollapsibleContent>
-      </Card>
-    </Collapsible>
-  )
-}
-
-function TestInfoCard({
-  test,
-  isBaseline,
-  baselineConfig,
-}: {
-  test: ComparisonTestInfo
-  isBaseline: boolean
-  baselineConfig?: Record<string, any>
-}) {
-  const [queriesOpen, setQueriesOpen] = useState(false)
-  const config = test.config || {}
-  const scenarioName = test.scenario_info?.name || config.scenario || "-"
-  const queries = test.scenario_info?.queries || []
-
-  const formatDate = (dateStr?: string | null) => {
-    if (!dateStr) return null
-    try {
-      return new Date(dateStr).toLocaleString("ru-RU", {
-        day: "2-digit", month: "2-digit", year: "numeric",
-        hour: "2-digit", minute: "2-digit",
-      })
-    } catch {
-      return dateStr
-    }
-  }
-
-  const diffHighlight = (key: string, value: any) => {
-    if (isBaseline || !baselineConfig) return false
-    return baselineConfig[key] !== value
-  }
-
-  return (
-    <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="font-semibold truncate">{test.name}</p>
-          {test.started_at && (
-            <p className="text-xs text-muted-foreground">{formatDate(test.started_at)}</p>
-          )}
-        </div>
-        {isBaseline && <Badge variant="default" className="shrink-0">Baseline</Badge>}
-      </div>
-
-      <div className="space-y-1.5">
-        <div className="flex items-center gap-2 text-sm">
-          <Settings className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-          <span className="text-muted-foreground">Конфигурация:</span>
-        </div>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1 pl-5.5 text-sm">
-          <span className="text-muted-foreground">Потоки:</span>
-          <span className={`font-mono ${diffHighlight("virtual_users", config.virtual_users) ? "text-primary font-bold" : ""}`}>
-            {config.virtual_users ?? config.threads ?? "-"}
-          </span>
-          <span className="text-muted-foreground">Итерации:</span>
-          <span className={`font-mono ${diffHighlight("iterations", config.iterations) ? "text-primary font-bold" : ""}`}>
-            {config.iterations ?? "-"}
-          </span>
-          <span className="text-muted-foreground">Прогрев:</span>
-          <span className={`font-mono ${diffHighlight("warmup_time", config.warmup_time) ? "text-primary font-bold" : ""}`}>
-            {config.warmup_time != null ? `${config.warmup_time} с` : "-"}
-          </span>
-          <span className="text-muted-foreground">Индексы:</span>
-          <span className={`font-mono ${diffHighlight("use_indexes", config.use_indexes) ? "text-primary font-bold" : ""}`}>
-            {config.use_indexes ? "Да" : "Нет"}
-          </span>
-        </div>
-      </div>
-
-      <div className="space-y-1.5">
-        <div className="flex items-center gap-2 text-sm">
-          <Database className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-          <span className="text-muted-foreground">Сценарий:</span>
-          <span className="font-medium">{scenarioName}</span>
-        </div>
-        {test.scenario_info?.description && (
-          <p className="pl-5.5 text-xs text-muted-foreground">{test.scenario_info.description}</p>
-        )}
-      </div>
-
-      {test.connections.length > 0 && (
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2 text-sm">
-            <Server className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            <span className="text-muted-foreground">Подключения:</span>
-          </div>
-          <div className="pl-5.5 space-y-1">
-            {test.connections.map((conn) => (
-              <div key={conn.id} className="flex items-center gap-2 text-sm">
-                <Badge variant="outline" className="text-xs px-1.5 py-0">{conn.dbms_type}</Badge>
-                <span className="font-medium">{conn.name}</span>
-                <span className="text-xs text-muted-foreground">{conn.host}:{conn.port}/{conn.database}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {queries.length > 0 && (
-        <Collapsible open={queriesOpen} onOpenChange={setQueriesOpen}>
-          <CollapsibleTrigger asChild>
-            <button className="flex items-center gap-2 text-sm text-primary hover:underline">
-              <Code className="h-3.5 w-3.5 shrink-0" />
-              Запросы сценария ({queries.length})
-            </button>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="mt-2 space-y-2">
-            {queries.map((q, idx) => (
-              <div key={idx} className="rounded border border-border bg-background p-2.5 space-y-1">
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-xs px-1.5 py-0 uppercase">{q.query_type}</Badge>
-                  <span className="text-xs text-muted-foreground">вес: {q.weight}</span>
-                  {q.description && <span className="text-xs text-muted-foreground">— {q.description}</span>}
-                </div>
-                <pre className="text-xs font-mono bg-muted/50 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">{q.sql_template}</pre>
-              </div>
-            ))}
-          </CollapsibleContent>
-        </Collapsible>
-      )}
-    </div>
-  )
-}
-
-function getComparisonTypeLabel(type: ComparisonResult["comparison_type"]): string {
-  switch (type) {
-    case "cross_database":
-      return "Сравнение СУБД"
-    case "scalability":
-      return "Анализ масштабируемости"
-    case "mixed":
-      return "Смешанное сравнение"
-    case "temporal":
-      return "Временное сравнение"
-    default:
-      return "Смешанное сравнение"
-  }
 }

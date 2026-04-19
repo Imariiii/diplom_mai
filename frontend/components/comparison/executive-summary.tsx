@@ -1,20 +1,20 @@
 "use client"
 
-import { TrendingUp, TrendingDown, Minus, Activity, Zap, Timer, AlertTriangle } from "lucide-react"
+import {
+  Activity,
+  Zap,
+  Timer,
+  TrendingUp,
+  CheckCircle2,
+  Trophy,
+  Target,
+} from "lucide-react"
 
 import type { ComparisonResult } from "@/lib/api"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 
 interface ExecutiveSummaryProps {
   result: ComparisonResult
-}
-
-const COMPARISON_TYPE_LABELS: Record<ComparisonResult["comparison_type"], string> = {
-  cross_database: "Сравнение СУБД",
-  scalability: "Анализ масштабируемости",
-  mixed: "Смешанное сравнение",
-  temporal: "Временное сравнение",
 }
 
 function resolveDbKeyLabel(dbKey: string, labels?: Record<string, string>): string {
@@ -29,118 +29,211 @@ export function ExecutiveSummary({ result }: ExecutiveSummaryProps) {
   )
 
   const bestThroughput = findBestMetric(result, "throughput", "higher")
+  const worstThroughput = findBestMetric(result, "throughput", "lower")
   const bestLatency = findBestMetric(result, "latency", "lower")
+  const worstLatency = findBestMetric(result, "latency", "higher")
+
   const verdict = result.analysis_report?.verdict || ""
 
-  const verdictColor =
+  const intensity =
     sigCount === 0
-      ? "border-muted-foreground/20 bg-muted/30"
-      : largeEffects.length > 0
-        ? "border-primary/30 bg-primary/5"
-        : "border-amber-500/30 bg-amber-500/5"
+      ? "neutral"
+      : largeEffects.length >= 3
+        ? "strong"
+        : largeEffects.length > 0
+          ? "moderate"
+          : "weak"
 
   return (
-    <Card className={`border-2 ${verdictColor}`}>
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-xl">Результат сравнения</CardTitle>
-          <div className="flex gap-2">
-            <Badge variant="secondary">{COMPARISON_TYPE_LABELS[result.comparison_type]}</Badge>
-            <Badge variant="outline">{result.tests.length} тестов</Badge>
+    <section
+      aria-label="Результат сравнения"
+      className="relative overflow-hidden rounded-xl border border-border bg-card"
+    >
+      {/* Decorative top accent bar */}
+      <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-primary via-primary to-primary/40" />
+
+      <div className="grid gap-0 lg:grid-cols-[1.4fr_1fr]">
+        {/* Left: Verdict text */}
+        <div className="space-y-4 p-6 lg:p-8">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="gap-1.5 border-primary/30 bg-primary/5 text-primary">
+              <Trophy className="h-3 w-3" />
+              Ключевой вывод
+            </Badge>
+            <IntensityBadge intensity={intensity} />
           </div>
-        </div>
-        {verdict && (
-          <p className="text-base text-foreground leading-relaxed mt-2">{verdict}</p>
-        )}
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <KpiCard
-            icon={<Activity className="h-5 w-5" />}
-            label="Статистически значимых"
-            value={`${sigCount} / ${totalComparisons}`}
-            detail={sigCount > 0 ? "попарных сравнений" : "различий не обнаружено"}
-            variant={sigCount > 0 ? "positive" : "neutral"}
-          />
 
-          {bestThroughput && (
-            <KpiCard
-              icon={<Zap className="h-5 w-5" />}
-              label="Лучший throughput"
-              value={`${bestThroughput.value.toFixed(1)} req/s`}
-              detail={bestThroughput.testName}
-              variant="positive"
-            />
+          <h2 className="text-pretty text-xl font-semibold leading-snug tracking-tight md:text-[1.35rem]">
+            {verdict || "Статистически значимых различий между тестами не обнаружено."}
+          </h2>
+
+          {/* Winner card */}
+          {bestThroughput && bestLatency && (
+            <div className="grid gap-2 pt-2 sm:grid-cols-2">
+              <WinnerPill
+                icon={<Zap className="h-3.5 w-3.5" />}
+                label="Лидер throughput"
+                name={bestThroughput.testName}
+                db={resolveDbKeyLabel(bestThroughput.dbKey, result.db_key_labels)}
+                value={`${bestThroughput.value.toFixed(0)} req/s`}
+              />
+              <WinnerPill
+                icon={<Timer className="h-3.5 w-3.5" />}
+                label="Лидер latency"
+                name={bestLatency.testName}
+                db={resolveDbKeyLabel(bestLatency.dbKey, result.db_key_labels)}
+                value={`${bestLatency.value.toFixed(2)} мс`}
+              />
+            </div>
           )}
-
-          {bestLatency && (
-            <KpiCard
-              icon={<Timer className="h-5 w-5" />}
-              label="Лучшая latency"
-              value={`${bestLatency.value.toFixed(2)} мс`}
-              detail={bestLatency.testName}
-              variant="positive"
-            />
-          )}
-
-          <KpiCard
-            icon={largeEffects.length > 0 ? <TrendingUp className="h-5 w-5" /> : <Minus className="h-5 w-5" />}
-            label="Практически значимых"
-            value={`${largeEffects.length}`}
-            detail="различий с medium/large эффектом"
-            variant={largeEffects.length > 0 ? "accent" : "neutral"}
-          />
         </div>
 
-        {result.warnings.length > 0 && (
-          <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-            <div className="flex items-center gap-2 text-sm font-medium text-amber-600 mb-1">
-              <AlertTriangle className="h-4 w-4" />
-              Предупреждения ({result.warnings.length})
-            </div>
-            <div className="space-y-0.5 text-sm text-muted-foreground">
-              {result.warnings.slice(0, 3).map((w) => (
-                <p key={w}>• {w}</p>
-              ))}
-              {result.warnings.length > 3 && (
-                <p className="text-xs">и ещё {result.warnings.length - 3}...</p>
-              )}
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+        {/* Right: KPI grid */}
+        <div className="grid grid-cols-2 gap-px border-t border-border bg-border lg:border-t-0 lg:border-l">
+          <KpiTile
+            icon={<Activity className="h-3.5 w-3.5" />}
+            label="Значимых"
+            primary={`${sigCount}`}
+            secondary={`из ${totalComparisons} сравнений`}
+            progress={totalComparisons > 0 ? sigCount / totalComparisons : 0}
+            tone="primary"
+          />
+          <KpiTile
+            icon={<Target className="h-3.5 w-3.5" />}
+            label="Large/Medium effects"
+            primary={`${largeEffects.length}`}
+            secondary="практических различий"
+            progress={totalComparisons > 0 ? largeEffects.length / totalComparisons : 0}
+            tone={largeEffects.length > 0 ? "accent" : "neutral"}
+          />
+          <KpiTile
+            icon={<TrendingUp className="h-3.5 w-3.5" />}
+            label="Throughput диапазон"
+            primary={
+              bestThroughput
+                ? `${bestThroughput.value.toFixed(0)} req/s`
+                : "—"
+            }
+            secondary={
+              worstThroughput && bestThroughput && worstThroughput.value !== bestThroughput.value
+                ? `min ${worstThroughput.value.toFixed(0)} req/s`
+                : "по всем тестам"
+            }
+            tone="success"
+          />
+          <KpiTile
+            icon={<CheckCircle2 className="h-3.5 w-3.5" />}
+            label="Latency диапазон"
+            primary={bestLatency ? `${bestLatency.value.toFixed(2)} мс` : "—"}
+            secondary={
+              worstLatency && bestLatency && worstLatency.value !== bestLatency.value
+                ? `max ${worstLatency.value.toFixed(2)} мс`
+                : "по всем тестам"
+            }
+            tone="neutral"
+          />
+        </div>
+      </div>
+    </section>
   )
 }
 
-function KpiCard({
+function IntensityBadge({ intensity }: { intensity: "strong" | "moderate" | "weak" | "neutral" }) {
+  const map = {
+    strong: { label: "Сильные различия", cls: "bg-warning/15 text-warning border-warning/30" },
+    moderate: { label: "Умеренные различия", cls: "bg-primary/10 text-primary border-primary/20" },
+    weak: { label: "Слабые эффекты", cls: "bg-muted text-muted-foreground border-border" },
+    neutral: { label: "Эффекты не выражены", cls: "bg-muted text-muted-foreground border-border" },
+  } as const
+  const cfg = map[intensity]
+  return (
+    <Badge variant="outline" className={cfg.cls}>
+      {cfg.label}
+    </Badge>
+  )
+}
+
+function WinnerPill({
   icon,
   label,
+  name,
+  db,
   value,
-  detail,
-  variant,
 }: {
   icon: React.ReactNode
   label: string
+  name: string
+  db: string
   value: string
-  detail: string
-  variant: "positive" | "negative" | "neutral" | "accent"
 }) {
-  const colors = {
-    positive: "text-green-600",
-    negative: "text-red-600",
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+      <div className="flex items-center gap-2.5 min-w-0">
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-success/15 text-success">
+          {icon}
+        </div>
+        <div className="min-w-0">
+          <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
+            {label}
+          </p>
+          <p className="truncate text-sm font-medium">
+            {name}
+            <span className="text-muted-foreground"> · {db}</span>
+          </p>
+        </div>
+      </div>
+      <p className="shrink-0 font-mono text-sm font-semibold tabular-nums">{value}</p>
+    </div>
+  )
+}
+
+function KpiTile({
+  icon,
+  label,
+  primary,
+  secondary,
+  progress,
+  tone,
+}: {
+  icon: React.ReactNode
+  label: string
+  primary: string
+  secondary: string
+  progress?: number
+  tone: "primary" | "accent" | "success" | "neutral"
+}) {
+  const toneMap = {
+    primary: "text-primary",
+    accent: "text-warning",
+    success: "text-success",
     neutral: "text-muted-foreground",
-    accent: "text-primary",
-  }
+  } as const
+
+  const barColor = {
+    primary: "bg-primary",
+    accent: "bg-warning",
+    success: "bg-success",
+    neutral: "bg-muted-foreground/60",
+  } as const
 
   return (
-    <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-1">
-      <div className={`flex items-center gap-2 text-sm ${colors[variant]}`}>
-        {icon}
-        <span>{label}</span>
+    <div className="bg-card p-4 md:p-5">
+      <div className="flex items-center gap-2">
+        <span className={toneMap[tone]}>{icon}</span>
+        <p className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</p>
       </div>
-      <p className="text-2xl font-bold">{value}</p>
-      <p className="text-xs text-muted-foreground truncate">{detail}</p>
+      <p className="mt-2 font-mono text-2xl font-semibold tabular-nums leading-none">
+        {primary}
+      </p>
+      <p className="mt-1 truncate text-xs text-muted-foreground">{secondary}</p>
+      {progress != null && (
+        <div className="mt-3 h-1 w-full overflow-hidden rounded-full bg-muted">
+          <div
+            className={`h-full rounded-full ${barColor[tone]}`}
+            style={{ width: `${Math.min(100, Math.max(4, progress * 100))}%` }}
+          />
+        </div>
+      )}
     </div>
   )
 }
@@ -151,16 +244,11 @@ function findBestMetric(
   direction: "higher" | "lower"
 ): { testName: string; value: number; dbKey: string } | null {
   let best: { testName: string; value: number; dbKey: string } | null = null
-
   for (const test of result.tests) {
     const bundles = result.descriptive_stats[test.id] || {}
     for (const [dbKey, bundle] of Object.entries(bundles)) {
-      const val =
-        type === "throughput"
-          ? bundle.throughput?.mean
-          : bundle.latency_ms?.mean
+      const val = type === "throughput" ? bundle.throughput?.mean : bundle.latency_ms?.mean
       if (val == null) continue
-
       if (
         !best ||
         (direction === "higher" && val > best.value) ||
@@ -170,6 +258,5 @@ function findBestMetric(
       }
     }
   }
-
   return best
 }
