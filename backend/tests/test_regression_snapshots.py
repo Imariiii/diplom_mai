@@ -1,6 +1,6 @@
 """
-Regression-тесты: фиксированный вход -> проверка структуры ComparisonResult.
-Проверяют, что ключевые поля результата не меняются при рефакторинге.
+Regression-тесты: фиксированный вход -> проверка структуры результата.
+Проверяют, что ключевые поля PerTestResult и SeriesResult не меняются при рефакторинге.
 """
 import json
 import uuid
@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 import numpy as np
 import pytest
 
+from backend.comparison.schemas import ComparisonRequest
 from backend.comparison.service import ComparisonService
 
 
@@ -66,117 +67,124 @@ def _make_samples(db_key, seed=42):
     return samples
 
 
-class TestRegressionStructure:
-    """Проверяют стабильность структуры ComparisonResult."""
+def _make_repo(td, sm):
+    repo = AsyncMock()
+    repo.get_test_run_with_results = AsyncMock(side_effect=lambda tid: td.get(tid))
+    repo.get_metric_samples = AsyncMock(side_effect=lambda tid: sm.get(tid, []))
+    repo.get_time_series = AsyncMock(return_value=[])
+    return repo
+
+
+class TestPerTestRegressionStructure:
+    """Проверяют стабильность структуры PerTestResult."""
 
     @pytest.mark.asyncio
-    async def test_result_has_all_required_fields(self):
-        id1, id2 = uuid.uuid4(), uuid.uuid4()
-        td = {
-            str(id1): _make_test_data(id1, "MySQL", ["conn_mysql"]),
-            str(id2): _make_test_data(id2, "PG", ["conn_pg"]),
-        }
-        sm = {
-            str(id1): _make_samples("conn_mysql", seed=42),
-            str(id2): _make_samples("conn_pg", seed=99),
-        }
-        repo = AsyncMock()
-        repo.get_test_run_with_results = AsyncMock(side_effect=lambda tid: td.get(tid))
-        repo.get_metric_samples = AsyncMock(side_effect=lambda tid: sm.get(tid, []))
-        repo.get_time_series = AsyncMock(return_value=[])
+    async def test_per_test_has_all_required_fields(self):
+        id1 = uuid.uuid4()
+        td = {str(id1): _make_test_data(id1, "MySQL+PG", ["conn_mysql", "conn_pg"])}
+        sm = {str(id1): _make_samples("conn_mysql", seed=42) + _make_samples("conn_pg", seed=99)}
+        svc = ComparisonService(repository=_make_repo(td, sm))
 
-        svc = ComparisonService(repository=repo)
-        result = await svc.analyze([id1, id2])
-
-        # Сериализуем в JSON и проверяем ключевые поля
+        request = ComparisonRequest(analysis_mode="per_test", test_ids=[id1])
+        result = await svc.analyze(request)
         data = json.loads(result.model_dump_json())
 
-        assert "tests" in data
-        assert "baseline_id" in data
-        assert "comparison_type" in data
+        assert data["analysis_mode"] == "per_test"
+        assert "test" in data
         assert "warnings" in data
         assert "descriptive_stats" in data
-        assert "pairwise_comparisons" in data
-        assert "charts_data" in data
+        assert "pairwise" in data
+        assert "rankings" in data
+        assert "charts" in data
         assert "analysis_report" in data
         assert "db_key_labels" in data
-        assert "parameter_impacts" in data
-        assert "normalized_metrics" in data
 
     @pytest.mark.asyncio
-    async def test_descriptive_stats_structure(self):
-        id1, id2 = uuid.uuid4(), uuid.uuid4()
-        td = {
-            str(id1): _make_test_data(id1, "A", ["conn_pg"], created_at="2025-01-01T00:00:00Z"),
-            str(id2): _make_test_data(id2, "B", ["conn_pg"], created_at="2025-02-01T00:00:00Z"),
-        }
-        sm = {
-            str(id1): _make_samples("conn_pg", seed=10),
-            str(id2): _make_samples("conn_pg", seed=20),
-        }
-        repo = AsyncMock()
-        repo.get_test_run_with_results = AsyncMock(side_effect=lambda tid: td.get(tid))
-        repo.get_metric_samples = AsyncMock(side_effect=lambda tid: sm.get(tid, []))
-        repo.get_time_series = AsyncMock(return_value=[])
+    async def test_per_test_descriptive_stats_structure(self):
+        id1 = uuid.uuid4()
+        td = {str(id1): _make_test_data(id1, "Test", ["conn_pg"])}
+        sm = {str(id1): _make_samples("conn_pg", seed=10)}
+        svc = ComparisonService(repository=_make_repo(td, sm))
 
-        svc = ComparisonService(repository=repo)
-        result = await svc.analyze([id1, id2])
-
+        request = ComparisonRequest(analysis_mode="per_test", test_ids=[id1])
+        result = await svc.analyze(request)
         data = json.loads(result.model_dump_json())
-        for test_id_str, db_map in data["descriptive_stats"].items():
-            for db_key, bundle in db_map.items():
-                if bundle.get("latency_ms"):
-                    lat = bundle["latency_ms"]
-                    for field in ["count", "mean", "median", "std", "min", "max", "p50", "p95", "p99"]:
-                        assert field in lat, f"Missing {field} in latency_ms"
+
+        for db_key, bundle in data["descriptive_stats"].items():
+            if bundle.get("latency_ms"):
+                lat = bundle["latency_ms"]
+                for field in ["count", "mean", "median", "std", "min", "max", "p50", "p95", "p99"]:
+                    assert field in lat, f"Missing {field} in latency_ms"
 
     @pytest.mark.asyncio
-    async def test_pairwise_comparison_structure(self):
-        id1, id2 = uuid.uuid4(), uuid.uuid4()
-        td = {
-            str(id1): _make_test_data(id1, "A", ["conn_mysql"]),
-            str(id2): _make_test_data(id2, "B", ["conn_pg"]),
-        }
-        sm = {
-            str(id1): _make_samples("conn_mysql"),
-            str(id2): _make_samples("conn_pg", seed=99),
-        }
-        repo = AsyncMock()
-        repo.get_test_run_with_results = AsyncMock(side_effect=lambda tid: td.get(tid))
-        repo.get_metric_samples = AsyncMock(side_effect=lambda tid: sm.get(tid, []))
-        repo.get_time_series = AsyncMock(return_value=[])
+    async def test_per_test_pairwise_structure(self):
+        id1 = uuid.uuid4()
+        td = {str(id1): _make_test_data(id1, "Test", ["conn_mysql", "conn_pg"])}
+        sm = {str(id1): _make_samples("conn_mysql") + _make_samples("conn_pg", seed=99)}
+        svc = ComparisonService(repository=_make_repo(td, sm))
 
-        svc = ComparisonService(repository=repo)
-        result = await svc.analyze([id1, id2])
-
+        request = ComparisonRequest(analysis_mode="per_test", test_ids=[id1])
+        result = await svc.analyze(request)
         data = json.loads(result.model_dump_json())
-        for pc in data["pairwise_comparisons"]:
-            assert "baseline_test_id" in pc
-            assert "compared_test_id" in pc
+
+        for pc in data["pairwise"]:
+            assert "baseline_id" in pc
+            assert "compared_id" in pc
             assert "db_key" in pc
             assert "metric" in pc
             assert "interpretation" in pc
 
+
+class TestSeriesRegressionStructure:
+    """Проверяют стабильность структуры SeriesResult."""
+
     @pytest.mark.asyncio
-    async def test_analysis_report_sections(self):
+    async def test_series_has_all_required_fields(self):
         id1, id2 = uuid.uuid4(), uuid.uuid4()
         td = {
-            str(id1): _make_test_data(id1, "MySQL", ["conn_mysql"]),
-            str(id2): _make_test_data(id2, "PG", ["conn_pg"]),
+            str(id1): _make_test_data(id1, "4VU", ["conn_pg"], virtual_users=4),
+            str(id2): _make_test_data(id2, "8VU", ["conn_pg"], virtual_users=8),
         }
         sm = {
-            str(id1): _make_samples("conn_mysql"),
+            str(id1): _make_samples("conn_pg", seed=42),
             str(id2): _make_samples("conn_pg", seed=99),
         }
-        repo = AsyncMock()
-        repo.get_test_run_with_results = AsyncMock(side_effect=lambda tid: td.get(tid))
-        repo.get_metric_samples = AsyncMock(side_effect=lambda tid: sm.get(tid, []))
-        repo.get_time_series = AsyncMock(return_value=[])
+        svc = ComparisonService(repository=_make_repo(td, sm))
 
-        svc = ComparisonService(repository=repo)
-        result = await svc.analyze([id1, id2])
-
+        request = ComparisonRequest(analysis_mode="series", test_ids=[id1, id2])
+        result = await svc.analyze(request)
         data = json.loads(result.model_dump_json())
+
+        assert data["analysis_mode"] == "series"
+        assert "tests" in data
+        assert "baseline_id" in data
+        assert "comparability" in data
+        assert "load_levels" in data
+        assert "per_db" in data
+        assert "cross_db_ranks" in data
+        assert "charts" in data
+        assert "analysis_report" in data
+        assert "db_key_labels" in data
+        assert "parameter_impacts" in data
+        assert "warnings" in data
+
+    @pytest.mark.asyncio
+    async def test_series_analysis_report_sections(self):
+        id1, id2 = uuid.uuid4(), uuid.uuid4()
+        td = {
+            str(id1): _make_test_data(id1, "4VU", ["conn_pg"], virtual_users=4),
+            str(id2): _make_test_data(id2, "8VU", ["conn_pg"], virtual_users=8),
+        }
+        sm = {
+            str(id1): _make_samples("conn_pg"),
+            str(id2): _make_samples("conn_pg", seed=99),
+        }
+        svc = ComparisonService(repository=_make_repo(td, sm))
+
+        request = ComparisonRequest(analysis_mode="series", test_ids=[id1, id2])
+        result = await svc.analyze(request)
+        data = json.loads(result.model_dump_json())
+
         report = data["analysis_report"]
         assert "verdict" in report
         assert "sections" in report

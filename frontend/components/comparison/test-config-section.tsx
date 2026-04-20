@@ -3,7 +3,12 @@
 import { useState } from "react"
 import { Code, Database, Server, Settings, Trophy } from "lucide-react"
 
-import type { ComparisonResult, ComparisonTestInfo } from "@/lib/api"
+import {
+  type ComparisonResult,
+  type ComparisonTestInfo,
+  isPerTestResult,
+  isSeriesResult,
+} from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 import {
   Collapsible,
@@ -12,16 +17,29 @@ import {
 } from "@/components/ui/collapsible"
 import { Button } from "@/components/ui/button"
 
+function getTests(result: ComparisonResult): ComparisonTestInfo[] {
+  if (isPerTestResult(result)) return [result.test]
+  if (isSeriesResult(result)) return result.tests
+  return []
+}
+
+function getBaselineId(result: ComparisonResult): string | undefined {
+  if (isSeriesResult(result)) return result.baseline_id
+  return undefined
+}
+
 export function TestConfigSection({ result }: { result: ComparisonResult }) {
-  const baselineTest = result.tests.find((t) => t.id === result.baseline_id)
+  const tests = getTests(result)
+  const baselineId = getBaselineId(result)
+  const baselineTest = baselineId ? tests.find((t) => t.id === baselineId) : undefined
 
   return (
     <div className="space-y-3">
-      {result.tests.map((test) => (
+      {tests.map((test) => (
         <TestInfoCard
           key={test.id}
           test={test}
-          isBaseline={test.id === result.baseline_id}
+          isBaseline={test.id === baselineId}
           baselineConfig={baselineTest?.config}
         />
       ))}
@@ -169,24 +187,14 @@ function TestInfoCard({
           </CollapsibleTrigger>
           <CollapsibleContent className="mt-2 space-y-2">
             {queries.map((q, idx) => (
-              <div
-                key={idx}
-                className="rounded-md border border-border bg-background p-2.5"
-              >
+              <div key={idx} className="rounded-md border border-border bg-background p-2.5">
                 <div className="flex items-center gap-2">
-                  <Badge
-                    variant="outline"
-                    className="font-mono text-[10px] uppercase"
-                  >
+                  <Badge variant="outline" className="font-mono text-[10px] uppercase">
                     {q.query_type}
                   </Badge>
-                  <span className="text-xs text-muted-foreground">
-                    вес: {q.weight}
-                  </span>
+                  <span className="text-xs text-muted-foreground">вес: {q.weight}</span>
                   {q.description && (
-                    <span className="text-xs text-muted-foreground">
-                      — {q.description}
-                    </span>
+                    <span className="text-xs text-muted-foreground">— {q.description}</span>
                   )}
                 </div>
                 <pre className="mt-1.5 overflow-x-auto rounded bg-muted/60 p-2 text-xs font-mono leading-relaxed whitespace-pre-wrap break-all">

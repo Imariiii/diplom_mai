@@ -14,18 +14,26 @@ import {
   FileText,
   Settings2,
   Zap,
+  TrendingUp,
+  Activity,
+  Target,
+  Award,
 } from "lucide-react"
 
 import {
   analyzeComparison,
   type AnalysisReportConfig,
   type ComparisonResult,
+  type AnalysisWarning,
+  isPerTestResult,
+  isSeriesResult,
 } from "@/lib/api"
 import { useAppStore } from "@/lib/store"
 
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
+import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -50,17 +58,13 @@ import { StatisticalSummary } from "@/components/comparison/statistical-summary"
 import { AnalysisReport } from "@/components/comparison/analysis-report"
 import { TestConfigSection } from "@/components/comparison/test-config-section"
 
-const COMPARISON_TYPE_LABELS: Record<string, string> = {
-  cross_database: "Сравнение СУБД",
-  scalability: "Анализ масштабируемости",
-  config_comparison: "Сравнение конфигураций",
-  temporal: "Временное сравнение",
-  general: "Общее сравнение",
-  mixed: "Сравнение конфигураций",
+const MODE_LABELS: Record<string, string> = {
+  per_test: "Внутритестовый анализ",
+  series: "Серийный анализ",
 }
 
 export function ComparisonPage() {
-  const { comparisonTestIds, comparisonBaselineId, setCurrentPage } = useAppStore()
+  const { comparisonTestIds, comparisonBaselineId, analysisMode, setCurrentPage } = useAppStore()
 
   const [result, setResult] = useState<ComparisonResult | null>(null)
   const [loading, setLoading] = useState(true)
@@ -71,14 +75,18 @@ export function ComparisonPage() {
     include_recommendations: true,
     include_hypotheses: true,
   })
-  const [useNormalizedView, setUseNormalizedView] = useState(true)
-  const [activeTab, setActiveTab] = useState("params")
+  const [activeTab, setActiveTab] = useState("summary")
 
   useEffect(() => {
     let cancelled = false
     const run = async () => {
-      if (comparisonTestIds.length < 2) {
-        setError("Выберите минимум два теста для сравнения на странице истории")
+      if (analysisMode === "per_test" && comparisonTestIds.length !== 1) {
+        setError("Для внутритестового анализа выберите ровно один прогон")
+        setLoading(false)
+        return
+      }
+      if (analysisMode === "series" && comparisonTestIds.length < 2) {
+        setError("Для серийного анализа выберите минимум два прогона")
         setLoading(false)
         return
       }
@@ -86,15 +94,16 @@ export function ComparisonPage() {
       setError(null)
       try {
         const response = await analyzeComparison({
+          analysis_mode: analysisMode,
           test_ids: comparisonTestIds,
-          baseline_id: comparisonBaselineId || comparisonTestIds[0],
+          baseline_id: analysisMode === "series" ? (comparisonBaselineId || comparisonTestIds[0]) : undefined,
         })
         if (!cancelled) {
           startTransition(() => setResult(response))
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Ошибка анализа сравнения")
+          setError(err instanceof Error ? err.message : "Ошибка анализа")
         }
       } finally {
         if (!cancelled) setLoading(false)
@@ -104,11 +113,7 @@ export function ComparisonPage() {
     return () => {
       cancelled = true
     }
-  }, [comparisonTestIds, comparisonBaselineId])
-
-  const supportsNormalizedView = Boolean(
-    result && result.traits && !result.traits.same_load_params
-  )
+  }, [comparisonTestIds, comparisonBaselineId, analysisMode])
 
   const exportJson = () => {
     if (!result) return
@@ -116,7 +121,7 @@ export function ComparisonPage() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = `comparison-${result.baseline_id}.json`
+    a.download = `analysis-${analysisMode}-${Date.now()}.json`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -124,16 +129,30 @@ export function ComparisonPage() {
   const toggleReport = (key: keyof AnalysisReportConfig, checked: boolean) =>
     setReportConfig((current) => ({ ...current, [key]: checked }))
 
-  const tabs = useMemo(
+  const perTestTabs = useMemo(
     () => [
-      { value: "params", label: "Параметры", icon: Zap },
-      { value: "charts", label: "Графики", icon: BarChart3 },
-      { value: "table", label: "Таблица", icon: Table2 },
-      { value: "stats", label: "Статистика", icon: Sigma },
+      { value: "summary", label: "Сводка", icon: Zap },
+      { value: "rankings", label: "Ранги", icon: Award },
+      { value: "charts", label: "Графики по СУБД", icon: BarChart3 },
+      { value: "stats", label: "Статистика пар", icon: Sigma },
       { value: "report", label: "Отчёт", icon: FileText },
     ],
     []
   )
+
+  const seriesTabs = useMemo(
+    () => [
+      { value: "summary", label: "Траектории", icon: TrendingUp },
+      { value: "degradation", label: "Деградация p95–p99", icon: Activity },
+      { value: "stability", label: "Устойчивость (CV)", icon: Target },
+      { value: "charts", label: "Графики", icon: BarChart3 },
+      { value: "rankings", label: "Ранги по нагрузкам", icon: Award },
+      { value: "report", label: "Отчёт", icon: FileText },
+    ],
+    []
+  )
+
+  const tabs = analysisMode === "per_test" ? perTestTabs : seriesTabs
 
   if (loading) {
     return (
@@ -155,16 +174,20 @@ export function ComparisonPage() {
         </Button>
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Не удалось загрузить сравнение</AlertTitle>
+          <AlertTitle>Не удалось загрузить анализ</AlertTitle>
           <AlertDescription>{error || "Данные анализа отсутствуют"}</AlertDescription>
         </Alert>
       </div>
     )
   }
 
+  const warnings: AnalysisWarning[] = result.warnings ?? []
+  const testNames = isPerTestResult(result)
+    ? result.test.name
+    : result.tests.map((t) => t.name).join(" · ")
+
   return (
     <div className="bg-background">
-      {/* Sticky top bar */}
       <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="mx-auto flex max-w-[1400px] flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:justify-between md:px-6">
           <div className="flex items-center gap-3 min-w-0">
@@ -183,14 +206,14 @@ export function ComparisonPage() {
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h1 className="text-base font-semibold leading-none tracking-tight md:text-lg">
-                  Сравнение тестов
+                  Анализ прогонов
                 </h1>
-                <span className="hidden rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground sm:inline-block">
-                  {COMPARISON_TYPE_LABELS[result.comparison_type]}
-                </span>
+                <Badge variant="secondary" className="text-[10px] uppercase tracking-wider">
+                  {MODE_LABELS[analysisMode]}
+                </Badge>
               </div>
               <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                {result.tests.map((t) => t.name).join(" · ")}
+                {testNames}
               </p>
             </div>
           </div>
@@ -205,7 +228,7 @@ export function ComparisonPage() {
               </SheetTrigger>
               <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
                 <SheetHeader>
-                  <SheetTitle>Конфигурация тестов</SheetTitle>
+                  <SheetTitle>Конфигурация прогонов</SheetTitle>
                   <SheetDescription>
                     Параметры прогонов, подключения и сценарии
                   </SheetDescription>
@@ -228,22 +251,9 @@ export function ComparisonPage() {
                   <div>
                     <h4 className="text-sm font-medium">Параметры отображения</h4>
                     <p className="text-xs text-muted-foreground">
-                      Управляйте нормализацией и видимыми секциями отчёта
+                      Управляйте видимыми секциями отчёта
                     </p>
                   </div>
-                  <Separator />
-                  {supportsNormalizedView && (
-                    <div className="flex items-center justify-between gap-2">
-                      <Label htmlFor="normalized-view" className="text-sm font-normal">
-                        Нормализованный вид
-                      </Label>
-                      <Switch
-                        id="normalized-view"
-                        checked={useNormalizedView}
-                        onCheckedChange={setUseNormalizedView}
-                      />
-                    </div>
-                  )}
                   <Separator />
                   <div className="space-y-2">
                     <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -284,9 +294,7 @@ export function ComparisonPage() {
       <div className="mx-auto max-w-[1400px] space-y-6 px-4 py-6 md:px-6">
         <ExecutiveSummary result={result} />
 
-        {result.warnings.length > 0 && (
-          <WarningsCard warnings={result.warnings} />
-        )}
+        {warnings.length > 0 && <WarningsCard warnings={warnings} />}
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <TabsList className="h-auto w-full justify-start overflow-x-auto rounded-lg border border-border bg-card p-1">
@@ -305,42 +313,65 @@ export function ComparisonPage() {
             })}
           </TabsList>
 
-          <TabsContent value="params" className="space-y-6 focus-visible:outline-none">
-            <ParameterImpact result={result} />
-          </TabsContent>
+          {/* Per-test mode tabs */}
+          {isPerTestResult(result) && (
+            <>
+              <TabsContent value="summary" className="space-y-6 focus-visible:outline-none">
+                <ParameterImpact result={result} />
+              </TabsContent>
+              <TabsContent value="rankings" className="space-y-6 focus-visible:outline-none">
+                <ComparisonTable result={result} />
+              </TabsContent>
+              <TabsContent value="charts" className="space-y-4 focus-visible:outline-none">
+                <ComparisonCharts result={result} />
+              </TabsContent>
+              <TabsContent value="stats" className="focus-visible:outline-none">
+                <StatisticalSummary result={result} />
+              </TabsContent>
+              <TabsContent value="report" className="focus-visible:outline-none">
+                <AnalysisReport
+                  report={result.analysis_report}
+                  config={reportConfig}
+                  analysisMode={analysisMode}
+                />
+              </TabsContent>
+            </>
+          )}
 
-          <TabsContent value="charts" className="space-y-4 focus-visible:outline-none">
-            <ComparisonCharts
-              result={result}
-              useNormalized={supportsNormalizedView && useNormalizedView}
-            />
-          </TabsContent>
-
-          <TabsContent value="table" className="focus-visible:outline-none">
-            <ComparisonTable
-              result={result}
-              useNormalized={supportsNormalizedView && useNormalizedView}
-            />
-          </TabsContent>
-
-          <TabsContent value="stats" className="focus-visible:outline-none">
-            <StatisticalSummary result={result} />
-          </TabsContent>
-
-          <TabsContent value="report" className="focus-visible:outline-none">
-            <AnalysisReport
-              report={result.analysis_report}
-              config={reportConfig}
-              comparisonType={result.comparison_type}
-            />
-          </TabsContent>
+          {/* Series mode tabs */}
+          {isSeriesResult(result) && (
+            <>
+              <TabsContent value="summary" className="space-y-6 focus-visible:outline-none">
+                <ParameterImpact result={result} />
+              </TabsContent>
+              <TabsContent value="degradation" className="space-y-6 focus-visible:outline-none">
+                <ComparisonCharts result={result} chartFocus="degradation" />
+              </TabsContent>
+              <TabsContent value="stability" className="space-y-6 focus-visible:outline-none">
+                <ComparisonCharts result={result} chartFocus="stability" />
+              </TabsContent>
+              <TabsContent value="charts" className="space-y-4 focus-visible:outline-none">
+                <ComparisonCharts result={result} />
+              </TabsContent>
+              <TabsContent value="rankings" className="focus-visible:outline-none">
+                <ComparisonTable result={result} />
+              </TabsContent>
+              <TabsContent value="report" className="focus-visible:outline-none">
+                <AnalysisReport
+                  report={result.analysis_report}
+                  config={reportConfig}
+                  analysisMode={analysisMode}
+                />
+              </TabsContent>
+            </>
+          )}
         </Tabs>
       </div>
     </div>
   )
 }
 
-function WarningsCard({ warnings }: { warnings: string[] }) {
+function WarningsCard({ warnings }: { warnings: AnalysisWarning[] }) {
   return (
     <div className="rounded-xl border border-warning/30 bg-warning/5 p-4">
       <div className="mb-2 flex items-center gap-2">
@@ -355,9 +386,12 @@ function WarningsCard({ warnings }: { warnings: string[] }) {
         </div>
       </div>
       <ul className="mt-3 grid gap-1.5 pl-9 text-sm text-muted-foreground md:grid-cols-2">
-        {warnings.map((w) => (
-          <li key={w} className="leading-relaxed">
-            — {w}
+        {warnings.map((w, i) => (
+          <li key={i} className="leading-relaxed">
+            <Badge variant="outline" className="mr-1 text-[10px] px-1 py-0">
+              {w.severity}
+            </Badge>
+            {w.message}
           </li>
         ))}
       </ul>

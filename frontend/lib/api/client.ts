@@ -138,7 +138,7 @@ class ApiClient {
     return this.request(`/history/tests/${testId}`, { method: 'DELETE' })
   }
 
-  async analyzeComparison(request: { test_ids: string[]; baseline_id?: string }): Promise<any> {
+  async analyzeComparison(request: { analysis_mode: string; test_ids: string[]; baseline_id?: string; report_config?: any }): Promise<any> {
     return this.request('/api/comparison/analyze', {
       method: 'POST',
       body: JSON.stringify(request),

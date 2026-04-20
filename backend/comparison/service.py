@@ -1,256 +1,704 @@
 """
-Сервис сравнительного анализа результатов тестирования
+Сервис двухрежимного сравнительного анализа прогонов.
+
+Два пайплайна:
+- _run_per_test: внутритестовый анализ (один прогон, все пары СУБД)
+- _run_series: серийный анализ (несколько прогонов, траектории по СУБД)
 """
 from dataclasses import asdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
-from backend.analysis.report_generator import ComparisonReportGenerator
 from backend.comparison.schemas import (
+    AnalysisMode,
     AnalysisReportConfig,
+    AnalysisWarning,
     BarChartPoint,
     BoxPlotPoint,
     ChangedParameter,
-    ComparisonTraits,
-    ComparisonType,
-    ComparisonChartsData,
+    ComparabilityReport,
+    ComparisonRequest,
     ComparisonResult,
     ComparisonTestInfo,
     ConnectionInfo,
+    CrossDbLevelRank,
+    DbRankEntry,
+    DbSeriesSummary,
+    LoadLevel,
     MetricEffect,
+    MetricRanking,
     MetricStatsBundle,
-    NormalizedMetrics,
-    PairwiseComparison,
     ParameterImpactSummary,
+    PairwiseComparison,
+    PerTestCharts,
+    PerTestResult,
     ResourceMetrics,
     ScenarioInfo,
     ScenarioQueryInfo,
+    SeriesChartPoint,
+    SeriesCharts,
+    SeriesResult,
     ThroughputSeriesPoint,
+    TrajectoryPoint,
 )
 from backend.comparison.statistics import (
     MIN_SAMPLE_SIZE_FOR_TEST,
     apply_fdr_correction,
     calculate_box_plot_stats,
+    calculate_degradation_index,
     calculate_descriptive_stats,
+    calculate_elasticity,
+    calculate_stability_index,
     compare_two_samples,
+    detect_saturation_point,
+    mann_kendall_trend,
+    spearman_correlation,
 )
 
 
 class ComparisonService:
-    """Сервис для анализа и сравнения нескольких тестовых прогонов"""
+    """Сервис для анализа и сравнения нагрузочных прогонов"""
 
     def __init__(self, repository, scenario_bundle_repository=None, connection_repository=None):
         self.repository = repository
         self.scenario_bundle_repository = scenario_bundle_repository
         self.connection_repository = connection_repository
-        self.report_generator = ComparisonReportGenerator()
 
-    async def analyze(
+    async def analyze(self, request: ComparisonRequest) -> ComparisonResult:
+        """Главная точка входа: маршрутизация по analysis_mode."""
+        if request.analysis_mode == AnalysisMode.PER_TEST:
+            return await self._run_per_test(request)
+        return await self._run_series(request)
+
+    # ======================================================================
+    # Режим A: внутритестовый анализ (per-test)
+    # ======================================================================
+
+    async def _run_per_test(self, request: ComparisonRequest) -> PerTestResult:
+        """Один прогон — сравнение всех СУБД между собой."""
+        test_id = request.test_ids[0]
+        test_data = await self._load_single_test(test_id)
+        test_info = await self._build_test_info(test_data)
+        db_keys = self._get_test_db_keys(test_data)
+        db_key_labels = self._build_db_key_labels([test_data])
+
+        warnings: List[AnalysisWarning] = []
+
+        if len(db_keys) < 2:
+            warnings.append(AnalysisWarning(
+                severity="warn", code="single_db",
+                message="В прогоне только одна СУБД — попарное сравнение невозможно",
+            ))
+
+        descriptive_stats: Dict[str, MetricStatsBundle] = {}
+        raw_samples: Dict[str, Dict[str, Any]] = {}
+        charts = PerTestCharts()
+
+        for db_key in db_keys:
+            samples_info = await self._collect_metric_samples(str(test_id), db_key, test_data)
+            bundle = self._build_metric_bundle(samples_info, warnings, test_data["name"], db_key)
+            descriptive_stats[db_key] = bundle
+            raw_samples[db_key] = samples_info
+
+            label = db_key_labels.get(db_key, db_key)
+            self._append_charts_per_test(charts, test_data, db_key, label, bundle, samples_info)
+
+        pairwise = self._build_all_db_pairs(db_keys, raw_samples, db_key_labels)
+        apply_fdr_correction(pairwise)
+
+        rankings = self._build_rankings(descriptive_stats, db_key_labels)
+        resource_metrics = self._collect_resource_metrics_single(test_data)
+
+        report = None
+        try:
+            from backend.analysis.report_generator import PerTestReportGenerator
+            generator = PerTestReportGenerator()
+            report = generator.generate(
+                test_info=test_info,
+                descriptive_stats=descriptive_stats,
+                pairwise=pairwise,
+                rankings=rankings,
+                db_key_labels=db_key_labels,
+                config=request.report_config,
+            )
+        except Exception as exc:
+            warnings.append(AnalysisWarning(
+                severity="warn", code="report_error",
+                message=f"Не удалось сгенерировать аналитический отчёт: {exc}",
+            ))
+
+        return PerTestResult(
+            test=test_info,
+            warnings=warnings,
+            descriptive_stats=descriptive_stats,
+            pairwise=pairwise,
+            rankings=rankings,
+            charts=charts,
+            analysis_report=report,
+            db_key_labels=db_key_labels,
+            resource_metrics=resource_metrics,
+        )
+
+    def _build_all_db_pairs(
         self,
-        test_ids: List[UUID],
-        baseline_id: Optional[UUID] = None,
-        report_config: Optional[AnalysisReportConfig] = None,
-    ) -> ComparisonResult:
-        """Выполнить сравнительный анализ по выбранным тестам"""
-        unique_test_ids = self._normalize_test_ids(test_ids)
-        baseline_uuid = self._resolve_baseline_id(unique_test_ids, baseline_id)
+        db_keys: List[str],
+        raw_samples: Dict[str, Dict[str, Any]],
+        db_key_labels: Dict[str, str],
+    ) -> List[PairwiseComparison]:
+        """Построить попарные сравнения всех СУБД внутри одного прогона."""
+        comparisons: List[PairwiseComparison] = []
+        for i, db_a in enumerate(db_keys):
+            for db_b in db_keys[i + 1:]:
+                info_a = raw_samples.get(db_a, {})
+                info_b = raw_samples.get(db_b, {})
+                label_a = db_key_labels.get(db_a, db_a)
+                label_b = db_key_labels.get(db_b, db_b)
 
-        tests = await self._load_tests(unique_test_ids)
+                for metric, key in [("latency_ms", "latency_values"), ("throughput", "throughput_values")]:
+                    comparisons.append(compare_two_samples(
+                        a=info_a.get(key, []),
+                        b=info_b.get(key, []),
+                        baseline_id=label_a,
+                        compared_id=label_b,
+                        db_key=f"{label_a} vs {label_b}",
+                        metric=metric,
+                    ))
+        return comparisons
+
+    def _build_rankings(
+        self,
+        descriptive_stats: Dict[str, MetricStatsBundle],
+        db_key_labels: Dict[str, str],
+    ) -> List[MetricRanking]:
+        """Ранжировать СУБД по каждой ключевой метрике."""
+        metrics_spec = [
+            ("throughput_mean", lambda b: b.throughput.mean if b.throughput else None, True),
+            ("latency_mean", lambda b: b.latency_ms.mean if b.latency_ms else None, False),
+            ("latency_p95", lambda b: b.latency_ms.p95 if b.latency_ms else None, False),
+            ("latency_p99", lambda b: b.latency_ms.p99 if b.latency_ms else None, False),
+            ("error_rate", lambda b: b.error_rate, False),
+        ]
+
+        rankings: List[MetricRanking] = []
+        for metric_name, getter, higher_is_better in metrics_spec:
+            entries: List[Tuple[str, float]] = []
+            for db_key, bundle in descriptive_stats.items():
+                val = getter(bundle)
+                if val is not None:
+                    entries.append((db_key, val))
+
+            if not entries:
+                continue
+
+            entries.sort(key=lambda e: e[1], reverse=higher_is_better)
+            rank_entries = [
+                DbRankEntry(
+                    db_key=db_key,
+                    db_label=db_key_labels.get(db_key),
+                    rank=idx + 1,
+                    value=round(val, 4),
+                )
+                for idx, (db_key, val) in enumerate(entries)
+            ]
+            rankings.append(MetricRanking(
+                metric=metric_name,
+                rankings=rank_entries,
+                best_db_key=entries[0][0],
+            ))
+        return rankings
+
+    def _append_charts_per_test(
+        self,
+        charts: PerTestCharts,
+        test_data: Dict[str, Any],
+        db_key: str,
+        label: str,
+        bundle: MetricStatsBundle,
+        samples_info: Dict[str, Any],
+    ):
+        """Добавить точки графиков для одной СУБД в per-test режиме."""
+        charts.bar_chart.append(BarChartPoint(
+            label=label,
+            db_key=db_key,
+            latency_mean=bundle.latency_ms.mean if bundle.latency_ms else None,
+            latency_p95=bundle.latency_ms.p95 if bundle.latency_ms else None,
+            latency_p99=bundle.latency_ms.p99 if bundle.latency_ms else None,
+            throughput_mean=bundle.throughput.mean if bundle.throughput else None,
+            error_rate=bundle.error_rate,
+        ))
+
+        latency_values = samples_info.get("latency_values", [])
+        if latency_values:
+            try:
+                box_stats = calculate_box_plot_stats(latency_values)
+                charts.box_plot.append(BoxPlotPoint(
+                    label=label,
+                    db_key=db_key,
+                    min=box_stats["min"],
+                    q1=box_stats["q1"],
+                    median=box_stats["median"],
+                    q3=box_stats["q3"],
+                    max=box_stats["max"],
+                    sample_count=int(box_stats["sample_count"]),
+                ))
+            except ValueError:
+                pass
+
+    # ======================================================================
+    # Режим B: серийный анализ по СУБД (series)
+    # ======================================================================
+
+    async def _run_series(self, request: ComparisonRequest) -> SeriesResult:
+        """Несколько прогонов — траектории СУБД при разных нагрузках."""
+        unique_ids = self._normalize_test_ids(request.test_ids)
+        baseline_id = self._resolve_baseline_id(unique_ids, request.baseline_id)
+
+        tests = await self._load_tests(unique_ids)
         self._validate_tests_for_comparison(tests)
-        traits = self._detect_traits(tests)
-        comparison_type = self._derive_comparison_type(traits)
 
-        warnings: List[str] = []
-        warnings.extend(self._collect_comparability_warnings(tests))
-        warnings.extend(self._collect_traits_warnings(traits, tests))
+        comparability = self._build_comparability_report(tests)
+        if not comparability.is_valid_for_series:
+            raise ValueError(
+                "Прогоны несопоставимы для серийного анализа: "
+                + "; ".join(comparability.reasons)
+            )
 
-        descriptive_stats = {}
-        normalized_metrics = {}
-        raw_samples = {}
-        throughput_series = {}
-        charts_data = ComparisonChartsData()
+        load_levels = self._build_load_levels(tests)
+        test_infos = [await self._build_test_info(t) for t in tests]
+        db_key_labels = self._build_db_key_labels(tests)
+        warnings: List[AnalysisWarning] = []
+
+        all_db_keys = self._get_all_db_keys(tests)
+
+        descriptive_stats_map: Dict[str, Dict[str, MetricStatsBundle]] = {}
+        raw_samples_map: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        charts = SeriesCharts()
 
         for test_data in tests:
-            test_id = test_data["id"]
-            descriptive_stats[str(test_id)] = {}
-            normalized_metrics[str(test_id)] = {}
-            raw_samples[str(test_id)] = {}
-            throughput_series[str(test_id)] = {}
+            tid = str(test_data["id"])
+            descriptive_stats_map[tid] = {}
+            raw_samples_map[tid] = {}
+            for db_key in self._get_test_db_keys(test_data):
+                samples_info = await self._collect_metric_samples(tid, db_key, test_data)
+                bundle = self._build_metric_bundle(samples_info, warnings, test_data["name"], db_key)
+                descriptive_stats_map[tid][db_key] = bundle
+                raw_samples_map[tid][db_key] = samples_info
 
-            db_keys = self._get_test_db_keys(test_data)
-            for db_key in db_keys:
-                samples_info = await self._collect_metric_samples(str(test_id), db_key, test_data)
-                metrics_bundle = self._build_metric_bundle(samples_info, warnings, test_data["name"], db_key)
-                descriptive_stats[str(test_id)][db_key] = metrics_bundle
-                raw_samples[str(test_id)][db_key] = samples_info
+        per_db: Dict[str, DbSeriesSummary] = {}
+        for db_key in all_db_keys:
+            summary = self._build_db_series_summary(
+                db_key=db_key,
+                db_label=db_key_labels.get(db_key),
+                tests=tests,
+                load_levels=load_levels,
+                descriptive_stats_map=descriptive_stats_map,
+                raw_samples_map=raw_samples_map,
+            )
+            per_db[db_key] = summary
+            self._fill_series_charts(charts, db_key, db_key_labels.get(db_key, db_key), summary)
 
-                if samples_info["latency_values"]:
-                    try:
-                        box_stats = calculate_box_plot_stats(samples_info["latency_values"])
-                        charts_data.box_plot.append(
-                            BoxPlotPoint(
-                                test_id=test_id,
-                                test_name=test_data["name"],
-                                db_key=db_key,
-                                min=box_stats["min"],
-                                q1=box_stats["q1"],
-                                median=box_stats["median"],
-                                q3=box_stats["q3"],
-                                max=box_stats["max"],
-                                sample_count=int(box_stats["sample_count"]),
-                            )
-                        )
-                    except ValueError:
-                        pass
-
-                charts_data.bar_chart.append(
-                    BarChartPoint(
-                        test_id=test_id,
-                        test_name=test_data["name"],
-                        db_key=db_key,
-                        latency_mean=metrics_bundle.latency_ms.mean if metrics_bundle.latency_ms else None,
-                        latency_p95=metrics_bundle.latency_ms.p95 if metrics_bundle.latency_ms else None,
-                        latency_p99=metrics_bundle.latency_ms.p99 if metrics_bundle.latency_ms else None,
-                        throughput_mean=metrics_bundle.throughput.mean if metrics_bundle.throughput else None,
-                        error_rate=metrics_bundle.error_rate,
-                    )
-                )
-
-                db_type = self._resolve_db_type(
-                    test_data,
-                    db_key,
-                    samples_info["aggregate_metrics"],
-                )
-                series = await self._load_time_series(str(test_id), db_type, db_key)
-                throughput_series[str(test_id)][db_key] = series
-                charts_data.throughput_series[f"{test_id}:{db_key}"] = [
-                    ThroughputSeriesPoint(**point) for point in series
-                ]
+        cross_db_ranks = self._build_cross_db_ranks(per_db, load_levels, db_key_labels)
+        self._fill_series_bar_box(charts, tests, descriptive_stats_map, raw_samples_map, db_key_labels, load_levels)
 
         resource_metrics = self._collect_resource_metrics(tests)
 
-        normalized_metrics = self._build_normalized_metrics_map(
-            tests=tests,
-            baseline_id=baseline_uuid,
-            traits=traits,
-            descriptive_stats=descriptive_stats,
-            warnings=warnings,
-        )
-
-        pairwise_comparisons = self._build_pairwise_comparisons(
-            tests=tests,
-            baseline_id=baseline_uuid,
-            traits=traits,
-            raw_samples=raw_samples,
-            normalized_metrics=normalized_metrics,
-            warnings=warnings,
-        )
-
-        apply_fdr_correction(pairwise_comparisons)
-
-        test_infos = [await self._build_test_info(test_data) for test_data in tests]
-        db_key_labels = self._build_db_key_labels(tests)
-
         parameter_impacts = self._build_parameter_impact_analysis(
             tests=tests,
-            baseline_id=baseline_uuid,
-            descriptive_stats=descriptive_stats,
+            baseline_id=baseline_id,
+            descriptive_stats=descriptive_stats_map,
             db_key_labels=db_key_labels,
         )
 
-        comparison_result = ComparisonResult(
+        report = None
+        try:
+            from backend.analysis.report_generator import SeriesReportGenerator
+            generator = SeriesReportGenerator()
+            report = generator.generate(
+                tests=test_infos,
+                per_db=per_db,
+                load_levels=load_levels,
+                cross_db_ranks=cross_db_ranks,
+                db_key_labels=db_key_labels,
+                parameter_impacts=parameter_impacts,
+                config=request.report_config,
+            )
+        except Exception as exc:
+            warnings.append(AnalysisWarning(
+                severity="warn", code="report_error",
+                message=f"Не удалось сгенерировать аналитический отчёт: {exc}",
+            ))
+
+        return SeriesResult(
             tests=test_infos,
-            baseline_id=baseline_uuid,
-            comparison_type=comparison_type,
-            traits=traits,
-            warnings=self._deduplicate_warnings(warnings),
-            descriptive_stats=descriptive_stats,
-            normalized_metrics=normalized_metrics,
-            pairwise_comparisons=pairwise_comparisons,
-            charts_data=charts_data,
+            baseline_id=baseline_id,
+            comparability=comparability,
+            load_levels=load_levels,
+            per_db=per_db,
+            cross_db_ranks=cross_db_ranks,
+            charts=charts,
+            analysis_report=report,
             db_key_labels=db_key_labels,
             parameter_impacts=parameter_impacts,
+            warnings=warnings,
             resource_metrics=resource_metrics,
         )
-        comparison_result.analysis_report = self.report_generator.generate(comparison_result, report_config)
-        if comparison_result.analysis_report and db_key_labels:
-            self._replace_db_keys_in_report(comparison_result.analysis_report, db_key_labels)
-        return comparison_result
+
+    # ------------------------------------------------------------------
+    # ComparabilityReport
+    # ------------------------------------------------------------------
+
+    def _build_comparability_report(self, tests: List[Dict[str, Any]]) -> ComparabilityReport:
+        """Проверить сопоставимость прогонов для серийного анализа."""
+        sigs = [self._build_workload_signature(t) for t in tests]
+        reasons: List[str] = []
+
+        scenarios = set(s.get("scenario") for s in sigs)
+        same_scenario = len(scenarios) <= 1
+        if not same_scenario:
+            reasons.append(f"Различные сценарии: {', '.join(str(s) for s in scenarios)}")
+
+        query_sets = set(s.get("query_ids") for s in sigs)
+        same_query_ids = len(query_sets) <= 1
+        if not same_query_ids:
+            reasons.append("Различные наборы запросов в сценариях")
+
+        profile_ids = set()
+        for t in tests:
+            config = t.get("config", {}) or {}
+            pid = config.get("resolved_profile_id") or config.get("schema_profile_id")
+            profile_ids.add(pid)
+        profile_ids.discard(None)
+        same_schema_profile = len(profile_ids) <= 1
+        if not same_schema_profile:
+            reasons.append("Различные профили схемы данных")
+
+        vu_set = set(s.get("virtual_users") for s in sigs)
+        it_set = set(s.get("iterations") for s in sigs)
+        wu_set = set(s.get("warmup_time") for s in sigs)
+        same_load_params = len(vu_set) <= 1 and len(it_set) <= 1 and len(wu_set) <= 1
+
+        is_valid = same_scenario and same_query_ids
+
+        return ComparabilityReport(
+            same_scenario=same_scenario,
+            same_query_ids=same_query_ids,
+            same_schema_profile=same_schema_profile,
+            same_load_params=same_load_params,
+            is_valid_for_series=is_valid,
+            reasons=reasons,
+        )
+
+    def _build_load_levels(self, tests: List[Dict[str, Any]]) -> List[LoadLevel]:
+        """Построить упорядоченный список уровней нагрузки из конфигураций прогонов."""
+        level_map: Dict[str, LoadLevel] = {}
+        for t in tests:
+            config = t.get("config", {}) or {}
+            vu = int(config.get("virtual_users", 1) or 1)
+            it = int(config.get("iterations", 1) or 1)
+            wu = float(config.get("warmup_time", 0) or 0)
+            level_id = f"vu{vu}_it{it}_wu{int(wu)}"
+            label = f"{vu} VU / {it} iter"
+
+            if level_id not in level_map:
+                level_map[level_id] = LoadLevel(
+                    level_id=level_id,
+                    virtual_users=vu,
+                    iterations=it,
+                    warmup_time=wu,
+                    label=label,
+                    test_ids=[],
+                )
+            level_map[level_id].test_ids.append(UUID(str(t["id"])))
+
+        levels = sorted(level_map.values(), key=lambda l: (l.virtual_users, l.iterations))
+        return levels
+
+    def _build_db_series_summary(
+        self,
+        db_key: str,
+        db_label: Optional[str],
+        tests: List[Dict[str, Any]],
+        load_levels: List[LoadLevel],
+        descriptive_stats_map: Dict[str, Dict[str, MetricStatsBundle]],
+        raw_samples_map: Dict[str, Dict[str, Dict[str, Any]]],
+    ) -> DbSeriesSummary:
+        """Построить полную сводку серии для одной СУБД."""
+        trajectory: List[TrajectoryPoint] = []
+        stats_by_level: Dict[str, MetricStatsBundle] = {}
+        adjacent_tests: List[PairwiseComparison] = []
+
+        p95_values: List[float] = []
+        p99_values: List[float] = []
+        cv_values: List[float] = []
+        tp_values: List[float] = []
+        thread_counts: List[int] = []
+        level_ids: List[str] = []
+
+        for level in load_levels:
+            tid = str(level.test_ids[0]) if level.test_ids else None
+            if not tid:
+                continue
+
+            bundle = descriptive_stats_map.get(tid, {}).get(db_key)
+            if not bundle:
+                continue
+
+            stats_by_level[level.level_id] = bundle
+
+            tp_mean = bundle.throughput.mean if bundle.throughput else None
+            lat_mean = bundle.latency_ms.mean if bundle.latency_ms else None
+            lat_p95 = bundle.latency_ms.p95 if bundle.latency_ms else None
+            lat_p99 = bundle.latency_ms.p99 if bundle.latency_ms else None
+            cv = bundle.latency_ms.cv if bundle.latency_ms else None
+            err = bundle.error_rate
+
+            trajectory.append(TrajectoryPoint(
+                level_id=level.level_id,
+                load_label=level.label,
+                throughput_mean=tp_mean,
+                latency_mean=lat_mean,
+                latency_p95=lat_p95,
+                latency_p99=lat_p99,
+                error_rate=err,
+                cv=cv,
+            ))
+
+            if lat_p95 is not None:
+                p95_values.append(lat_p95)
+            if lat_p99 is not None:
+                p99_values.append(lat_p99)
+            if cv is not None:
+                cv_values.append(cv)
+            if tp_mean is not None:
+                tp_values.append(tp_mean)
+                thread_counts.append(level.virtual_users)
+            level_ids.append(level.level_id)
+
+        prev_level_tid = None
+        prev_level_samples = None
+        for level in load_levels:
+            tid = str(level.test_ids[0]) if level.test_ids else None
+            if not tid:
+                continue
+            curr_samples = raw_samples_map.get(tid, {}).get(db_key, {})
+            if prev_level_tid and prev_level_samples and curr_samples:
+                for metric, key in [("latency_ms", "latency_values"), ("throughput", "throughput_values")]:
+                    adjacent_tests.append(compare_two_samples(
+                        a=prev_level_samples.get(key, []),
+                        b=curr_samples.get(key, []),
+                        baseline_id=prev_level_tid,
+                        compared_id=tid,
+                        db_key=db_key,
+                        metric=metric,
+                    ))
+            prev_level_tid = tid
+            prev_level_samples = curr_samples
+
+        apply_fdr_correction(adjacent_tests)
+
+        degradation = calculate_degradation_index(p95_values, p99_values)
+        stability = calculate_stability_index(cv_values)
+        elasticity = calculate_elasticity(tp_values, thread_counts)
+
+        saturation = detect_saturation_point(tp_values, p95_values, level_ids)
+
+        trend_tests = {}
+        if len(tp_values) >= 3:
+            x_levels = list(range(len(tp_values)))
+            sp_tp = spearman_correlation(x_levels, tp_values)
+            if sp_tp:
+                trend_tests["throughput_spearman"] = sp_tp
+            mk_tp = mann_kendall_trend(tp_values)
+            if mk_tp:
+                trend_tests["throughput_mann_kendall"] = mk_tp
+
+        if len(p95_values) >= 3:
+            x_levels = list(range(len(p95_values)))
+            sp_lat = spearman_correlation(x_levels, p95_values)
+            if sp_lat:
+                trend_tests["latency_p95_spearman"] = sp_lat
+            mk_lat = mann_kendall_trend(p95_values)
+            if mk_lat:
+                trend_tests["latency_p95_mann_kendall"] = mk_lat
+
+        return DbSeriesSummary(
+            db_key=db_key,
+            db_label=db_label,
+            trajectory=trajectory,
+            degradation=degradation,
+            stability_index=stability,
+            elasticity=elasticity,
+            saturation_point=saturation,
+            trend_tests=trend_tests,
+            adjacent_level_tests=adjacent_tests,
+            descriptive_stats_by_level=stats_by_level,
+        )
+
+    def _build_cross_db_ranks(
+        self,
+        per_db: Dict[str, DbSeriesSummary],
+        load_levels: List[LoadLevel],
+        db_key_labels: Dict[str, str],
+    ) -> List[CrossDbLevelRank]:
+        """Ранжировать СУБД по каждому уровню нагрузки и метрике."""
+        ranks: List[CrossDbLevelRank] = []
+        metrics_spec = [
+            ("throughput_mean", lambda tp: tp.throughput_mean, True),
+            ("latency_mean", lambda tp: tp.latency_mean, False),
+            ("latency_p95", lambda tp: tp.latency_p95, False),
+        ]
+
+        for level in load_levels:
+            for metric_name, getter, higher_is_better in metrics_spec:
+                entries: List[Tuple[str, float]] = []
+                for db_key, summary in per_db.items():
+                    for tp in summary.trajectory:
+                        if tp.level_id == level.level_id:
+                            val = getter(tp)
+                            if val is not None:
+                                entries.append((db_key, val))
+                            break
+
+                if not entries:
+                    continue
+
+                entries.sort(key=lambda e: e[1], reverse=higher_is_better)
+                rank_entries = [
+                    DbRankEntry(
+                        db_key=dk, db_label=db_key_labels.get(dk),
+                        rank=idx + 1, value=round(v, 4),
+                    )
+                    for idx, (dk, v) in enumerate(entries)
+                ]
+                ranks.append(CrossDbLevelRank(
+                    level_id=level.level_id,
+                    load_label=level.label,
+                    metric=metric_name,
+                    rankings=rank_entries,
+                ))
+        return ranks
+
+    def _fill_series_charts(
+        self,
+        charts: SeriesCharts,
+        db_key: str,
+        label: str,
+        summary: DbSeriesSummary,
+    ):
+        """Заполнить графики серии из траектории одной СУБД."""
+        for tp in summary.trajectory:
+            def _pt(val):
+                return SeriesChartPoint(level_id=tp.level_id, load_label=tp.load_label, value=val)
+
+            charts.throughput_by_load.setdefault(label, []).append(_pt(tp.throughput_mean))
+            charts.latency_by_load.setdefault(label, []).append(_pt(tp.latency_mean))
+            charts.p95_by_load.setdefault(label, []).append(_pt(tp.latency_p95))
+            charts.p99_by_load.setdefault(label, []).append(_pt(tp.latency_p99))
+            charts.error_rate_by_load.setdefault(label, []).append(_pt(tp.error_rate))
+
+    def _fill_series_bar_box(
+        self,
+        charts: SeriesCharts,
+        tests: List[Dict[str, Any]],
+        descriptive_stats_map: Dict[str, Dict[str, MetricStatsBundle]],
+        raw_samples_map: Dict[str, Dict[str, Dict[str, Any]]],
+        db_key_labels: Dict[str, str],
+        load_levels: List[LoadLevel],
+    ):
+        """Добавить bar/box chart данные для серии (каждый тест×СУБД = точка)."""
+        for level in load_levels:
+            for tid in level.test_ids:
+                tid_str = str(tid)
+                test_data = None
+                for t in tests:
+                    if str(t["id"]) == tid_str:
+                        test_data = t
+                        break
+                if not test_data:
+                    continue
+
+                for db_key in self._get_test_db_keys(test_data):
+                    bundle = descriptive_stats_map.get(tid_str, {}).get(db_key)
+                    if not bundle:
+                        continue
+                    db_label = db_key_labels.get(db_key, db_key)
+                    bar_label = f"{level.label} · {db_label}"
+
+                    charts.bar_chart.append(BarChartPoint(
+                        label=bar_label,
+                        db_key=db_key,
+                        latency_mean=bundle.latency_ms.mean if bundle.latency_ms else None,
+                        latency_p95=bundle.latency_ms.p95 if bundle.latency_ms else None,
+                        latency_p99=bundle.latency_ms.p99 if bundle.latency_ms else None,
+                        throughput_mean=bundle.throughput.mean if bundle.throughput else None,
+                        error_rate=bundle.error_rate,
+                    ))
+
+                    latency_values = raw_samples_map.get(tid_str, {}).get(db_key, {}).get("latency_values", [])
+                    if latency_values:
+                        try:
+                            box = calculate_box_plot_stats(latency_values)
+                            charts.box_plot.append(BoxPlotPoint(
+                                label=bar_label, db_key=db_key,
+                                min=box["min"], q1=box["q1"], median=box["median"],
+                                q3=box["q3"], max=box["max"],
+                                sample_count=int(box["sample_count"]),
+                            ))
+                        except ValueError:
+                            pass
+
+    # ======================================================================
+    # Общие утилиты (переиспользуются обоими режимами)
+    # ======================================================================
 
     def _normalize_test_ids(self, test_ids: List[UUID]) -> List[UUID]:
-        """Нормализовать и провалидировать список ID тестов"""
-        normalized = []
         seen = set()
-
-        for test_id in test_ids:
-            if test_id in seen:
-                continue
-            normalized.append(test_id)
-            seen.add(test_id)
-
-        if len(normalized) < 2 or len(normalized) > 5:
-            raise ValueError("Для сравнения необходимо выбрать от 2 до 5 тестов")
-
-        return normalized
+        result = []
+        for tid in test_ids:
+            if tid not in seen:
+                result.append(tid)
+                seen.add(tid)
+        return result
 
     def _resolve_baseline_id(self, test_ids: List[UUID], baseline_id: Optional[UUID]) -> UUID:
-        """Определить baseline-тест"""
         if baseline_id is None:
             return test_ids[0]
-
         if baseline_id not in test_ids:
-            raise ValueError("Baseline-тест должен входить в список сравниваемых тестов")
-
+            raise ValueError("Baseline-прогон должен входить в список сравниваемых прогонов")
         return baseline_id
 
+    async def _load_single_test(self, test_id: UUID) -> Dict[str, Any]:
+        test_data = await self.repository.get_test_run_with_results(str(test_id))
+        if not test_data:
+            raise ValueError(f"Прогон {test_id} не найден")
+        return test_data
+
     async def _load_tests(self, test_ids: List[UUID]) -> List[Dict[str, Any]]:
-        """Загрузить тесты вместе с результатами"""
         tests = []
-
-        for test_id in test_ids:
-            test_data = await self.repository.get_test_run_with_results(str(test_id))
+        for tid in test_ids:
+            test_data = await self.repository.get_test_run_with_results(str(tid))
             if not test_data:
-                raise ValueError(f"Тест {test_id} не найден")
+                raise ValueError(f"Прогон {tid} не найден")
             tests.append(test_data)
-
         return tests
 
     def _validate_tests_for_comparison(self, tests: List[Dict[str, Any]]):
-        """Проверить базовые ограничения для сравнения"""
-        for test_data in tests:
-            if test_data.get("status") != "completed":
-                raise ValueError(f"Тест {test_data.get('id')} не завершён и не может быть использован для сравнения")
+        for t in tests:
+            if t.get("status") != "completed":
+                raise ValueError(f"Прогон {t.get('id')} не завершён")
 
         logical_db_ids = set()
-        for test_data in tests:
-            ldb_id = test_data.get("logical_database_id")
-            if ldb_id:
-                logical_db_ids.add(str(ldb_id))
+        for t in tests:
+            ldb = t.get("logical_database_id")
+            if ldb:
+                logical_db_ids.add(str(ldb))
         if len(logical_db_ids) > 1:
-            raise ValueError(
-                "Все сравниваемые тесты должны принадлежать одной логической базе данных"
-            )
-
-        scenario_templates = set()
-        for test_data in tests:
-            config = test_data.get("config", {}) or {}
-            template = (
-                config.get("scenario_template_id")
-                or config.get("scenario")
-            )
-            if template:
-                scenario_templates.add(str(template))
-        if len(scenario_templates) > 1:
-            raise ValueError(
-                "Все сравниваемые тесты должны использовать один и тот же сценарий тестирования"
-            )
+            raise ValueError("Все прогоны должны принадлежать одной логической базе данных")
 
     def _build_workload_signature(self, test_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Построить сигнатуру нагрузки для валидации сравнения"""
         config = test_data.get("config", {}) or {}
         results = test_data.get("results", []) or []
-        query_ids = sorted([result.get("query_id") or "" for result in results])
-
+        query_ids = sorted([r.get("query_id") or "" for r in results])
         return {
             "scenario": config.get("scenario"),
             "iterations": config.get("iterations"),
@@ -260,121 +708,8 @@ class ComparisonService:
             "query_ids": tuple(query_ids),
         }
 
-    def _detect_traits(self, tests: List[Dict[str, Any]]) -> ComparisonTraits:
-        """Detect boolean comparison dimensions from test data."""
-        workload_signatures = [self._build_workload_signature(test_data) for test_data in tests]
-
-        same_scenario = len(set(sig.get("scenario") for sig in workload_signatures)) == 1
-        same_query_set = len(set(sig.get("query_ids") for sig in workload_signatures)) == 1
-
-        diff_virtual_users = len(set(sig.get("virtual_users") for sig in workload_signatures)) > 1
-        diff_iterations = len(set(sig.get("iterations") for sig in workload_signatures)) > 1
-        diff_warmup = len(set(sig.get("warmup_time") for sig in workload_signatures)) > 1
-
-        same_load_params = not diff_virtual_users and not diff_iterations and not diff_warmup
-
-        db_key_sets = [
-            tuple(sorted(self._get_test_db_keys(test_data)))
-            for test_data in tests
-        ]
-        same_db_targets = len(set(db_key_sets)) == 1
-
-        flattened_db_keys: set = set()
-        for db_keys in db_key_sets:
-            flattened_db_keys.update(db_keys)
-        multiple_dbs = len(flattened_db_keys) > 1
-
-        created_at_values = [test_data.get("created_at") for test_data in tests]
-        is_temporal = (
-            same_scenario
-            and same_query_set
-            and same_load_params
-            and same_db_targets
-            and len(set(created_at_values)) > 1
-        )
-
-        return ComparisonTraits(
-            same_scenario=same_scenario and same_query_set,
-            same_db_targets=same_db_targets,
-            multiple_dbs=multiple_dbs,
-            same_load_params=same_load_params,
-            diff_virtual_users=diff_virtual_users,
-            diff_iterations=diff_iterations,
-            diff_warmup=diff_warmup,
-            is_temporal=is_temporal,
-        )
-
-    @staticmethod
-    def _derive_comparison_type(traits: ComparisonTraits) -> ComparisonType:
-        """Derive a human-readable comparison type label from traits."""
-        if traits.multiple_dbs and traits.same_load_params:
-            return ComparisonType.CROSS_DATABASE
-        if not traits.same_load_params and traits.multiple_dbs:
-            return ComparisonType.CONFIG_COMPARISON
-        if not traits.same_load_params and not traits.multiple_dbs:
-            return ComparisonType.SCALABILITY
-        if traits.is_temporal:
-            return ComparisonType.TEMPORAL
-        return ComparisonType.GENERAL
-
-    def _collect_traits_warnings(
-        self,
-        traits: ComparisonTraits,
-        tests: List[Dict[str, Any]],
-    ) -> List[str]:
-        """Generate warnings dynamically from detected traits."""
-        warnings: List[str] = []
-
-        if not traits.same_load_params:
-            diffs: List[str] = []
-            workload_sigs = [self._build_workload_signature(t) for t in tests]
-            if traits.diff_virtual_users:
-                vals = sorted(set(s.get("virtual_users") for s in workload_sigs))
-                diffs.append(f"virtual_users: {', '.join(str(v) for v in vals)}")
-            if traits.diff_iterations:
-                vals = sorted(set(s.get("iterations") for s in workload_sigs))
-                diffs.append(f"iterations: {', '.join(str(v) for v in vals)}")
-            if traits.diff_warmup:
-                vals = sorted(set(s.get("warmup_time") for s in workload_sigs))
-                diffs.append(f"warmup_time: {', '.join(str(v) for v in vals)}")
-            warnings.append(
-                f"Параметры нагрузки различаются между тестами ({'; '.join(diffs)}). "
-                "Для throughput и эффективности будут использоваться нормализованные метрики"
-            )
-
-        if traits.is_temporal:
-            warnings.append(
-                "Тесты имеют идентичную конфигурацию и сравниваются как изменение производительности во времени"
-            )
-
-        return warnings
-
-    def _collect_comparability_warnings(self, tests: List[Dict[str, Any]]) -> List[str]:
-        """Собрать некритичные предупреждения о сравнимости"""
-        warnings = []
-        baseline_db_keys = set(self._get_test_db_keys(tests[0]))
-
-        for test_data in tests[1:]:
-            current_db_keys = set(self._get_test_db_keys(test_data))
-            missing = baseline_db_keys - current_db_keys
-            extra = current_db_keys - baseline_db_keys
-
-            if missing:
-                warnings.append(
-                    f"Тест {test_data.get('name')} не содержит результаты для: {', '.join(sorted(missing))}"
-                )
-
-            if extra:
-                warnings.append(
-                    f"Тест {test_data.get('name')} содержит дополнительные результаты для: {', '.join(sorted(extra))}"
-                )
-
-        return warnings
-
     def _get_test_db_keys(self, test_data: Dict[str, Any]) -> List[str]:
-        """Получить список ключей/имён СУБД внутри теста"""
         keys = []
-
         for result in test_data.get("results", []) or []:
             metrics = result.get("metrics", {}) or {}
             db_key = (
@@ -384,16 +719,25 @@ class ComparisonService:
             )
             if db_key and db_key not in keys:
                 keys.append(db_key)
-
         return keys
 
+    def _get_all_db_keys(self, tests: List[Dict[str, Any]]) -> List[str]:
+        all_keys = []
+        seen = set()
+        for t in tests:
+            for k in self._get_test_db_keys(t):
+                if k not in seen:
+                    all_keys.append(k)
+                    seen.add(k)
+        return all_keys
+
+    # ------------------------------------------------------------------
+    # Сбор метрик (общий для обоих режимов)
+    # ------------------------------------------------------------------
+
     async def _collect_metric_samples(
-        self,
-        test_id: str,
-        db_key: str,
-        test_data: Dict[str, Any],
+        self, test_id: str, db_key: str, test_data: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Собрать данные для анализа из raw samples, time series и агрегатов"""
         metric_samples = []
         get_metric_samples = getattr(self.repository, "get_metric_samples", None)
         if callable(get_metric_samples):
@@ -416,17 +760,15 @@ class ComparisonService:
             series_points = await self._load_time_series(test_id, db_type, db_key)
             if not latency_values:
                 latency_values = [
-                    point.get("response_time")
-                    for point in series_points
-                    if point.get("response_time") is not None
+                    p.get("response_time") for p in series_points
+                    if p.get("response_time") is not None
                 ]
                 if latency_values:
                     latency_source = "time_series"
             if not throughput_values:
                 throughput_values = [
-                    point.get("throughput")
-                    for point in series_points
-                    if point.get("throughput") is not None
+                    p.get("throughput") for p in series_points
+                    if p.get("throughput") is not None
                 ]
                 if throughput_values:
                     throughput_source = "time_series"
@@ -443,11 +785,8 @@ class ComparisonService:
             "latency_source": latency_source,
             "throughput_source": throughput_source,
             "source": self._resolve_data_source(
-                latency_source,
-                throughput_source,
-                filtered_raw_samples,
-                latency_values,
-                throughput_values,
+                latency_source, throughput_source,
+                filtered_raw_samples, latency_values, throughput_values,
             ),
         }
 
@@ -455,7 +794,6 @@ class ComparisonService:
     def _filter_warmup_samples(
         samples: List[Dict[str, Any]], test_data: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
-        """Exclude samples collected during the warmup period."""
         config = test_data.get("config", {}) or {}
         warmup_seconds = 0
         try:
@@ -470,7 +808,7 @@ class ComparisonService:
         if not started_at_str:
             return samples
 
-        from datetime import datetime, timezone
+        from datetime import datetime, timedelta, timezone
 
         try:
             if isinstance(started_at_str, datetime):
@@ -480,7 +818,6 @@ class ComparisonService:
         except (ValueError, TypeError):
             return samples
 
-        from datetime import timedelta
         cutoff = started_at + timedelta(seconds=warmup_seconds)
 
         filtered = []
@@ -507,13 +844,10 @@ class ComparisonService:
                     filtered.append(sample)
             except (ValueError, TypeError):
                 filtered.append(sample)
-
         return filtered
 
     def _filter_metric_samples(self, metric_samples: List[Dict[str, Any]], db_key: str) -> List[Dict[str, Any]]:
-        """Отфильтровать raw samples по ключу БД"""
         filtered = []
-
         for point in metric_samples:
             sample_db_key = (
                 point.get("connection_key")
@@ -522,75 +856,40 @@ class ComparisonService:
             )
             if sample_db_key == db_key:
                 filtered.append(point)
-
         return filtered
 
     def _extract_latency_values(self, metric_samples: List[Dict[str, Any]]) -> List[float]:
-        """Извлечь latency samples только из request_latency записей"""
-        latency_values = []
-
-        for point in metric_samples:
-            if point.get("sample_type") != "request_latency":
-                continue
-            if point.get("latency_ms") is None:
-                continue
-            latency_values.append(point.get("latency_ms"))
-
-        return latency_values
+        return [
+            p.get("latency_ms")
+            for p in metric_samples
+            if p.get("sample_type") == "request_latency" and p.get("latency_ms") is not None
+        ]
 
     def _select_throughput_samples(self, metric_samples: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Выбрать throughput samples с приоритетом batch-окон над realtime."""
-        batch_samples = []
-        realtime_samples = []
-
-        for point in metric_samples:
-            sample_type = point.get("sample_type")
-            if sample_type == "throughput_window":
-                batch_samples.append(point)
-            elif sample_type == "throughput_realtime":
-                realtime_samples.append(point)
-
-        return batch_samples if batch_samples else realtime_samples
+        batch = [p for p in metric_samples if p.get("sample_type") == "throughput_window"]
+        realtime = [p for p in metric_samples if p.get("sample_type") == "throughput_realtime"]
+        return batch if batch else realtime
 
     def _extract_throughput_values(self, metric_samples: List[Dict[str, Any]]) -> List[float]:
-        """Извлечь throughput samples с приоритетом batch throughput_window."""
-        throughput_values = []
-
-        for point in self._select_throughput_samples(metric_samples):
-            value = point.get("throughput")
-            if value is None:
-                value = point.get("tps")
-            if value is None:
-                continue
-
-            throughput_values.append(value)
-
-        return throughput_values
+        values = []
+        for p in self._select_throughput_samples(metric_samples):
+            v = p.get("throughput") or p.get("tps")
+            if v is not None:
+                values.append(v)
+        return values
 
     async def _load_time_series(
         self, test_id: str, db_type: str, db_key: str = "",
     ) -> List[Dict[str, Any]]:
-        """Загрузить временной ряд для теста.
-
-        Tries three sources in order:
-        1. TimeSeries table filtered by db_type
-        2. TimeSeries table without db_type filter (in case of type mismatch)
-        3. MetricSample throughput records filtered by connection_key
-        """
         points: List[Dict[str, Any]] = []
-
         try:
-            points = await self.repository.get_time_series(
-                test_id, db_type=db_type, limit=5000,
-            )
+            points = await self.repository.get_time_series(test_id, db_type=db_type, limit=5000)
         except Exception as exc:
             print(f"[COMPARISON] Ошибка получения time_series для {test_id}: {exc}")
 
         if not points:
             try:
-                all_points = await self.repository.get_time_series(
-                    test_id, db_type=None, limit=5000,
-                )
+                all_points = await self.repository.get_time_series(test_id, db_type=None, limit=5000)
                 if all_points:
                     points = all_points
             except Exception:
@@ -599,13 +898,13 @@ class ComparisonService:
         if points:
             return [
                 {
-                    "timestamp": point.get("timestamp"),
-                    "throughput": point.get("throughput"),
-                    "tps": point.get("tps"),
-                    "response_time": point.get("response_time"),
-                    "error_count": point.get("error_count"),
+                    "timestamp": p.get("timestamp"),
+                    "throughput": p.get("throughput"),
+                    "tps": p.get("tps"),
+                    "response_time": p.get("response_time"),
+                    "error_count": p.get("error_count"),
                 }
-                for point in points
+                for p in points
             ]
 
         return await self._build_series_from_metric_samples(test_id, db_key)
@@ -613,11 +912,9 @@ class ComparisonService:
     async def _build_series_from_metric_samples(
         self, test_id: str, db_key: str,
     ) -> List[Dict[str, Any]]:
-        """Build a timeline from throughput MetricSample records."""
         get_samples = getattr(self.repository, "get_metric_samples", None)
         if not callable(get_samples):
             return []
-
         try:
             raw = await get_samples(test_id)
         except Exception:
@@ -632,11 +929,9 @@ class ComparisonService:
             )
             if db_key and sample_key != db_key:
                 continue
-
             tp = sample.get("throughput") or sample.get("tps")
             if tp is None:
                 continue
-
             series.append({
                 "timestamp": sample.get("timestamp"),
                 "throughput": tp,
@@ -644,25 +939,11 @@ class ComparisonService:
                 "response_time": sample.get("latency_ms"),
                 "error_count": None,
             })
-
         return series
 
-    def _extract_db_type_from_key(self, db_key: str) -> str:
-        """Определить db_type по ключу результата"""
-        lower_key = db_key.lower()
-        if "post" in lower_key:
-            return "postgresql"
-        if "maria" in lower_key:
-            return "mariadb"
-        if "mysql" in lower_key:
-            return "mysql"
-        return db_key
-
     def _resolve_db_type(self, test_data: Dict[str, Any], db_key: str, metrics: Dict[str, Any]) -> str:
-        """Определить db_type для результата теста"""
         if metrics.get("db_type"):
             return metrics["db_type"]
-
         for result in test_data.get("results", []) or []:
             result_metrics = result.get("metrics", {}) or {}
             result_key = (
@@ -672,11 +953,16 @@ class ComparisonService:
             )
             if result_key == db_key and result.get("db_type"):
                 return result["db_type"]
-
-        return self._extract_db_type_from_key(db_key)
+        lower = db_key.lower()
+        if "post" in lower:
+            return "postgresql"
+        if "maria" in lower:
+            return "mariadb"
+        if "mysql" in lower:
+            return "mysql"
+        return db_key
 
     def _find_result_metrics(self, test_data: Dict[str, Any], db_key: str) -> Dict[str, Any]:
-        """Найти агрегированные метрики для конкретной СУБД"""
         for result in test_data.get("results", []) or []:
             metrics = result.get("metrics", {}) or {}
             result_key = (
@@ -686,7 +972,6 @@ class ComparisonService:
             )
             if result_key == db_key:
                 return metrics
-
         return {}
 
     def _resolve_data_source(
@@ -697,7 +982,6 @@ class ComparisonService:
         latency_values: List[float],
         throughput_values: List[float],
     ) -> str:
-        """Определить источник данных для статистики"""
         if latency_source and throughput_source and latency_source == throughput_source:
             return latency_source
         if latency_source or throughput_source:
@@ -711,11 +995,10 @@ class ComparisonService:
     def _build_metric_bundle(
         self,
         samples_info: Dict[str, Any],
-        warnings: List[str],
+        warnings,
         test_name: str,
         db_key: str,
     ) -> MetricStatsBundle:
-        """Собрать bundle со статистикой по метрикам"""
         aggregate_metrics = samples_info["aggregate_metrics"]
         latency_stats = None
         throughput_stats = None
@@ -732,20 +1015,22 @@ class ComparisonService:
                 )
         elif aggregate_metrics:
             latency_stats = self._build_stats_from_aggregates(aggregate_metrics, "latency")
-            warnings.append(
-                f"Для {test_name}/{db_key} отсутствуют raw latency samples; использованы агрегированные метрики"
+            self._add_warning(
+                warnings,
+                f"Для {test_name}/{db_key} отсутствуют raw latency samples; использованы агрегированные метрики",
             )
 
         if throughput_values:
             throughput_stats = calculate_descriptive_stats(throughput_values)
         elif aggregate_metrics:
             throughput_stats = self._build_stats_from_aggregates(aggregate_metrics, "throughput")
-            warnings.append(
-                f"Для {test_name}/{db_key} отсутствуют throughput samples; использованы агрегированные метрики"
+            self._add_warning(
+                warnings,
+                f"Для {test_name}/{db_key} отсутствуют throughput samples; использованы агрегированные метрики",
             )
 
         if sample_size_warning:
-            warnings.append(sample_size_warning)
+            self._add_warning(warnings, sample_size_warning)
 
         return MetricStatsBundle(
             latency_ms=latency_stats,
@@ -756,396 +1041,51 @@ class ComparisonService:
             sample_size_warning=sample_size_warning,
         )
 
-    def _build_stats_from_aggregates(self, metrics: Dict[str, Any], metric_kind: str):
-        """Построить псевдостатистику из агрегатов, если raw данных нет"""
-        if metric_kind == "latency":
-            avg_value = float(metrics.get("avg_time_ms", 0) or 0)
-            min_value = float(metrics.get("min_time_ms", avg_value) or avg_value)
-            max_value = float(metrics.get("max_time_ms", avg_value) or avg_value)
-            p50_value = float(metrics.get("p50_time_ms", avg_value) or avg_value)
-            p95_value = float(metrics.get("p95_time_ms", avg_value) or avg_value)
-            p99_value = float(metrics.get("p99_time_ms", avg_value) or avg_value)
-        else:
-            avg_value = float(metrics.get("throughput", metrics.get("tps", 0)) or 0)
-            min_value = avg_value
-            max_value = avg_value
-            p50_value = avg_value
-            p95_value = avg_value
-            p99_value = avg_value
+    @staticmethod
+    def _add_warning(warnings, message: str):
+        """Add a warning — works with both List[str] and List[AnalysisWarning]."""
+        if warnings and isinstance(warnings, list):
+            if warnings and isinstance(warnings[0], AnalysisWarning):
+                warnings.append(AnalysisWarning(severity="warn", code="data_quality", message=message))
+            else:
+                warnings.append(message)
+        elif isinstance(warnings, list):
+            warnings.append(AnalysisWarning(severity="warn", code="data_quality", message=message))
 
-        return calculate_descriptive_stats([min_value, p50_value, avg_value, p95_value, p99_value, max_value])
+    def _build_stats_from_aggregates(self, metrics: Dict[str, Any], metric_kind: str):
+        if metric_kind == "latency":
+            avg = float(metrics.get("avg_time_ms", 0) or 0)
+            mn = float(metrics.get("min_time_ms", avg) or avg)
+            mx = float(metrics.get("max_time_ms", avg) or avg)
+            p50 = float(metrics.get("p50_time_ms", avg) or avg)
+            p95 = float(metrics.get("p95_time_ms", avg) or avg)
+            p99 = float(metrics.get("p99_time_ms", avg) or avg)
+        else:
+            avg = float(metrics.get("throughput", metrics.get("tps", 0)) or 0)
+            mn = mx = p50 = p95 = p99 = avg
+        return calculate_descriptive_stats([mn, p50, avg, p95, p99, mx])
 
     def _resolve_error_rate(self, metrics: Dict[str, Any]) -> Optional[float]:
-        """Извлечь error rate из агрегированных метрик"""
         if not metrics:
             return None
-        value = metrics.get("error_rate")
-        if value is None:
-            return None
-        return float(value)
+        v = metrics.get("error_rate")
+        return float(v) if v is not None else None
 
     def _resolve_total_duration(self, metrics: Dict[str, Any]) -> Optional[float]:
-        """Извлечь длительность выполнения"""
         if not metrics:
             return None
         if metrics.get("total_time_ms") is not None:
             return float(metrics["total_time_ms"]) / 1000.0
         return None
 
-    def _build_normalized_metrics_map(
-        self,
-        tests: List[Dict[str, Any]],
-        baseline_id: UUID,
-        traits: ComparisonTraits,
-        descriptive_stats: Dict[str, Dict[str, MetricStatsBundle]],
-        warnings: List[str],
-    ) -> Dict[str, Dict[str, Dict[str, Any]]]:
-        """Построить нормализованные метрики когда параметры нагрузки различаются"""
-        if traits.same_load_params:
-            return {}
-
-        normalized_metrics: Dict[str, Dict[str, Dict[str, Any]]] = {}
-        baseline_test = next((test for test in tests if UUID(str(test["id"])) == baseline_id), None)
-
-        if baseline_test is None:
-            raise ValueError("Baseline-тест не найден среди загруженных данных")
-
-        baseline_key = str(baseline_id)
-        baseline_descriptive = descriptive_stats.get(baseline_key, {})
-
-        for test_data in tests:
-            test_key = str(test_data["id"])
-            normalized_metrics[test_key] = {}
-
-            for db_key, metrics_bundle in descriptive_stats.get(test_key, {}).items():
-                baseline_bundle = baseline_descriptive.get(db_key)
-                normalized = self._normalize_metrics(
-                    test_data=test_data,
-                    db_key=db_key,
-                    metrics_bundle=metrics_bundle,
-                    baseline_test=baseline_test,
-                    baseline_bundle=baseline_bundle,
-                    traits=traits,
-                )
-                normalized_metrics[test_key][db_key] = asdict(normalized)
-
-                if normalized.normalization_warning:
-                    warnings.append(
-                        f"{test_data.get('name')}/{db_key}: {normalized.normalization_warning}"
-                    )
-
-        return normalized_metrics
-
-    def _normalize_metrics(
-        self,
-        test_data: Dict[str, Any],
-        db_key: str,
-        metrics_bundle: MetricStatsBundle,
-        baseline_test: Dict[str, Any],
-        baseline_bundle: Optional[MetricStatsBundle],
-        traits: ComparisonTraits,
-    ) -> NormalizedMetrics:
-        """Нормализовать метрики теста для сравнения разных конфигураций"""
-        threads = self._resolve_thread_count(test_data)
-        duration_seconds = self._resolve_test_duration_seconds(test_data, metrics_bundle)
-        throughput_abs = metrics_bundle.throughput.mean if metrics_bundle.throughput else None
-        latency_mean_abs = metrics_bundle.latency_ms.mean if metrics_bundle.latency_ms else None
-        throughput_per_thread = None
-        throughput_per_second = None
-        scaling_efficiency = None
-        latency_per_thread = None
-        normalization_warning = None
-
-        if threads <= 0:
-            normalization_warning = "Не удалось вычислить нормализацию: число потоков равно 0"
-        else:
-            if throughput_abs is not None:
-                throughput_per_thread = throughput_abs / float(threads)
-            if latency_mean_abs is not None:
-                latency_per_thread = latency_mean_abs / float(threads)
-
-        total_transactions = self._resolve_total_transactions(test_data, db_key)
-        if total_transactions is not None and duration_seconds and duration_seconds > 0:
-            throughput_per_second = total_transactions / duration_seconds
-        elif throughput_abs is not None:
-            throughput_per_second = throughput_abs
-
-        if traits.diff_virtual_users or traits.diff_iterations:
-            baseline_threads = self._resolve_thread_count(baseline_test)
-            baseline_throughput = baseline_bundle.throughput.mean if baseline_bundle and baseline_bundle.throughput else None
-            if baseline_threads <= 0 or baseline_throughput is None or throughput_abs is None:
-                if normalization_warning is None:
-                    normalization_warning = (
-                        "Недостаточно baseline-данных для расчёта scaling efficiency"
-                    )
-            else:
-                expected_throughput = baseline_throughput * (float(threads) / float(baseline_threads))
-                if expected_throughput > 0:
-                    scaling_efficiency = throughput_abs / expected_throughput
-                else:
-                    normalization_warning = (
-                        "Не удалось вычислить scaling efficiency: ожидаемый throughput равен 0"
-                    )
-
-        source_metrics = [
-            metric_name
-            for metric_name, metric_value in (
-                ("throughput_abs", throughput_abs),
-                ("latency_mean_abs", latency_mean_abs),
-                ("throughput_per_thread", throughput_per_thread),
-                ("throughput_per_second", throughput_per_second),
-                ("scaling_efficiency", scaling_efficiency),
-                ("latency_per_thread", latency_per_thread),
-            )
-            if metric_value is not None
-        ]
-
-        return NormalizedMetrics(
-            throughput_abs=throughput_abs,
-            latency_mean_abs=latency_mean_abs,
-            throughput_per_thread=throughput_per_thread,
-            throughput_per_second=throughput_per_second,
-            scaling_efficiency=scaling_efficiency,
-            latency_per_thread=latency_per_thread,
-            threads=threads if threads > 0 else None,
-            duration_seconds=duration_seconds,
-            source_metrics=source_metrics,
-            normalization_warning=normalization_warning,
-        )
-
-    def _resolve_thread_count(self, test_data: Dict[str, Any]) -> int:
-        """Получить число потоков/виртуальных пользователей для теста"""
-        config = test_data.get("config", {}) or {}
-
-        for field_name in ("virtual_users", "threads", "num_threads"):
-            value = config.get(field_name)
-            if value is None:
-                continue
-            try:
-                return int(value)
-            except (TypeError, ValueError):
-                continue
-
-        return 0
-
-    def _resolve_test_duration_seconds(
-        self,
-        test_data: Dict[str, Any],
-        metrics_bundle: MetricStatsBundle,
-    ) -> Optional[float]:
-        """Определить фактическую длительность теста в секундах"""
-        if metrics_bundle.total_duration_sec is not None:
-            return metrics_bundle.total_duration_sec
-
-        summary = test_data.get("summary", {}) or {}
-        if summary.get("total_duration") is not None:
-            try:
-                return float(summary["total_duration"])
-            except (TypeError, ValueError):
-                return None
-
-        config = test_data.get("config", {}) or {}
-        if config.get("duration") is not None:
-            try:
-                return float(config["duration"])
-            except (TypeError, ValueError):
-                return None
-
-        return None
-
-    def _resolve_total_transactions(self, test_data: Dict[str, Any], db_key: str) -> Optional[float]:
-        """Определить общее число транзакций/запросов для теста"""
-        metrics = self._find_result_metrics(test_data, db_key)
-        successful = metrics.get("successful")
-        failed = metrics.get("failed")
-
-        if successful is not None or failed is not None:
-            try:
-                return float(successful or 0) + float(failed or 0)
-            except (TypeError, ValueError):
-                return None
-
-        summary = test_data.get("summary", {}) or {}
-        total_transactions = summary.get("total_transactions")
-        if total_transactions is None:
-            return None
-
-        try:
-            return float(total_transactions)
-        except (TypeError, ValueError):
-            return None
-
-    def _build_pairwise_comparisons(
-        self,
-        tests: List[Dict[str, Any]],
-        baseline_id: UUID,
-        traits: ComparisonTraits,
-        raw_samples: Dict[str, Dict[str, Dict[str, Any]]],
-        normalized_metrics: Dict[str, Dict[str, Dict[str, Any]]],
-        warnings: List[str],
-    ) -> List[PairwiseComparison]:
-        """Построить попарные сравнения относительно baseline"""
-        comparisons = []
-        baseline_key = str(baseline_id)
-        baseline_test = None
-
-        for test_data in tests:
-            if str(test_data["id"]) == baseline_key:
-                baseline_test = test_data
-                break
-
-        if not baseline_test:
-            raise ValueError("Baseline-тест не найден среди загруженных данных")
-
-        baseline_db_keys = self._get_test_db_keys(baseline_test)
-
-        for test_data in tests:
-            compared_id = UUID(str(test_data["id"]))
-            if compared_id == baseline_id:
-                continue
-
-            db_pairs = self._resolve_db_pairs_for_comparison(
-                baseline_test=baseline_test,
-                compared_test=test_data,
-                traits=traits,
-                warnings=warnings,
-            )
-
-            for baseline_db_key, compared_db_key, display_db_key in db_pairs:
-                baseline_info = raw_samples.get(baseline_key, {}).get(baseline_db_key, {})
-                compared_info = raw_samples.get(str(compared_id), {}).get(compared_db_key, {})
-
-                if not baseline_info:
-                    warnings.append(f"Baseline-тест не содержит данных для {baseline_db_key}")
-                    continue
-
-                if not compared_info:
-                    warnings.append(f"Тест {test_data.get('name')} не содержит данных для {compared_db_key}")
-                    continue
-
-                comparisons.append(
-                    compare_two_samples(
-                        a=baseline_info.get("latency_values", []),
-                        b=compared_info.get("latency_values", []),
-                        baseline_test_id=baseline_id,
-                        compared_test_id=compared_id,
-                        db_key=display_db_key,
-                        metric="latency_ms",
-                    )
-                )
-
-                comparisons.append(
-                    compare_two_samples(
-                        a=baseline_info.get("throughput_values", []),
-                        b=compared_info.get("throughput_values", []),
-                        baseline_test_id=baseline_id,
-                        compared_test_id=compared_id,
-                        db_key=display_db_key,
-                        metric="throughput",
-                    )
-                )
-
-                if traits.diff_virtual_users or traits.diff_iterations:
-                    baseline_threads = self._resolve_thread_count(baseline_test)
-                    compared_threads = self._resolve_thread_count(test_data)
-                    if baseline_threads > 0 and compared_threads > 0:
-                        baseline_normalized_samples = [
-                            value / float(baseline_threads)
-                            for value in baseline_info.get("throughput_values", [])
-                        ]
-                        compared_normalized_samples = [
-                            value / float(compared_threads)
-                            for value in compared_info.get("throughput_values", [])
-                        ]
-                        comparisons.append(
-                            compare_two_samples(
-                                a=baseline_normalized_samples,
-                                b=compared_normalized_samples,
-                                baseline_test_id=baseline_id,
-                                compared_test_id=compared_id,
-                                db_key=display_db_key,
-                                metric="throughput_per_thread",
-                            )
-                        )
-
-                    baseline_efficiency = (
-                        normalized_metrics.get(baseline_key, {})
-                        .get(baseline_db_key, {})
-                        .get("scaling_efficiency")
-                    )
-                    compared_efficiency = (
-                        normalized_metrics.get(str(compared_id), {})
-                        .get(compared_db_key, {})
-                        .get("scaling_efficiency")
-                    )
-                    if baseline_efficiency is not None and compared_efficiency is not None:
-                        pct_difference = None
-                        if baseline_efficiency != 0:
-                            pct_difference = (
-                                (compared_efficiency - baseline_efficiency) / baseline_efficiency
-                            ) * 100.0
-                        comparisons.append(
-                            PairwiseComparison(
-                                baseline_test_id=baseline_id,
-                                compared_test_id=compared_id,
-                                db_key=display_db_key,
-                                metric="scaling_efficiency",
-                                baseline_mean=baseline_efficiency,
-                                compared_mean=compared_efficiency,
-                                pct_difference=pct_difference,
-                                test_used=None,
-                                statistic=None,
-                                p_value=None,
-                                is_significant=False,
-                                interpretation="Сравнение scaling efficiency выполнено без статистического теста",
-                                warning="Scaling efficiency рассчитывается как нормализованная производная метрика",
-                            )
-                        )
-
-        return comparisons
-
-    def _resolve_db_pairs_for_comparison(
-        self,
-        baseline_test: Dict[str, Any],
-        compared_test: Dict[str, Any],
-        traits: ComparisonTraits,
-        warnings: List[str],
-    ) -> List:
-        """Определить пары db_key для попарного сравнения"""
-        baseline_db_keys = self._get_test_db_keys(baseline_test)
-        compared_db_keys = self._get_test_db_keys(compared_test)
-
-        if traits.multiple_dbs and traits.same_load_params and not traits.same_db_targets:
-            if len(baseline_db_keys) == 1 and len(compared_db_keys) == 1:
-                return [
-                    (
-                        baseline_db_keys[0],
-                        compared_db_keys[0],
-                        f"{baseline_db_keys[0]} vs {compared_db_keys[0]}",
-                    )
-                ]
-
-            zipped_pairs = list(zip(baseline_db_keys, compared_db_keys))
-            if zipped_pairs:
-                warnings.append(
-                    "Для cross-database сравнения с несколькими целевыми БД пары сопоставлены по позиции в списке результатов"
-                )
-                return [
-                    (baseline_db_key, compared_db_key, f"{baseline_db_key} vs {compared_db_key}")
-                    for baseline_db_key, compared_db_key in zipped_pairs
-                ]
-
-            return []
-
-        common_db_keys = [db_key for db_key in baseline_db_keys if db_key in compared_db_keys]
-        return [(db_key, db_key, db_key) for db_key in common_db_keys]
+    # ------------------------------------------------------------------
+    # Test info
+    # ------------------------------------------------------------------
 
     async def _build_test_info(self, test_data: Dict[str, Any]) -> ComparisonTestInfo:
-        """Преобразовать словарь теста в схему ответа с развёрнутой информацией"""
         config = test_data.get("config", {}) or {}
         scenario_info = await self._resolve_scenario_info(config)
         connections = await self._resolve_connections(config.get("connection_ids"))
-
         return ComparisonTestInfo(
             id=UUID(str(test_data["id"])),
             name=test_data.get("name", "Без имени"),
@@ -1161,7 +1101,6 @@ class ComparisonService:
         )
 
     async def _resolve_scenario_info(self, config: Dict[str, Any]) -> Optional[ScenarioInfo]:
-        """Разрешить сценарий из snapshot config или активного bundle."""
         if not config:
             return None
 
@@ -1207,12 +1146,12 @@ class ComparisonService:
     def _scenario_info_from_snapshot(self, snapshot: Dict[str, Any]) -> ScenarioInfo:
         queries = [
             ScenarioQueryInfo(
-                sql_template=query.get("sql_template", ""),
-                query_type=query.get("query_type", "unknown"),
-                weight=query.get("weight", 1),
-                description=query.get("description"),
+                sql_template=q.get("sql_template", ""),
+                query_type=q.get("query_type", "unknown"),
+                weight=q.get("weight", 1),
+                description=q.get("description"),
             )
-            for query in snapshot.get("queries", []) or []
+            for q in snapshot.get("queries", []) or []
         ]
         return ScenarioInfo(
             name=snapshot.get("name", "Без названия"),
@@ -1222,43 +1161,94 @@ class ComparisonService:
         )
 
     async def _resolve_connections(self, connection_ids: Optional[List[str]]) -> List[ConnectionInfo]:
-        """Разрешить имена подключений по ID"""
         if not connection_ids or not self.connection_repository:
             return []
-
         connections = []
         for conn_id in connection_ids:
             try:
                 conn = await self.connection_repository.get_connection_by_id(conn_id)
                 if conn:
                     connections.append(ConnectionInfo(
-                        id=str(conn.id),
-                        name=conn.name,
-                        dbms_type=conn.dbms_type,
-                        host=conn.host,
-                        port=conn.port,
-                        database=conn.database,
+                        id=str(conn.id), name=conn.name, dbms_type=conn.dbms_type,
+                        host=conn.host, port=conn.port, database=conn.database,
                     ))
             except Exception as exc:
                 print(f"[COMPARISON] Не удалось разрешить подключение '{conn_id}': {exc}")
-
         return connections
 
-    @staticmethod
-    def _replace_db_keys_in_report(report, db_key_labels: Dict[str, str]):
-        """Заменить UUID db_key в тексте отчёта на человекочитаемые метки"""
-        def _replace_text(text: str) -> str:
-            for uuid_key, label in db_key_labels.items():
-                text = text.replace(uuid_key, label)
-            return text
+    # ------------------------------------------------------------------
+    # Labels and resources
+    # ------------------------------------------------------------------
 
-        report.verdict = _replace_text(report.verdict)
-        report.patterns = [_replace_text(item) for item in report.patterns]
-        report.recommendations = [_replace_text(item) for item in report.recommendations]
-        report.hypotheses = [_replace_text(item) for item in report.hypotheses]
-        for section in report.sections:
-            section.title = _replace_text(section.title)
-            section.items = [_replace_text(item) for item in section.items]
+    def _build_db_key_labels(self, tests: List[Dict[str, Any]]) -> Dict[str, str]:
+        labels: Dict[str, str] = {}
+        for t in tests:
+            for result in t.get("results", []) or []:
+                metrics = result.get("metrics", {}) or {}
+                db_key = (
+                    metrics.get("connection_key")
+                    or metrics.get("db_name")
+                    or result.get("db_type")
+                )
+                if not db_key or db_key in labels:
+                    continue
+                db_name = metrics.get("db_name")
+                if db_name and db_name != db_key:
+                    labels[db_key] = db_name
+                elif result.get("db_type"):
+                    labels[db_key] = result["db_type"]
+        return labels
+
+    @staticmethod
+    def _collect_resource_metrics(tests: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        result: Dict[str, Dict[str, Any]] = {}
+        for t in tests:
+            tk = str(t["id"])
+            result[tk] = {}
+            for tr in t.get("results", []) or []:
+                metrics = tr.get("metrics", {}) or {}
+                db_key = metrics.get("connection_key") or metrics.get("db_name") or tr.get("db_type")
+                if not db_key:
+                    continue
+                sys_m = tr.get("system_metrics") or {}
+                dbms_m = tr.get("dbms_metrics") or {}
+                rm = ResourceMetrics(
+                    cpu_usage=sys_m.get("cpu_usage"),
+                    memory_usage_percent=sys_m.get("memory_usage_percent"),
+                    disk_iops=sys_m.get("disk_iops"),
+                    cache_hit_ratio=dbms_m.get("cache_hit_ratio"),
+                    buffer_pool_hit_ratio=dbms_m.get("buffer_pool_hit_ratio"),
+                    lock_waits=dbms_m.get("lock_waits"),
+                    deadlocks=dbms_m.get("deadlocks"),
+                )
+                result[tk][db_key] = asdict(rm)
+        return result
+
+    @staticmethod
+    def _collect_resource_metrics_single(test_data: Dict[str, Any]) -> Dict[str, Any]:
+        result: Dict[str, Any] = {}
+        for tr in test_data.get("results", []) or []:
+            metrics = tr.get("metrics", {}) or {}
+            db_key = metrics.get("connection_key") or metrics.get("db_name") or tr.get("db_type")
+            if not db_key:
+                continue
+            sys_m = tr.get("system_metrics") or {}
+            dbms_m = tr.get("dbms_metrics") or {}
+            rm = ResourceMetrics(
+                cpu_usage=sys_m.get("cpu_usage"),
+                memory_usage_percent=sys_m.get("memory_usage_percent"),
+                disk_iops=sys_m.get("disk_iops"),
+                cache_hit_ratio=dbms_m.get("cache_hit_ratio"),
+                buffer_pool_hit_ratio=dbms_m.get("buffer_pool_hit_ratio"),
+                lock_waits=dbms_m.get("lock_waits"),
+                deadlocks=dbms_m.get("deadlocks"),
+            )
+            result[db_key] = asdict(rm)
+        return result
+
+    # ------------------------------------------------------------------
+    # Parameter impact (серийный режим)
+    # ------------------------------------------------------------------
 
     def _build_parameter_impact_analysis(
         self,
@@ -1267,11 +1257,10 @@ class ComparisonService:
         descriptive_stats: Dict[str, Dict[str, MetricStatsBundle]],
         db_key_labels: Dict[str, str],
     ) -> List[ParameterImpactSummary]:
-        """Построить анализ влияния параметров конфигурации на результаты"""
         baseline_test = None
-        for test_data in tests:
-            if UUID(str(test_data["id"])) == baseline_id:
-                baseline_test = test_data
+        for t in tests:
+            if UUID(str(t["id"])) == baseline_id:
+                baseline_test = t
                 break
         if not baseline_test:
             return []
@@ -1288,77 +1277,62 @@ class ComparisonService:
         ]
 
         summaries: List[ParameterImpactSummary] = []
-
-        for test_data in tests:
-            compared_id = UUID(str(test_data["id"]))
+        for t in tests:
+            compared_id = UUID(str(t["id"]))
             if compared_id == baseline_id:
                 continue
 
-            compared_config = test_data.get("config", {}) or {}
+            compared_config = t.get("config", {}) or {}
             compared_key = str(compared_id)
             compared_stats = descriptive_stats.get(compared_key, {})
 
-            changed_parameters: List[ChangedParameter] = []
-            for param_key, param_label in tracked_params:
-                baseline_val = baseline_config.get(param_key)
-                compared_val = compared_config.get(param_key)
-                if baseline_val == compared_val:
+            changed_params: List[ChangedParameter] = []
+            for pk, pl in tracked_params:
+                bv = baseline_config.get(pk)
+                cv = compared_config.get(pk)
+                if bv == cv:
                     continue
-                changed_parameters.append(ChangedParameter(
-                    parameter=param_key,
-                    label=param_label,
-                    baseline_value=baseline_val,
-                    compared_value=compared_val,
-                    change_description=self._format_param_change(
-                        param_key, baseline_val, compared_val
-                    ),
+                changed_params.append(ChangedParameter(
+                    parameter=pk, label=pl,
+                    baseline_value=bv, compared_value=cv,
+                    change_description=self._format_param_change(pk, bv, cv),
                 ))
 
-            metric_effects = self._compute_metric_effects(
-                baseline_stats, compared_stats, db_key_labels,
-            )
+            metric_effects = self._compute_metric_effects(baseline_stats, compared_stats, db_key_labels)
             top_insights = self._build_top_insights(metric_effects)
-
-            summary_text = self._format_impact_summary_v2(
-                test_data.get("name", ""),
-                baseline_test.get("name", ""),
-                changed_parameters,
-                top_insights,
+            summary_text = self._format_impact_summary(
+                t.get("name", ""), baseline_test.get("name", ""),
+                changed_params, top_insights,
             )
 
             summaries.append(ParameterImpactSummary(
                 test_id=compared_id,
-                test_name=test_data.get("name", ""),
+                test_name=t.get("name", ""),
                 vs_baseline=baseline_test.get("name", ""),
-                changed_parameters=changed_parameters,
+                changed_parameters=changed_params,
                 metric_effects=metric_effects,
                 top_insights=top_insights,
                 summary_text=summary_text,
             ))
-
         return summaries
 
     def _format_param_change(self, param_key: str, baseline_val, compared_val) -> str:
-        """Форматировать описание изменения параметра"""
         if param_key == "use_indexes":
-            base_label = "с индексами" if baseline_val else "без индексов"
-            comp_label = "с индексами" if compared_val else "без индексов"
-            return f"{base_label} → {comp_label}"
-
+            bl = "с индексами" if baseline_val else "без индексов"
+            cl = "с индексами" if compared_val else "без индексов"
+            return f"{bl} → {cl}"
         try:
-            base_num = float(baseline_val or 0)
-            comp_num = float(compared_val or 0)
+            bn = float(baseline_val or 0)
+            cn = float(compared_val or 0)
         except (TypeError, ValueError):
             return f"{baseline_val} → {compared_val}"
-
-        if base_num != 0:
-            pct = ((comp_num - base_num) / base_num) * 100
-            return f"{int(base_num)} → {int(comp_num)} ({pct:+.0f}%)"
-        return f"{int(base_num)} → {int(comp_num)}"
+        if bn != 0:
+            pct = ((cn - bn) / bn) * 100
+            return f"{int(bn)} → {int(cn)} ({pct:+.0f}%)"
+        return f"{int(bn)} → {int(cn)}"
 
     @staticmethod
     def _classify_magnitude(pct: float) -> str:
-        """Classify effect magnitude by absolute percent change."""
         abs_pct = abs(pct)
         if abs_pct < 5:
             return "negligible"
@@ -1374,200 +1348,73 @@ class ComparisonService:
         compared_stats: Dict[str, MetricStatsBundle],
         db_key_labels: Dict[str, str],
     ) -> List[MetricEffect]:
-        """Compute metric effects once per (baseline, compared) pair across all DBs."""
         effects: List[MetricEffect] = []
-        common_db_keys = set(baseline_stats.keys()) & set(compared_stats.keys())
-
-        metrics_spec = [
+        common = set(baseline_stats.keys()) & set(compared_stats.keys())
+        specs = [
             ("throughput", lambda b: b.throughput and b.throughput.mean, lambda b: b.throughput.mean, True),
             ("latency_mean", lambda b: b.latency_ms and b.latency_ms.mean, lambda b: b.latency_ms.mean, False),
             ("latency_p99", lambda b: b.latency_ms and b.latency_ms.p99, lambda b: b.latency_ms.p99, False),
             ("latency_cv", lambda b: b.latency_ms and b.latency_ms.cv, lambda b: b.latency_ms.cv, False),
         ]
-
-        for db_key in sorted(common_db_keys):
-            b_bundle = baseline_stats[db_key]
-            c_bundle = compared_stats[db_key]
-
-            for metric_name, has_val, get_val, higher_is_better in metrics_spec:
-                if not (has_val(b_bundle) and has_val(c_bundle)):
+        for dk in sorted(common):
+            bb = baseline_stats[dk]
+            cb = compared_stats[dk]
+            for mn, has, get, hib in specs:
+                if not (has(bb) and has(cb)):
                     continue
-                b_val = get_val(b_bundle)
-                c_val = get_val(c_bundle)
-                if b_val == 0:
+                bv, cv = get(bb), get(cb)
+                if bv == 0:
                     continue
-
-                pct = ((c_val - b_val) / b_val) * 100
-
-                if abs(pct) < 0.5:
-                    direction = "flat"
-                elif pct > 0:
-                    direction = "up"
-                else:
-                    direction = "down"
-
-                is_improvement = (
-                    (higher_is_better and direction == "up")
-                    or (not higher_is_better and direction == "down")
-                )
-
+                pct = ((cv - bv) / bv) * 100
+                d = "flat" if abs(pct) < 0.5 else ("up" if pct > 0 else "down")
+                imp = (hib and d == "up") or (not hib and d == "down")
                 effects.append(MetricEffect(
-                    db_key=db_key,
-                    db_label=db_key_labels.get(db_key),
-                    metric=metric_name,
-                    baseline_value=round(b_val, 4),
-                    compared_value=round(c_val, 4),
-                    pct_change=round(pct, 2),
-                    direction=direction,
-                    is_improvement=is_improvement,
-                    magnitude=self._classify_magnitude(pct),
+                    db_key=dk, db_label=db_key_labels.get(dk),
+                    metric=mn, baseline_value=round(bv, 4), compared_value=round(cv, 4),
+                    pct_change=round(pct, 2), direction=d,
+                    is_improvement=imp, magnitude=self._classify_magnitude(pct),
                 ))
-
         return effects
 
     @staticmethod
     def _build_top_insights(effects: List[MetricEffect], limit: int = 3) -> List[str]:
-        """Select top N most impactful insights, prioritizing regressions."""
-        magnitude_rank = {"large": 3, "medium": 2, "small": 1, "negligible": 0}
-
-        sorted_effects = sorted(
-            effects,
-            key=lambda e: (
-                0 if not e.is_improvement else 1,
-                -magnitude_rank.get(e.magnitude, 0),
-                -abs(e.pct_change),
-            ),
-        )
-
-        metric_labels = {
-            "throughput": "throughput",
-            "latency_mean": "latency mean",
-            "latency_p99": "latency p99",
-            "latency_cv": "стабильность (CV)",
-        }
-        metric_units = {
-            "throughput": "req/s",
-            "latency_mean": "мс",
-            "latency_p99": "мс",
-            "latency_cv": "",
-        }
-
+        mag_rank = {"large": 3, "medium": 2, "small": 1, "negligible": 0}
+        sorted_e = sorted(effects, key=lambda e: (
+            0 if not e.is_improvement else 1,
+            -mag_rank.get(e.magnitude, 0),
+            -abs(e.pct_change),
+        ))
+        labels = {"throughput": "throughput", "latency_mean": "latency mean",
+                  "latency_p99": "latency p99", "latency_cv": "стабильность (CV)"}
+        units = {"throughput": "req/s", "latency_mean": "мс", "latency_p99": "мс", "latency_cv": ""}
         insights: List[str] = []
-        for e in sorted_effects[:limit]:
+        for e in sorted_e[:limit]:
             if e.magnitude == "negligible":
                 continue
             db = e.db_label or e.db_key
-            m_label = metric_labels.get(e.metric, e.metric)
-            unit = metric_units.get(e.metric, "")
-
-            direction_word = "вырос" if e.direction == "up" else "снизился"
-            fmt_base = f"{e.baseline_value:.1f}" if unit else f"{e.baseline_value:.2f}"
-            fmt_comp = f"{e.compared_value:.1f}" if unit else f"{e.compared_value:.2f}"
-            unit_str = f" {unit}" if unit else ""
-
-            insights.append(
-                f"{db}: {m_label} {direction_word} на {abs(e.pct_change):.1f}% "
-                f"({fmt_base} → {fmt_comp}{unit_str})"
-            )
+            ml = labels.get(e.metric, e.metric)
+            u = units.get(e.metric, "")
+            dw = "вырос" if e.direction == "up" else "снизился"
+            fb = f"{e.baseline_value:.1f}" if u else f"{e.baseline_value:.2f}"
+            fc = f"{e.compared_value:.1f}" if u else f"{e.compared_value:.2f}"
+            us = f" {u}" if u else ""
+            insights.append(f"{db}: {ml} {dw} на {abs(e.pct_change):.1f}% ({fb} → {fc}{us})")
         return insights
 
-    def _format_impact_summary_v2(
-        self,
-        test_name: str,
-        baseline_name: str,
-        changed_params: List[ChangedParameter],
-        top_insights: List[str],
+    def _format_impact_summary(
+        self, test_name: str, baseline_name: str,
+        changed_params: List[ChangedParameter], top_insights: List[str],
     ) -> str:
-        """Сформировать текстовое резюме влияния параметров"""
         if not changed_params:
-            return f"Конфигурация теста «{test_name}» совпадает с baseline «{baseline_name}»"
-
-        param_gen_labels = {
+            return f"Конфигурация прогона «{test_name}» совпадает с baseline «{baseline_name}»"
+        gen = {
             "virtual_users": "числа виртуальных пользователей",
             "iterations": "числа итераций",
             "use_indexes": "использования индексов",
             "warmup_time": "времени прогрева",
         }
-
-        parts = []
-        for cp in changed_params:
-            label = param_gen_labels.get(cp.parameter, cp.parameter)
-            parts.append(f"изменение {label} ({cp.change_description})")
-
-        summary = f"В тесте «{test_name}» относительно baseline «{baseline_name}»: {', '.join(parts)}."
-
+        parts = [f"изменение {gen.get(cp.parameter, cp.parameter)} ({cp.change_description})" for cp in changed_params]
+        s = f"В прогоне «{test_name}» относительно baseline «{baseline_name}»: {', '.join(parts)}."
         if top_insights:
-            summary += " " + "; ".join(top_insights) + "."
-
-        return summary
-
-    def _build_db_key_labels(self, tests: List[Dict[str, Any]]) -> Dict[str, str]:
-        """Построить маппинг db_key -> человекочитаемое имя из результатов тестов"""
-        labels: Dict[str, str] = {}
-
-        for test_data in tests:
-            for result in test_data.get("results", []) or []:
-                metrics = result.get("metrics", {}) or {}
-                db_key = (
-                    metrics.get("connection_key")
-                    or metrics.get("db_name")
-                    or result.get("db_type")
-                )
-                if not db_key or db_key in labels:
-                    continue
-
-                db_name = metrics.get("db_name")
-                if db_name and db_name != db_key:
-                    labels[db_key] = db_name
-                elif result.get("db_type"):
-                    labels[db_key] = result["db_type"]
-
-        return labels
-
-    def _deduplicate_warnings(self, warnings: List[str]) -> List[str]:
-        """Удалить дубли предупреждений, сохранив порядок"""
-        unique_warnings = []
-        seen = set()
-
-        for warning in warnings:
-            if warning in seen:
-                continue
-            unique_warnings.append(warning)
-            seen.add(warning)
-
-        return unique_warnings
-
-    @staticmethod
-    def _collect_resource_metrics(tests: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-        """Collect system/DBMS metrics snapshots from TestResult records."""
-        result: Dict[str, Dict[str, Any]] = {}
-
-        for test_data in tests:
-            test_key = str(test_data["id"])
-            result[test_key] = {}
-
-            for test_result in test_data.get("results", []) or []:
-                metrics = test_result.get("metrics", {}) or {}
-                db_key = (
-                    metrics.get("connection_key")
-                    or metrics.get("db_name")
-                    or test_result.get("db_type")
-                )
-                if not db_key:
-                    continue
-
-                sys_m = test_result.get("system_metrics") or {}
-                dbms_m = test_result.get("dbms_metrics") or {}
-
-                rm = ResourceMetrics(
-                    cpu_usage=sys_m.get("cpu_usage"),
-                    memory_usage_percent=sys_m.get("memory_usage_percent"),
-                    disk_iops=sys_m.get("disk_iops"),
-                    cache_hit_ratio=dbms_m.get("cache_hit_ratio"),
-                    buffer_pool_hit_ratio=dbms_m.get("buffer_pool_hit_ratio"),
-                    lock_waits=dbms_m.get("lock_waits"),
-                    deadlocks=dbms_m.get("deadlocks"),
-                )
-                result[test_key][db_key] = asdict(rm)
-
-        return result
+            s += " " + "; ".join(top_insights) + "."
+        return s

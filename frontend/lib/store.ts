@@ -31,7 +31,8 @@ interface AppState {
 
   comparisonTestIds: string[]
   comparisonBaselineId: string | null
-  setComparisonSelection: (testIds: string[], baselineId?: string | null) => void
+  analysisMode: "per_test" | "series"
+  setComparisonSelection: (testIds: string[], baselineId?: string | null, mode?: "per_test" | "series") => void
   clearComparisonSelection: () => void
 }
 
@@ -84,12 +85,15 @@ export const useAppStore = create<AppState>((set) => ({
 
   comparisonTestIds: [],
   comparisonBaselineId: null,
-  setComparisonSelection: (testIds, baselineId = null) => set({
+  analysisMode: "per_test",
+  setComparisonSelection: (testIds, baselineId = null, mode = "per_test") => set({
     comparisonTestIds: testIds,
     comparisonBaselineId: baselineId ?? testIds[0] ?? null,
+    analysisMode: mode,
   }),
   clearComparisonSelection: () => set({
     comparisonTestIds: [],
     comparisonBaselineId: null,
+    analysisMode: "per_test",
   }),
 }))

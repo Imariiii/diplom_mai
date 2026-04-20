@@ -1,49 +1,99 @@
 """
-Pydantic схемы для сравнительного анализа тестов
+Pydantic схемы для двухрежимного сравнительного анализа прогонов.
+
+Два режима анализа:
+- per_test: внутритестовый (один прогон, сравнение СУБД на одной нагрузке)
+- series: серийный по СУБД (несколько прогонов, анализ траекторий при разных нагрузках)
 """
 from dataclasses import field
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic.dataclasses import dataclass
 
 
-class ComparisonType(str, Enum):
-    """Тип сравнительного анализа (derived label from traits)"""
+# ---------------------------------------------------------------------------
+# Режим анализа
+# ---------------------------------------------------------------------------
 
-    CROSS_DATABASE = "cross_database"
-    SCALABILITY = "scalability"
-    CONFIG_COMPARISON = "config_comparison"
-    TEMPORAL = "temporal"
-    GENERAL = "general"
-
-    # Keep MIXED as an alias so old serialized data still deserialises
-    MIXED = "mixed"
+class AnalysisMode(str, Enum):
+    PER_TEST = "per_test"
+    SERIES = "series"
 
 
-@dataclass
-class ComparisonTraits:
-    """Boolean dimensions describing the comparison rather than a rigid type."""
+# ---------------------------------------------------------------------------
+# Предупреждения
+# ---------------------------------------------------------------------------
+
+class AnalysisWarning(BaseModel):
+    """Типизированное предупреждение анализа"""
+
+    severity: Literal["info", "warn", "block"]
+    code: str
+    message: str
+
+
+# ---------------------------------------------------------------------------
+# Сравнимость серии
+# ---------------------------------------------------------------------------
+
+class ComparabilityReport(BaseModel):
+    """Отчёт о сопоставимости прогонов для серийного анализа"""
 
     same_scenario: bool = True
-    same_db_targets: bool = True
-    multiple_dbs: bool = False
+    same_query_ids: bool = True
+    same_schema_profile: bool = True
     same_load_params: bool = True
-    diff_virtual_users: bool = False
-    diff_iterations: bool = False
-    diff_warmup: bool = False
-    is_temporal: bool = False
+    is_valid_for_series: bool = True
+    reasons: List[str] = Field(default_factory=list)
+
+
+class LoadLevel(BaseModel):
+    """Один уровень нагрузки в серии"""
+
+    level_id: str
+    virtual_users: int
+    iterations: int
+    warmup_time: float = 0.0
+    label: str = ""
+    test_ids: List[UUID] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Запрос на анализ
+# ---------------------------------------------------------------------------
+
+class AnalysisReportConfig(BaseModel):
+    """Конфигурация включения уровней аналитического отчёта"""
+
+    include_verdict: bool = True
+    include_patterns: bool = True
+    include_recommendations: bool = True
+    include_hypotheses: bool = True
 
 
 class ComparisonRequest(BaseModel):
-    """Запрос на сравнительный анализ тестов"""
+    """Запрос на сравнительный анализ прогонов"""
 
-    test_ids: List[UUID] = Field(..., min_length=2, max_length=5, description="ID тестов для сравнения")
-    baseline_id: Optional[UUID] = Field(default=None, description="ID baseline-теста")
-    report_config: Optional["AnalysisReportConfig"] = None
+    analysis_mode: AnalysisMode
+    test_ids: List[UUID] = Field(..., min_length=1, max_length=5)
+    baseline_id: Optional[UUID] = Field(default=None, description="ID baseline-прогона (для серии)")
+    report_config: Optional[AnalysisReportConfig] = None
 
+    @model_validator(mode="after")
+    def _validate_mode_constraints(self):
+        if self.analysis_mode == AnalysisMode.PER_TEST and len(self.test_ids) != 1:
+            raise ValueError("Режим per_test требует ровно один test_id")
+        if self.analysis_mode == AnalysisMode.SERIES and len(self.test_ids) < 2:
+            raise ValueError("Режим series требует минимум 2 test_id")
+        return self
+
+
+# ---------------------------------------------------------------------------
+# Общие модели (переиспользуются обоими режимами)
+# ---------------------------------------------------------------------------
 
 class ScenarioQueryInfo(BaseModel):
     """Информация о SQL-запросе сценария"""
@@ -75,7 +125,7 @@ class ConnectionInfo(BaseModel):
 
 
 class ComparisonTestInfo(BaseModel):
-    """Краткая информация о тесте для ответа"""
+    """Краткая информация о прогоне для ответа"""
 
     id: UUID
     name: str
@@ -107,7 +157,7 @@ class DescriptiveStats(BaseModel):
 
 
 class MetricStatsBundle(BaseModel):
-    """Набор метрик для одного теста и одной СУБД"""
+    """Набор метрик для одного прогона и одной СУБД"""
 
     latency_ms: Optional[DescriptiveStats] = None
     throughput: Optional[DescriptiveStats] = None
@@ -117,27 +167,11 @@ class MetricStatsBundle(BaseModel):
     sample_size_warning: Optional[str] = None
 
 
-@dataclass
-class NormalizedMetrics:
-    """Нормализованные метрики для сравнения разных конфигураций"""
-
-    throughput_abs: Optional[float] = None
-    latency_mean_abs: Optional[float] = None
-    throughput_per_thread: Optional[float] = None
-    throughput_per_second: Optional[float] = None
-    scaling_efficiency: Optional[float] = None
-    latency_per_thread: Optional[float] = None
-    threads: Optional[int] = None
-    duration_seconds: Optional[float] = None
-    source_metrics: List[str] = field(default_factory=list)
-    normalization_warning: Optional[str] = None
-
-
 class PairwiseComparison(BaseModel):
-    """Результат попарного сравнения тестов"""
+    """Результат попарного сравнения двух выборок"""
 
-    baseline_test_id: UUID
-    compared_test_id: UUID
+    baseline_id: str
+    compared_id: str
     db_key: str
     metric: str
     baseline_mean: Optional[float] = None
@@ -157,11 +191,14 @@ class PairwiseComparison(BaseModel):
     is_significant_adjusted: bool = False
 
 
+# ---------------------------------------------------------------------------
+# Графики — общие точки
+# ---------------------------------------------------------------------------
+
 class BarChartPoint(BaseModel):
     """Точка данных для bar chart"""
 
-    test_id: UUID
-    test_name: str
+    label: str
     db_key: str
     latency_mean: Optional[float] = None
     latency_p95: Optional[float] = None
@@ -173,8 +210,7 @@ class BarChartPoint(BaseModel):
 class BoxPlotPoint(BaseModel):
     """Точка данных для box plot"""
 
-    test_id: UUID
-    test_name: str
+    label: str
     db_key: str
     min: float
     q1: float
@@ -194,13 +230,9 @@ class ThroughputSeriesPoint(BaseModel):
     error_count: Optional[int] = None
 
 
-class ComparisonChartsData(BaseModel):
-    """Данные для сравнительных графиков"""
-
-    bar_chart: List[BarChartPoint] = Field(default_factory=list)
-    box_plot: List[BoxPlotPoint] = Field(default_factory=list)
-    throughput_series: Dict[str, List[ThroughputSeriesPoint]] = Field(default_factory=dict)
-
+# ---------------------------------------------------------------------------
+# Аналитический отчёт
+# ---------------------------------------------------------------------------
 
 class AnalysisSection(BaseModel):
     """Секция аналитического отчёта"""
@@ -210,7 +242,7 @@ class AnalysisSection(BaseModel):
 
 
 class AnalysisReport(BaseModel):
-    """Rule-based аналитический отчёт по сравнению тестов"""
+    """Rule-based аналитический отчёт"""
 
     verdict: str
     patterns: List[str] = Field(default_factory=list)
@@ -219,14 +251,9 @@ class AnalysisReport(BaseModel):
     sections: List[AnalysisSection] = Field(default_factory=list)
 
 
-class AnalysisReportConfig(BaseModel):
-    """Конфигурация включения уровней аналитического отчёта"""
-
-    include_verdict: bool = True
-    include_patterns: bool = True
-    include_recommendations: bool = True
-    include_hypotheses: bool = True
-
+# ---------------------------------------------------------------------------
+# Parameter impact
+# ---------------------------------------------------------------------------
 
 class ChangedParameter(BaseModel):
     """Один изменившийся параметр конфигурации"""
@@ -253,7 +280,7 @@ class MetricEffect(BaseModel):
 
 
 class ParameterImpactSummary(BaseModel):
-    """Сводка влияния параметров для одного теста относительно baseline"""
+    """Сводка влияния параметров для одного прогона относительно baseline"""
 
     test_id: UUID
     test_name: str
@@ -277,22 +304,149 @@ class ResourceMetrics:
     deadlocks: Optional[int] = None
 
 
-class ComparisonResult(BaseModel):
-    """Полный результат сравнительного анализа"""
+# ---------------------------------------------------------------------------
+# Режим A: Per-test (внутритестовый анализ)
+# ---------------------------------------------------------------------------
 
+class DbRankEntry(BaseModel):
+    """Позиция одной СУБД в ранжировании по метрике"""
+
+    db_key: str
+    db_label: Optional[str] = None
+    rank: int
+    value: float
+
+
+class MetricRanking(BaseModel):
+    """Ранжирование СУБД по одной метрике"""
+
+    metric: str
+    rankings: List[DbRankEntry] = Field(default_factory=list)
+    best_db_key: str
+
+
+class PerTestCharts(BaseModel):
+    """Графики для внутритестового режима"""
+
+    bar_chart: List[BarChartPoint] = Field(default_factory=list)
+    box_plot: List[BoxPlotPoint] = Field(default_factory=list)
+    throughput_series: Dict[str, List[ThroughputSeriesPoint]] = Field(default_factory=dict)
+
+
+class PerTestResult(BaseModel):
+    """Результат внутритестового анализа (один прогон, сравнение СУБД)"""
+
+    analysis_mode: Literal["per_test"] = "per_test"
+    test: ComparisonTestInfo
+    warnings: List[AnalysisWarning] = Field(default_factory=list)
+    descriptive_stats: Dict[str, MetricStatsBundle] = Field(default_factory=dict)
+    pairwise: List[PairwiseComparison] = Field(default_factory=list)
+    rankings: List[MetricRanking] = Field(default_factory=list)
+    charts: PerTestCharts = Field(default_factory=PerTestCharts)
+    analysis_report: Optional[AnalysisReport] = None
+    db_key_labels: Dict[str, str] = Field(default_factory=dict)
+    resource_metrics: Dict[str, Any] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Режим B: Series (серийный анализ по СУБД)
+# ---------------------------------------------------------------------------
+
+class TrajectoryPoint(BaseModel):
+    """Одна точка траектории СУБД при определённом уровне нагрузки"""
+
+    level_id: str
+    load_label: str
+    throughput_mean: Optional[float] = None
+    latency_mean: Optional[float] = None
+    latency_p95: Optional[float] = None
+    latency_p99: Optional[float] = None
+    error_rate: Optional[float] = None
+    cv: Optional[float] = None
+
+
+class TrendTestResult(BaseModel):
+    """Результат одного тренд-теста"""
+
+    statistic: float
+    p_value: float
+    direction: Literal["increasing", "decreasing", "no_trend"]
+
+
+class DegradationIndex(BaseModel):
+    """Индекс деградации p95/p99 по уровням нагрузки"""
+
+    p95_changes: List[float] = Field(default_factory=list)
+    p99_changes: List[float] = Field(default_factory=list)
+    overall_p95: float = 0.0
+    overall_p99: float = 0.0
+
+
+class DbSeriesSummary(BaseModel):
+    """Сводка серийного анализа для одной СУБД"""
+
+    db_key: str
+    db_label: Optional[str] = None
+    trajectory: List[TrajectoryPoint] = Field(default_factory=list)
+    degradation: DegradationIndex = Field(default_factory=DegradationIndex)
+    stability_index: Optional[float] = None
+    elasticity: Optional[float] = None
+    saturation_point: Optional[str] = None
+    trend_tests: Dict[str, TrendTestResult] = Field(default_factory=dict)
+    adjacent_level_tests: List[PairwiseComparison] = Field(default_factory=list)
+    descriptive_stats_by_level: Dict[str, MetricStatsBundle] = Field(default_factory=dict)
+
+
+class CrossDbLevelRank(BaseModel):
+    """Кросс-СУБД ранжирование на одном уровне нагрузки"""
+
+    level_id: str
+    load_label: str
+    metric: str
+    rankings: List[DbRankEntry] = Field(default_factory=list)
+
+
+class SeriesChartPoint(BaseModel):
+    """Точка графика серии (СУБД × уровень нагрузки)"""
+
+    level_id: str
+    load_label: str
+    value: Optional[float] = None
+
+
+class SeriesCharts(BaseModel):
+    """Графики для серийного режима"""
+
+    throughput_by_load: Dict[str, List[SeriesChartPoint]] = Field(default_factory=dict)
+    latency_by_load: Dict[str, List[SeriesChartPoint]] = Field(default_factory=dict)
+    p95_by_load: Dict[str, List[SeriesChartPoint]] = Field(default_factory=dict)
+    p99_by_load: Dict[str, List[SeriesChartPoint]] = Field(default_factory=dict)
+    error_rate_by_load: Dict[str, List[SeriesChartPoint]] = Field(default_factory=dict)
+    scaling_efficiency: Dict[str, List[SeriesChartPoint]] = Field(default_factory=dict)
+    bar_chart: List[BarChartPoint] = Field(default_factory=list)
+    box_plot: List[BoxPlotPoint] = Field(default_factory=list)
+
+
+class SeriesResult(BaseModel):
+    """Результат серийного анализа по СУБД (несколько прогонов, разные нагрузки)"""
+
+    analysis_mode: Literal["series"] = "series"
     tests: List[ComparisonTestInfo]
     baseline_id: UUID
-    comparison_type: ComparisonType
-    traits: Optional[ComparisonTraits] = None
-    warnings: List[str] = Field(default_factory=list)
-    descriptive_stats: Dict[str, Dict[str, MetricStatsBundle]] = Field(default_factory=dict)
-    normalized_metrics: Dict[str, Dict[str, NormalizedMetrics]] = Field(default_factory=dict)
-    pairwise_comparisons: List[PairwiseComparison] = Field(default_factory=list)
-    charts_data: ComparisonChartsData = Field(default_factory=ComparisonChartsData)
+    comparability: ComparabilityReport
+    load_levels: List[LoadLevel] = Field(default_factory=list)
+    per_db: Dict[str, DbSeriesSummary] = Field(default_factory=dict)
+    cross_db_ranks: List[CrossDbLevelRank] = Field(default_factory=list)
+    charts: SeriesCharts = Field(default_factory=SeriesCharts)
     analysis_report: Optional[AnalysisReport] = None
-    db_key_labels: Dict[str, str] = Field(default_factory=dict, description="Маппинг db_key (UUID) -> человекочитаемое имя")
+    db_key_labels: Dict[str, str] = Field(default_factory=dict)
     parameter_impacts: List[ParameterImpactSummary] = Field(default_factory=list)
+    warnings: List[AnalysisWarning] = Field(default_factory=list)
     resource_metrics: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
 
-ComparisonRequest.model_rebuild()
+# ---------------------------------------------------------------------------
+# Union-тип для ответа API
+# ---------------------------------------------------------------------------
+
+ComparisonResult = Union[PerTestResult, SeriesResult]

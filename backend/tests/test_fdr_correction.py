@@ -11,8 +11,8 @@ from backend.comparison.statistics import apply_fdr_correction
 
 def _make_comparison(p_value):
     return PairwiseComparison(
-        baseline_test_id=uuid.uuid4(),
-        compared_test_id=uuid.uuid4(),
+        baseline_id=str(uuid.uuid4()),
+        compared_id=str(uuid.uuid4()),
         db_key="conn_pg",
         metric="throughput",
         interpretation="test",

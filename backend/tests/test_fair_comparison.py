@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 import numpy as np
 import pytest
 
-from backend.comparison.schemas import ComparisonType
+from backend.comparison.schemas import ComparisonRequest
 from backend.comparison.service import ComparisonService
 
 
@@ -86,7 +86,7 @@ def _mock_repo(test_data_map, samples_map=None):
 
 
 # =========================================================================
-# Baseline selection
+# Baseline selection (series mode)
 # =========================================================================
 
 class TestBaselineSelection:
@@ -94,24 +94,26 @@ class TestBaselineSelection:
     async def test_default_baseline_is_first(self):
         id1, id2 = uuid.uuid4(), uuid.uuid4()
         td = {
-            str(id1): _make_test_data(id1, "A", db_keys=["conn_mysql"]),
+            str(id1): _make_test_data(id1, "A", db_keys=["conn_pg"]),
             str(id2): _make_test_data(id2, "B", db_keys=["conn_pg"]),
         }
-        sm = {str(id1): _make_samples("conn_mysql"), str(id2): _make_samples("conn_pg")}
+        sm = {str(id1): _make_samples("conn_pg"), str(id2): _make_samples("conn_pg", seed=99)}
         svc = ComparisonService(repository=_mock_repo(td, sm))
-        result = await svc.analyze([id1, id2])
+        request = ComparisonRequest(analysis_mode="series", test_ids=[id1, id2])
+        result = await svc.analyze(request)
         assert result.baseline_id == id1
 
     @pytest.mark.asyncio
     async def test_explicit_baseline(self):
         id1, id2 = uuid.uuid4(), uuid.uuid4()
         td = {
-            str(id1): _make_test_data(id1, "A", db_keys=["conn_mysql"]),
+            str(id1): _make_test_data(id1, "A", db_keys=["conn_pg"]),
             str(id2): _make_test_data(id2, "B", db_keys=["conn_pg"]),
         }
-        sm = {str(id1): _make_samples("conn_mysql"), str(id2): _make_samples("conn_pg")}
+        sm = {str(id1): _make_samples("conn_pg"), str(id2): _make_samples("conn_pg", seed=99)}
         svc = ComparisonService(repository=_mock_repo(td, sm))
-        result = await svc.analyze([id1, id2], baseline_id=id2)
+        request = ComparisonRequest(analysis_mode="series", test_ids=[id1, id2], baseline_id=id2)
+        result = await svc.analyze(request)
         assert result.baseline_id == id2
 
     @pytest.mark.asyncio
@@ -122,7 +124,7 @@ class TestBaselineSelection:
 
 
 # =========================================================================
-# Fair comparison warnings
+# Fair comparison warnings (series mode)
 # =========================================================================
 
 class TestFairComparisonWarnings:
@@ -134,38 +136,26 @@ class TestFairComparisonWarnings:
             str(id2): _make_test_data(id2, "B", logical_database_id="ldb2", db_keys=["c1"]),
         }
         svc = ComparisonService(repository=_mock_repo(td))
+        request = ComparisonRequest(analysis_mode="series", test_ids=[id1, id2])
         with pytest.raises(ValueError, match="одной логической"):
-            await svc.analyze([id1, id2])
+            await svc.analyze(request)
 
     @pytest.mark.asyncio
-    async def test_different_scenario_template_rejected(self):
+    async def test_different_scenario_rejected(self):
+        """Разные сценарии делают прогоны несопоставимыми для серийного анализа."""
         id1, id2 = uuid.uuid4(), uuid.uuid4()
         td = {
-            str(id1): _make_test_data(id1, "A", scenario_template_id="s1", db_keys=["c1"]),
-            str(id2): _make_test_data(id2, "B", scenario_template_id="s2", db_keys=["c1"]),
+            str(id1): _make_test_data(id1, "A", scenario="mixed_light", db_keys=["c1"]),
+            str(id2): _make_test_data(id2, "B", scenario="write_heavy", db_keys=["c1"]),
         }
         svc = ComparisonService(repository=_mock_repo(td))
-        with pytest.raises(ValueError, match="один и тот же сценарий"):
-            await svc.analyze([id1, id2])
-
-    @pytest.mark.asyncio
-    async def test_missing_db_keys_warning(self):
-        id1, id2 = uuid.uuid4(), uuid.uuid4()
-        td = {
-            str(id1): _make_test_data(id1, "A", db_keys=["conn_mysql", "conn_pg"]),
-            str(id2): _make_test_data(id2, "B", db_keys=["conn_mysql"]),
-        }
-        sm = {
-            str(id1): _make_samples("conn_mysql") + _make_samples("conn_pg", seed=99),
-            str(id2): _make_samples("conn_mysql", seed=77),
-        }
-        svc = ComparisonService(repository=_mock_repo(td, sm))
-        result = await svc.analyze([id1, id2])
-        assert any("не содержит" in w for w in result.warnings)
+        request = ComparisonRequest(analysis_mode="series", test_ids=[id1, id2])
+        with pytest.raises(ValueError, match="несопоставимы"):
+            await svc.analyze(request)
 
 
 # =========================================================================
-# Multiple tests (2-5)
+# Multiple tests (2-5, series mode)
 # =========================================================================
 
 class TestMultipleTests:
@@ -176,7 +166,8 @@ class TestMultipleTests:
               created_at=f"2025-0{n+1}-01T00:00:00Z") for n, i in enumerate(ids)}
         sm = {str(i): _make_samples("conn_pg", seed=n*10) for n, i in enumerate(ids)}
         svc = ComparisonService(repository=_mock_repo(td, sm))
-        result = await svc.analyze(ids)
+        request = ComparisonRequest(analysis_mode="series", test_ids=ids)
+        result = await svc.analyze(request)
         assert len(result.tests) == 2
 
     @pytest.mark.asyncio
@@ -186,7 +177,8 @@ class TestMultipleTests:
               created_at=f"2025-0{n+1}-01T00:00:00Z") for n, i in enumerate(ids)}
         sm = {str(i): _make_samples("conn_pg", seed=n*10) for n, i in enumerate(ids)}
         svc = ComparisonService(repository=_mock_repo(td, sm))
-        result = await svc.analyze(ids)
+        request = ComparisonRequest(analysis_mode="series", test_ids=ids)
+        result = await svc.analyze(request)
         assert len(result.tests) == 3
 
     @pytest.mark.asyncio
@@ -196,15 +188,9 @@ class TestMultipleTests:
               created_at=f"2025-0{n+1}-01T00:00:00Z") for n, i in enumerate(ids)}
         sm = {str(i): _make_samples("conn_pg", seed=n*10) for n, i in enumerate(ids)}
         svc = ComparisonService(repository=_mock_repo(td, sm))
-        result = await svc.analyze(ids)
+        request = ComparisonRequest(analysis_mode="series", test_ids=ids)
+        result = await svc.analyze(request)
         assert len(result.tests) == 5
-
-    @pytest.mark.asyncio
-    async def test_six_tests_rejected(self):
-        ids = [uuid.uuid4() for _ in range(6)]
-        svc = ComparisonService(repository=AsyncMock())
-        with pytest.raises(ValueError, match="от 2 до 5"):
-            svc._normalize_test_ids(ids)
 
 
 # =========================================================================
@@ -214,15 +200,15 @@ class TestMultipleTests:
 class TestAggregateOnlyData:
     @pytest.mark.asyncio
     async def test_no_raw_samples_still_works(self):
-        """Тесты без raw samples должны использовать агрегаты и предупреждать."""
         id1, id2 = uuid.uuid4(), uuid.uuid4()
         td = {
-            str(id1): _make_test_data(id1, "A", db_keys=["conn_mysql"]),
+            str(id1): _make_test_data(id1, "A", db_keys=["conn_pg"]),
             str(id2): _make_test_data(id2, "B", db_keys=["conn_pg"]),
         }
         repo = _mock_repo(td, {})
         svc = ComparisonService(repository=repo)
-        result = await svc.analyze([id1, id2])
+        request = ComparisonRequest(analysis_mode="series", test_ids=[id1, id2])
+        result = await svc.analyze(request)
 
         assert result is not None
         assert len(result.tests) == 2

@@ -1,7 +1,13 @@
 """
 Модуль сравнительного анализа результатов нагрузочного тестирования
 """
-from backend.comparison.schemas import ComparisonRequest, ComparisonResult
+from backend.comparison.schemas import (
+    AnalysisMode,
+    ComparisonRequest,
+    ComparisonResult,
+    PerTestResult,
+    SeriesResult,
+)
 
 
 def __getattr__(name):
@@ -12,7 +18,10 @@ def __getattr__(name):
     raise AttributeError(name)
 
 __all__ = [
+    "AnalysisMode",
     "ComparisonRequest",
     "ComparisonResult",
     "ComparisonService",
+    "PerTestResult",
+    "SeriesResult",
 ]

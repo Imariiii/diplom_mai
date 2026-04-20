@@ -23,9 +23,8 @@ export type {
 } from "./api/test"
 
 export type {
+  AnalysisMode,
   ComparisonRequest,
-  ComparisonType,
-  ComparisonTraits,
   ComparisonResult,
   ComparisonTestInfo,
   ScenarioInfo,
@@ -34,14 +33,16 @@ export type {
   AnalysisReport,
   AnalysisReportConfig,
   AnalysisSection,
+  AnalysisWarning,
+  WarningSeverity,
+  ComparabilityReport,
+  LoadLevel,
   DescriptiveStats,
   MetricStatsBundle,
-  NormalizedMetrics,
   PairwiseComparison,
   BarChartPoint,
   BoxPlotPoint,
   ThroughputSeriesPoint,
-  ComparisonChartsData,
   ChangedParameter,
   MetricEffect,
   MetricEffectMetric,
@@ -49,9 +50,21 @@ export type {
   MetricEffectMagnitude,
   ParameterImpactSummary,
   ResourceMetrics,
+  PerTestResult,
+  PerTestCharts,
+  DbRankEntry,
+  MetricRanking,
+  SeriesResult,
+  SeriesCharts,
+  SeriesChartPoint,
+  TrajectoryPoint,
+  TrendTestResult,
+  DegradationIndex,
+  DbSeriesSummary,
+  CrossDbLevelRank,
 } from "./api/comparison"
 
-// Функции - реэкспорт из модулей
+// Функции и type guards - реэкспорт из модулей
 export {
   runAsyncTest,
   getAsyncTestResults,
@@ -64,6 +77,8 @@ export {
 
 export {
   analyzeComparison,
+  isPerTestResult,
+  isSeriesResult,
 } from "./api/comparison"
 
 export {

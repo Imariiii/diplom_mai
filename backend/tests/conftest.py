@@ -10,15 +10,17 @@ import pytest
 import numpy as np
 
 from backend.comparison.schemas import (
+    AnalysisMode,
     AnalysisReportConfig,
-    ComparisonResult,
+    AnalysisWarning,
+    ComparisonRequest,
     ComparisonTestInfo,
-    ComparisonTraits,
-    ComparisonType,
     DescriptiveStats,
     MetricStatsBundle,
-    NormalizedMetrics,
     PairwiseComparison,
+    PerTestResult,
+    PerTestCharts,
+    SeriesResult,
 )
 
 
@@ -89,8 +91,8 @@ def make_descriptive_stats(
 
 
 def make_pairwise(
-    baseline_id: uuid.UUID,
-    compared_id: uuid.UUID,
+    baseline_id: str,
+    compared_id: str,
     db_key: str = "db1",
     metric: str = "throughput",
     pct_difference: Optional[float] = 10.0,
@@ -101,8 +103,8 @@ def make_pairwise(
     **overrides: Any,
 ) -> PairwiseComparison:
     defaults = dict(
-        baseline_test_id=baseline_id,
-        compared_test_id=compared_id,
+        baseline_id=baseline_id,
+        compared_id=compared_id,
         db_key=db_key,
         metric=metric,
         baseline_mean=100.0,
@@ -112,7 +114,7 @@ def make_pairwise(
         statistic=3.5,
         p_value=p_value,
         is_significant=is_significant,
-        interpretation="Сравниваемый тест показывает прирост на 10.0%",
+        interpretation="Сравниваемый показывает прирост на 10.0%",
         effect_size=effect_size,
         effect_size_label=effect_size_label,
         ci_lower=5.0,
@@ -146,107 +148,32 @@ def two_test_ids():
 
 
 @pytest.fixture
-def cross_database_result(two_test_ids):
-    """Минимальный ComparisonResult типа CROSS_DATABASE"""
-    baseline_id, compared_id = two_test_ids
-    return ComparisonResult(
-        tests=[
-            make_test_info(baseline_id, "MySQL Test"),
-            make_test_info(compared_id, "PostgreSQL Test"),
-        ],
-        baseline_id=baseline_id,
-        comparison_type=ComparisonType.CROSS_DATABASE,
-        traits=ComparisonTraits(multiple_dbs=True),
+def per_test_result():
+    """Минимальный PerTestResult — один прогон, несколько СУБД."""
+    test_id = make_uuid()
+    db1, db2 = "conn_mysql", "conn_pg"
+    return PerTestResult(
+        analysis_mode="per_test",
+        test=make_test_info(test_id, "Mixed Test"),
+        warnings=[],
         descriptive_stats={
-            str(baseline_id): {"db1": MetricStatsBundle(
+            db1: MetricStatsBundle(
                 latency_ms=make_descriptive_stats(mean=45.0),
                 throughput=make_descriptive_stats(mean=100.0),
                 source="raw_samples",
-            )},
-            str(compared_id): {"db1": MetricStatsBundle(
+            ),
+            db2: MetricStatsBundle(
                 latency_ms=make_descriptive_stats(mean=50.0),
                 throughput=make_descriptive_stats(mean=110.0),
                 source="raw_samples",
-            )},
+            ),
         },
-        pairwise_comparisons=[
-            make_pairwise(baseline_id, compared_id, metric="throughput", pct_difference=10.0),
-            make_pairwise(baseline_id, compared_id, metric="latency_ms", pct_difference=11.1),
+        pairwise=[
+            make_pairwise(db1, db2, db_key=db1, metric="throughput", pct_difference=10.0),
+            make_pairwise(db1, db2, db_key=db1, metric="latency_ms", pct_difference=11.1),
         ],
-    )
-
-
-@pytest.fixture
-def scalability_result():
-    """ComparisonResult типа SCALABILITY (разные VU)"""
-    id1, id2 = make_uuid(), make_uuid()
-    return ComparisonResult(
-        tests=[
-            make_test_info(id1, "4 VU", virtual_users=4),
-            make_test_info(id2, "8 VU", virtual_users=8),
-        ],
-        baseline_id=id1,
-        comparison_type=ComparisonType.SCALABILITY,
-        traits=ComparisonTraits(same_load_params=False, diff_virtual_users=True),
-        descriptive_stats={
-            str(id1): {"db1": MetricStatsBundle(
-                throughput=make_descriptive_stats(mean=100.0),
-                latency_ms=make_descriptive_stats(mean=40.0),
-                source="raw_samples",
-            )},
-            str(id2): {"db1": MetricStatsBundle(
-                throughput=make_descriptive_stats(mean=180.0),
-                latency_ms=make_descriptive_stats(mean=55.0),
-                source="raw_samples",
-            )},
-        },
-        pairwise_comparisons=[
-            make_pairwise(id1, id2, metric="throughput", pct_difference=80.0),
-            make_pairwise(id1, id2, metric="latency_ms", pct_difference=37.5),
-        ],
-        normalized_metrics={
-            str(id1): {"db1": NormalizedMetrics(
-                throughput_abs=100.0, latency_mean_abs=40.0,
-                throughput_per_thread=25.0, scaling_efficiency=1.0,
-                threads=4, duration_seconds=60.0,
-                source_metrics=["throughput"],
-            )},
-            str(id2): {"db1": NormalizedMetrics(
-                throughput_abs=180.0, latency_mean_abs=55.0,
-                throughput_per_thread=22.5, scaling_efficiency=0.9,
-                threads=8, duration_seconds=60.0,
-                source_metrics=["throughput"],
-            )},
-        },
-    )
-
-
-@pytest.fixture
-def temporal_result():
-    """ComparisonResult типа TEMPORAL"""
-    id1, id2 = make_uuid(), make_uuid()
-    return ComparisonResult(
-        tests=[
-            make_test_info(id1, "Run Jan"),
-            make_test_info(id2, "Run Feb"),
-        ],
-        baseline_id=id1,
-        comparison_type=ComparisonType.TEMPORAL,
-        traits=ComparisonTraits(is_temporal=True),
-        descriptive_stats={
-            str(id1): {"db1": MetricStatsBundle(
-                throughput=make_descriptive_stats(mean=100.0),
-                latency_ms=make_descriptive_stats(mean=50.0),
-                source="raw_samples",
-            )},
-            str(id2): {"db1": MetricStatsBundle(
-                throughput=make_descriptive_stats(mean=95.0),
-                latency_ms=make_descriptive_stats(mean=55.0),
-                source="raw_samples",
-            )},
-        },
-        pairwise_comparisons=[
-            make_pairwise(id1, id2, metric="throughput", pct_difference=-5.0, is_significant=False, p_value=0.12),
-            make_pairwise(id1, id2, metric="latency_ms", pct_difference=10.0, is_significant=True, p_value=0.03),
-        ],
+        rankings=[],
+        charts=PerTestCharts(bar_chart=[], box_plot=[], throughput_series={}),
+        db_key_labels={db1: "MySQL", db2: "PostgreSQL"},
+        resource_metrics={},
     )

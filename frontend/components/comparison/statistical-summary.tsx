@@ -11,7 +11,12 @@ import {
   Table2,
 } from "lucide-react"
 
-import type { ComparisonResult, PairwiseComparison } from "@/lib/api"
+import {
+  type ComparisonResult,
+  type PairwiseComparison,
+  isPerTestResult,
+  isSeriesResult,
+} from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
@@ -61,23 +66,40 @@ const EFFECT_VARIANTS: Record<
 
 type ViewMode = "cards" | "table"
 
+function extractPairwise(result: ComparisonResult): PairwiseComparison[] {
+  if (isPerTestResult(result)) return result.pairwise
+  if (isSeriesResult(result)) {
+    return Object.values(result.per_db).flatMap((db) => db.adjacent_level_tests)
+  }
+  return []
+}
+
+function resolveLabel(id: string, result: ComparisonResult): string {
+  if (isPerTestResult(result)) {
+    return result.db_key_labels[id] ?? id
+  }
+  if (isSeriesResult(result)) {
+    const test = result.tests.find((t) => t.id === id)
+    return test?.name ?? result.db_key_labels[id] ?? id
+  }
+  return id
+}
+
 export function StatisticalSummary({ result }: StatisticalSummaryProps) {
   const [showOnlySignificant, setShowOnlySignificant] = useState(false)
   const [activeMetric, setActiveMetric] = useState<string>("all")
   const [activeDb, setActiveDb] = useState<string>("all")
 
-  const autoTable = result.tests.length >= 3
+  const allPairwise = useMemo(() => extractPairwise(result), [result])
+  const autoTable = allPairwise.length >= 6
   const [viewMode, setViewMode] = useState<ViewMode>(autoTable ? "table" : "cards")
 
-  const grouped = useMemo(() => groupByMetric(result.pairwise_comparisons), [result])
+  const grouped = useMemo(() => groupByMetric(allPairwise), [allPairwise])
   const metricKeys = useMemo(() => Object.keys(grouped), [grouped])
 
   const dbKeys = useMemo(
-    () =>
-      Array.from(
-        new Set(result.pairwise_comparisons.map((p) => p.db_key))
-      ),
-    [result]
+    () => Array.from(new Set(allPairwise.map((p) => p.db_key))),
+    [allPairwise]
   )
 
   const filteredEntries = metricKeys
@@ -92,27 +114,29 @@ export function StatisticalSummary({ result }: StatisticalSummaryProps) {
 
   const allFiltered = filteredEntries.flatMap(([, items]) => items)
 
-  const totalSignificant = result.pairwise_comparisons.filter((p) => p.is_significant_adjusted ?? p.is_significant).length
-  const totalLarge = result.pairwise_comparisons.filter(
+  const totalSignificant = allPairwise.filter((p) => p.is_significant_adjusted ?? p.is_significant).length
+  const totalLarge = allPairwise.filter(
     (p) => (p.is_significant_adjusted ?? p.is_significant) && p.effect_size_label === "large"
   ).length
+
+  const sectionTitle = isSeriesResult(result)
+    ? "Сравнения смежных уровней нагрузки"
+    : "Статистические тесты"
+  const sectionDesc = isSeriesResult(result)
+    ? "Попарные сравнения метрик между соседними уровнями нагрузки"
+    : "Попарные сравнения с baseline · p-value · Cohen\u2019s d · 95% CI"
 
   return (
     <section className="space-y-4">
       <div className="rounded-xl border border-border bg-card">
-        {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
           <div className="flex items-start gap-2.5">
             <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
               <Sigma className="h-3.5 w-3.5" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold tracking-tight">
-                Статистические тесты
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                Попарные сравнения с baseline · p-value · Cohen&apos;s d · 95% CI
-              </p>
+              <h2 className="text-sm font-semibold tracking-tight">{sectionTitle}</h2>
+              <p className="text-xs text-muted-foreground">{sectionDesc}</p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -125,22 +149,14 @@ export function StatisticalSummary({ result }: StatisticalSummaryProps) {
               <span className="font-mono tabular-nums">{totalLarge}</span> large effect
             </Badge>
             <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-2 py-1">
-              <Label
-                htmlFor="sig-filter"
-                className="cursor-pointer text-xs text-muted-foreground"
-              >
+              <Label htmlFor="sig-filter" className="cursor-pointer text-xs text-muted-foreground">
                 Только значимые
               </Label>
-              <Switch
-                id="sig-filter"
-                checked={showOnlySignificant}
-                onCheckedChange={setShowOnlySignificant}
-              />
+              <Switch id="sig-filter" checked={showOnlySignificant} onCheckedChange={setShowOnlySignificant} />
             </div>
           </div>
         </div>
 
-        {/* Metric tabs + DB filter + view toggle */}
         <div className="flex flex-wrap items-center gap-3 border-b border-border/60 px-4 pt-3 pb-3">
           <Tabs value={activeMetric} onValueChange={setActiveMetric}>
             <TabsList className="h-8 bg-transparent p-0 gap-1">
@@ -202,23 +218,18 @@ export function StatisticalSummary({ result }: StatisticalSummaryProps) {
           </div>
         </div>
 
-        {/* Body */}
         {viewMode === "cards" ? (
           <div className="divide-y divide-border/60">
             {filteredEntries.map(([metric, items]) => (
               <div key={metric} className="p-4">
                 <div className="mb-3 flex items-center gap-2">
-                  <h3 className="text-sm font-medium">
-                    {METRIC_LABELS[metric] || metric}
-                  </h3>
-                  <Badge variant="outline" className="font-mono text-[10px]">
-                    {items.length}
-                  </Badge>
+                  <h3 className="text-sm font-medium">{METRIC_LABELS[metric] || metric}</h3>
+                  <Badge variant="outline" className="font-mono text-[10px]">{items.length}</Badge>
                 </div>
                 <div className="grid gap-2 lg:grid-cols-2">
                   {items.map((item) => (
                     <ComparisonCard
-                      key={`${item.baseline_test_id}-${item.compared_test_id}-${item.db_key}-${item.metric}`}
+                      key={`${item.baseline_id}-${item.compared_id}-${item.db_key}-${item.metric}`}
                       item={item}
                       result={result}
                     />
@@ -258,7 +269,7 @@ function CompactTable({
       <table className="w-full text-xs">
         <thead>
           <tr className="border-b border-border/60 bg-muted/30 text-[11px] uppercase tracking-wider text-muted-foreground">
-            <th className="px-4 py-2 text-left font-medium">Тест</th>
+            <th className="px-4 py-2 text-left font-medium">Сравнение</th>
             <th className="px-3 py-2 text-left font-medium">СУБД</th>
             <th className="px-3 py-2 text-left font-medium">Метрика</th>
             <th className="px-3 py-2 text-center font-medium">p-value</th>
@@ -269,24 +280,20 @@ function CompactTable({
         </thead>
         <tbody className="divide-y divide-border/40">
           {items.map((item) => {
-            const comparedName =
-              result.tests.find((t) => t.id === item.compared_test_id)?.name ||
-              item.compared_test_id
+            const comparedName = resolveLabel(item.compared_id, result)
             const effectKey = item.effect_size_label || "negligible"
             const effectCfg = EFFECT_VARIANTS[effectKey]
 
             return (
               <tr
-                key={`${item.baseline_test_id}-${item.compared_test_id}-${item.db_key}-${item.metric}`}
+                key={`${item.baseline_id}-${item.compared_id}-${item.db_key}-${item.metric}`}
                 className={`hover:bg-muted/20 ${(item.is_significant_adjusted ?? item.is_significant) ? "" : "opacity-60"}`}
               >
                 <td className="px-4 py-2 font-medium">{comparedName}</td>
                 <td className="px-3 py-2 text-muted-foreground">
                   {resolveDbKeyLabel(item.db_key, result.db_key_labels)}
                 </td>
-                <td className="px-3 py-2">
-                  {METRIC_LABELS[item.metric] || item.metric}
-                </td>
+                <td className="px-3 py-2">{METRIC_LABELS[item.metric] || item.metric}</td>
                 <td className="px-3 py-2 text-center font-mono tabular-nums">
                   {item.p_value_adjusted != null
                     ? item.p_value_adjusted.toExponential(1)
@@ -303,10 +310,7 @@ function CompactTable({
                     : "—"}
                 </td>
                 <td className="px-3 py-2 text-center">
-                  <Badge
-                    variant="outline"
-                    className={`gap-1 font-mono text-[10px] ${effectCfg.cls}`}
-                  >
+                  <Badge variant="outline" className={`gap-1 font-mono text-[10px] ${effectCfg.cls}`}>
                     <span className={`h-1.5 w-1.5 rounded-full ${effectCfg.dotCls}`} />
                     {effectCfg.label}
                   </Badge>
@@ -327,12 +331,8 @@ function ComparisonCard({
   item: PairwiseComparison
   result: ComparisonResult
 }) {
-  const baselineName =
-    result.tests.find((t) => t.id === item.baseline_test_id)?.name ||
-    item.baseline_test_id
-  const comparedName =
-    result.tests.find((t) => t.id === item.compared_test_id)?.name ||
-    item.compared_test_id
+  const baselineName = resolveLabel(item.baseline_id, result)
+  const comparedName = resolveLabel(item.compared_id, result)
 
   const effectKey = item.effect_size_label || "negligible"
   const effectCfg = EFFECT_VARIANTS[effectKey]
@@ -391,23 +391,19 @@ function ComparisonCard({
 
       <div className="mt-3 flex flex-wrap gap-1.5 pl-2">
         {item.effect_size != null && item.effect_size_label && (
-          <Badge
-            variant="outline"
-            className={`gap-1 font-mono text-[10px] ${effectCfg.cls}`}
-          >
+          <Badge variant="outline" className={`gap-1 font-mono text-[10px] ${effectCfg.cls}`}>
             <span className={`h-1.5 w-1.5 rounded-full ${effectCfg.dotCls}`} />
             d = {Math.abs(item.effect_size).toFixed(2)} · {effectCfg.label}
           </Badge>
         )}
-        <Badge
-          variant="outline"
-          className="font-mono text-[10px]"
-        >
+        <Badge variant="outline" className="font-mono text-[10px]">
           p = {item.p_value_adjusted != null ? item.p_value_adjusted.toExponential(1) : item.p_value != null ? item.p_value.toExponential(1) : "—"}
         </Badge>
-        <Badge variant="outline" className="text-[10px]">
-          {item.test_used}
-        </Badge>
+        {item.test_used && (
+          <Badge variant="outline" className="text-[10px]">
+            {item.test_used}
+          </Badge>
+        )}
       </div>
     </div>
   )

@@ -255,9 +255,7 @@ export function HistoryPage() {
 
   const selectionWarning = selectedIds.length > 5
     ? "Можно выбрать не более 5 тестов"
-    : selectedIds.length > 0 && selectedIds.length < 2
-      ? "Для сравнения выберите минимум 2 завершённых теста"
-      : null
+    : null
 
   const toggleSelection = (testId: string, checked: boolean) => {
     setSelectedIds((current) => {
@@ -269,9 +267,15 @@ export function HistoryPage() {
     })
   }
 
-  const goToComparison = () => {
+  const goToPerTest = () => {
+    if (selectedIds.length !== 1) return
+    setComparisonSelection(selectedIds, selectedIds[0], "per_test")
+    setCurrentPage("comparison")
+  }
+
+  const goToSeries = () => {
     if (selectedIds.length < 2 || selectedIds.length > 5) return
-    setComparisonSelection(selectedIds, selectedIds[0])
+    setComparisonSelection(selectedIds, selectedIds[0], "series")
     setCurrentPage("comparison")
   }
 
@@ -601,9 +605,13 @@ export function HistoryPage() {
           <p className="text-muted-foreground">Просмотр результатов всех запущенных тестов</p>
         </div>
         <div className="flex gap-2">
-          <Button onClick={goToComparison} disabled={selectedIds.length < 2 || selectedIds.length > 5}>
+          <Button onClick={goToPerTest} disabled={selectedIds.length !== 1} variant="outline">
+            <Eye className="h-4 w-4 mr-2" />
+            Сводка по прогону
+          </Button>
+          <Button onClick={goToSeries} disabled={selectedIds.length < 2 || selectedIds.length > 5}>
             <GitCompare className="h-4 w-4 mr-2" />
-            Сравнить выбранные
+            Анализ серии
           </Button>
           <Button onClick={() => fetchTests()} variant="outline">
             <RefreshCw className="h-4 w-4 mr-2" />
@@ -623,9 +631,9 @@ export function HistoryPage() {
       <Card className="bg-card border-border">
         <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
           <div className="space-y-1">
-            <p className="font-medium">Выбрано для сравнения: {selectedIds.length}</p>
+            <p className="font-medium">Выбрано для анализа: {selectedIds.length}</p>
             <p className="text-sm text-muted-foreground">
-              Доступно завершённых тестов: {comparableTests.length}. Можно выбрать от 2 до 5.
+              Доступно завершённых тестов: {comparableTests.length}. 1 — сводка по прогону, 2–5 — анализ серии.
             </p>
             <div className="flex flex-wrap gap-2">
               {lockedScenario && (

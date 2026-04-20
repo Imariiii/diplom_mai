@@ -13,10 +13,11 @@ import {
   Zap,
 } from "lucide-react"
 
-import type {
-  ParameterImpactSummary,
-  MetricEffect,
-  ComparisonResult,
+import {
+  type ParameterImpactSummary,
+  type MetricEffect,
+  type ComparisonResult,
+  isSeriesResult,
 } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 
@@ -46,7 +47,9 @@ const METRIC_UNITS: Record<string, string> = {
 }
 
 export function ParameterImpact({ result }: ParameterImpactProps) {
-  if (!result.parameter_impacts || result.parameter_impacts.length === 0) {
+  const impacts = isSeriesResult(result) ? result.parameter_impacts : []
+
+  if (!impacts || impacts.length === 0) {
     return null
   }
 
@@ -65,12 +68,12 @@ export function ParameterImpact({ result }: ParameterImpactProps) {
           </div>
         </div>
         <Badge variant="outline" className="shrink-0 font-mono text-[11px]">
-          {result.parameter_impacts.length} сравнений
+          {impacts.length} сравнений
         </Badge>
       </header>
 
       <div className="grid gap-3 xl:grid-cols-2">
-        {result.parameter_impacts.map((summary) => (
+        {impacts.map((summary) => (
           <ImpactCard
             key={summary.test_id}
             summary={summary}

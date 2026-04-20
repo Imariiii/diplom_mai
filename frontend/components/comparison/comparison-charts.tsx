@@ -10,13 +10,16 @@ import {
   Tooltip,
   XAxis,
   YAxis,
-  Legend,
-  ReferenceLine,
-  Cell,
 } from "recharts"
 import { BarChart3, LineChart as LineIcon, Activity } from "lucide-react"
 
-import type { ComparisonResult, BarChartPoint } from "@/lib/api"
+import {
+  type ComparisonResult,
+  type BarChartPoint,
+  type SeriesChartPoint,
+  isPerTestResult,
+  isSeriesResult,
+} from "@/lib/api"
 import {
   ChartContainer,
   ChartLegend,
@@ -28,20 +31,11 @@ import {
 
 interface ComparisonChartsProps {
   result: ComparisonResult
-  useNormalized?: boolean
+  chartFocus?: "degradation" | "stability"
 }
 
 function resolveDbKeyLabel(dbKey: string, labels?: Record<string, string>): string {
   return labels?.[dbKey] || dbKey
-}
-
-function toDbFamilyLabel(dbKey: string, labels?: Record<string, string>): string {
-  const resolved = labels?.[dbKey] || dbKey
-  const lower = resolved.toLowerCase()
-  if (lower.includes("post")) return "PostgreSQL"
-  if (lower.includes("maria")) return "MariaDB"
-  if (lower.includes("mysql")) return "MySQL"
-  return resolved
 }
 
 const DB_COLORS = [
@@ -52,38 +46,141 @@ const DB_COLORS = [
   "var(--chart-5)",
 ]
 
-export function ComparisonCharts({ result, useNormalized = false }: ComparisonChartsProps) {
-  const testNameById = Object.fromEntries(result.tests.map((t) => [t.id, t.name]))
-  const showNormalized =
-    useNormalized && result.traits != null && !result.traits.same_load_params
+export function ComparisonCharts({ result, chartFocus }: ComparisonChartsProps) {
+  if (isPerTestResult(result)) {
+    return <PerTestChartsView result={result} />
+  }
+  if (isSeriesResult(result)) {
+    return <SeriesChartsView result={result} chartFocus={chartFocus} />
+  }
+  return null
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Per-test charts
+// ═══════════════════════════════════════════════════════════════════════════
+
+function PerTestChartsView({ result }: { result: Extract<ComparisonResult, { analysis_mode: "per_test" }> }) {
+  const charts = result.charts
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-      {showNormalized ? (
-        <>
-          <NormalizedThroughputChart result={result} />
-          <ScalingEfficiencyChart result={result} />
-        </>
-      ) : (
-        <>
-          <GroupedLatencyChart result={result} />
-          <GroupedThroughputChart result={result} />
-          <PercentilesChart result={result} />
-          <DistributionChart result={result} />
-        </>
-      )}
+      <GroupedLatencyChart barData={charts.bar_chart} dbKeyLabels={result.db_key_labels} />
+      <GroupedThroughputChart barData={charts.bar_chart} dbKeyLabels={result.db_key_labels} />
+      <PercentilesChart barData={charts.bar_chart} dbKeyLabels={result.db_key_labels} />
+      <DistributionChart boxData={charts.box_plot} dbKeyLabels={result.db_key_labels} />
       <div className="xl:col-span-2">
         <ThroughputTimeline
-          result={result}
-          testNameById={testNameById}
-          showNormalized={showNormalized}
+          series={charts.throughput_series}
+          dbKeyLabels={result.db_key_labels}
         />
       </div>
     </div>
   )
 }
 
-// ---------- Chart shell ----------
+// ═══════════════════════════════════════════════════════════════════════════
+// Series charts
+// ═══════════════════════════════════════════════════════════════════════════
+
+function SeriesChartsView({
+  result,
+  chartFocus,
+}: {
+  result: Extract<ComparisonResult, { analysis_mode: "series" }>
+  chartFocus?: "degradation" | "stability"
+}) {
+  const charts = result.charts
+
+  if (chartFocus === "degradation") {
+    return (
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <SeriesTrajectoryChart
+          title="Latency p95 по уровням нагрузки"
+          description="Деградация хвостовых задержек (p95)"
+          data={charts.p95_by_load}
+          dbKeyLabels={result.db_key_labels}
+          unit="мс"
+        />
+        <SeriesTrajectoryChart
+          title="Latency p99 по уровням нагрузки"
+          description="Деградация хвостовых задержек (p99)"
+          data={charts.p99_by_load}
+          dbKeyLabels={result.db_key_labels}
+          unit="мс"
+        />
+        <DegradationSummaryChart result={result} />
+      </div>
+    )
+  }
+
+  if (chartFocus === "stability") {
+    return (
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <SeriesTrajectoryChart
+          title="Error rate по уровням нагрузки"
+          description="Доля ошибок при росте нагрузки"
+          data={charts.error_rate_by_load}
+          dbKeyLabels={result.db_key_labels}
+          unit="%"
+        />
+        {Object.keys(charts.scaling_efficiency).length > 0 && (
+          <SeriesTrajectoryChart
+            title="Scaling efficiency"
+            description="Эффективность масштабирования"
+            data={charts.scaling_efficiency}
+            dbKeyLabels={result.db_key_labels}
+            unit="%"
+          />
+        )}
+        <StabilityIndexChart result={result} />
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <SeriesTrajectoryChart
+        title="Throughput по уровням нагрузки"
+        description="Средняя пропускная способность на каждом уровне"
+        data={charts.throughput_by_load}
+        dbKeyLabels={result.db_key_labels}
+        unit="req/s"
+      />
+      <SeriesTrajectoryChart
+        title="Latency по уровням нагрузки"
+        description="Средняя задержка на каждом уровне"
+        data={charts.latency_by_load}
+        dbKeyLabels={result.db_key_labels}
+        unit="мс"
+      />
+      <SeriesTrajectoryChart
+        title="Latency p95 по уровням нагрузки"
+        description="Хвостовые задержки p95"
+        data={charts.p95_by_load}
+        dbKeyLabels={result.db_key_labels}
+        unit="мс"
+      />
+      <SeriesTrajectoryChart
+        title="Latency p99 по уровням нагрузки"
+        description="Хвостовые задержки p99"
+        data={charts.p99_by_load}
+        dbKeyLabels={result.db_key_labels}
+        unit="мс"
+      />
+      {charts.bar_chart.length > 0 && (
+        <GroupedThroughputChart barData={charts.bar_chart} dbKeyLabels={result.db_key_labels} />
+      )}
+      {charts.box_plot.length > 0 && (
+        <DistributionChart boxData={charts.box_plot} dbKeyLabels={result.db_key_labels} />
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Generic chart card shell
+// ═══════════════════════════════════════════════════════════════════════════
 
 function ChartCard({
   title,
@@ -119,7 +216,9 @@ function ChartCard({
   )
 }
 
-// ---------- Grouped charts helpers ----------
+// ═══════════════════════════════════════════════════════════════════════════
+// Shared per-test charts (grouped bar / percentiles / distribution / timeline)
+// ═══════════════════════════════════════════════════════════════════════════
 
 interface GroupedDataPoint {
   testName: string
@@ -131,7 +230,7 @@ function buildGroupedData(
   dbKeyLabels: Record<string, string>,
   getValue: (pt: BarChartPoint) => number | null | undefined
 ): { data: GroupedDataPoint[]; dbLabels: string[] } {
-  const testNames = Array.from(new Set(barData.map((d) => d.test_name)))
+  const testNames = Array.from(new Set(barData.map((d) => d.label)))
   const dbKeysRaw = Array.from(new Set(barData.map((d) => d.db_key)))
   const dbLabels = dbKeysRaw.map((k) => resolveDbKeyLabel(k, dbKeyLabels))
   const dbKeyToLabel = Object.fromEntries(
@@ -140,7 +239,7 @@ function buildGroupedData(
 
   const data: GroupedDataPoint[] = testNames.map((name) => {
     const row: GroupedDataPoint = { testName: name }
-    for (const pt of barData.filter((d) => d.test_name === name)) {
+    for (const pt of barData.filter((d) => d.label === name)) {
       const label = dbKeyToLabel[pt.db_key] || pt.db_key
       row[label] = getValue(pt)
     }
@@ -150,56 +249,33 @@ function buildGroupedData(
   return { data, dbLabels: Array.from(new Set(dbLabels)) }
 }
 
-// ---------- Grouped Latency Chart ----------
-
-function GroupedLatencyChart({ result }: { result: ComparisonResult }) {
+function GroupedLatencyChart({
+  barData,
+  dbKeyLabels,
+}: {
+  barData: BarChartPoint[]
+  dbKeyLabels: Record<string, string>
+}) {
   const { data, dbLabels } = useMemo(
-    () =>
-      buildGroupedData(
-        result.charts_data.bar_chart,
-        result.db_key_labels,
-        (pt) => pt.latency_mean
-      ),
-    [result]
+    () => buildGroupedData(barData, dbKeyLabels, (pt) => pt.latency_mean),
+    [barData, dbKeyLabels]
   )
 
   const config: ChartConfig = Object.fromEntries(
-    dbLabels.map((label, i) => [
-      label,
-      { label, color: DB_COLORS[i % DB_COLORS.length] },
-    ])
+    dbLabels.map((label, i) => [label, { label, color: DB_COLORS[i % DB_COLORS.length] }])
   )
 
   return (
-    <ChartCard
-      title="Latency"
-      description="Среднее по СУБД (мс)"
-      icon={Activity}
-    >
+    <ChartCard title="Latency" description="Среднее по СУБД (мс)" icon={Activity}>
       <ChartContainer config={config} className="h-[280px] w-full">
         <BarChart data={data} barGap={2} barCategoryGap="20%">
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
-          <XAxis
-            dataKey="testName"
-            tickLine={false}
-            axisLine={false}
-            tick={{ fontSize: 11 }}
-          />
-          <YAxis
-            tickLine={false}
-            axisLine={false}
-            tick={{ fontSize: 10 }}
-            tickFormatter={(v) => `${v}`}
-          />
+          <XAxis dataKey="testName" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
+          <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 10 }} />
           <ChartTooltip content={<ChartTooltipContent indicator="dot" />} />
           <ChartLegend content={<ChartLegendContent />} />
           {dbLabels.map((label, i) => (
-            <Bar
-              key={label}
-              dataKey={label}
-              radius={[4, 4, 0, 0]}
-              fill={DB_COLORS[i % DB_COLORS.length]}
-            />
+            <Bar key={label} dataKey={label} radius={[4, 4, 0, 0]} fill={DB_COLORS[i % DB_COLORS.length]} />
           ))}
         </BarChart>
       </ChartContainer>
@@ -207,29 +283,22 @@ function GroupedLatencyChart({ result }: { result: ComparisonResult }) {
   )
 }
 
-// ---------- Grouped Throughput Chart ----------
-
-function GroupedThroughputChart({ result }: { result: ComparisonResult }) {
+function GroupedThroughputChart({
+  barData,
+  dbKeyLabels,
+}: {
+  barData: BarChartPoint[]
+  dbKeyLabels: Record<string, string>
+}) {
   const { data, dbLabels } = useMemo(
-    () =>
-      buildGroupedData(
-        result.charts_data.bar_chart,
-        result.db_key_labels,
-        (pt) => pt.throughput_mean
-      ),
-    [result]
+    () => buildGroupedData(barData, dbKeyLabels, (pt) => pt.throughput_mean),
+    [barData, dbKeyLabels]
   )
 
-  const maxVal = Math.max(
-    ...result.charts_data.bar_chart.map((d) => d.throughput_mean ?? 0),
-    1
-  )
+  const maxVal = Math.max(...barData.map((d) => d.throughput_mean ?? 0), 1)
 
   const config: ChartConfig = Object.fromEntries(
-    dbLabels.map((label, i) => [
-      label,
-      { label, color: DB_COLORS[i % DB_COLORS.length] },
-    ])
+    dbLabels.map((label, i) => [label, { label, color: DB_COLORS[i % DB_COLORS.length] }])
   )
 
   return (
@@ -246,22 +315,12 @@ function GroupedThroughputChart({ result }: { result: ComparisonResult }) {
       <ChartContainer config={config} className="h-[280px] w-full">
         <BarChart data={data} barGap={2} barCategoryGap="20%">
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
-          <XAxis
-            dataKey="testName"
-            tickLine={false}
-            axisLine={false}
-            tick={{ fontSize: 11 }}
-          />
+          <XAxis dataKey="testName" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
           <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 10 }} />
           <ChartTooltip content={<ChartTooltipContent indicator="line" />} />
           <ChartLegend content={<ChartLegendContent />} />
           {dbLabels.map((label, i) => (
-            <Bar
-              key={label}
-              dataKey={label}
-              radius={[4, 4, 0, 0]}
-              fill={DB_COLORS[i % DB_COLORS.length]}
-            />
+            <Bar key={label} dataKey={label} radius={[4, 4, 0, 0]} fill={DB_COLORS[i % DB_COLORS.length]} />
           ))}
         </BarChart>
       </ChartContainer>
@@ -269,14 +328,18 @@ function GroupedThroughputChart({ result }: { result: ComparisonResult }) {
   )
 }
 
-// ---------- Percentiles ----------
-
-function PercentilesChart({ result }: { result: ComparisonResult }) {
-  const hasPercentiles = result.charts_data.bar_chart.some((d) => d.latency_p95 != null)
+function PercentilesChart({
+  barData,
+  dbKeyLabels,
+}: {
+  barData: BarChartPoint[]
+  dbKeyLabels: Record<string, string>
+}) {
+  const hasPercentiles = barData.some((d) => d.latency_p95 != null)
   if (!hasPercentiles) return null
 
-  const data = result.charts_data.bar_chart.map((item) => ({
-    name: `${item.test_name} · ${resolveDbKeyLabel(item.db_key, result.db_key_labels)}`,
+  const data = barData.map((item) => ({
+    name: `${item.label} · ${resolveDbKeyLabel(item.db_key, dbKeyLabels)}`,
     p50: item.latency_mean,
     p95: item.latency_p95,
     p99: item.latency_p99,
@@ -289,20 +352,11 @@ function PercentilesChart({ result }: { result: ComparisonResult }) {
   }
 
   return (
-    <ChartCard
-      title="Перцентили latency"
-      description="p50 / p95 / p99 — хвостовые задержки"
-      icon={LineIcon}
-    >
+    <ChartCard title="Перцентили latency" description="p50 / p95 / p99 — хвостовые задержки" icon={LineIcon}>
       <ChartContainer config={config} className="h-[280px] w-full">
         <LineChart data={data}>
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
-          <XAxis
-            dataKey="name"
-            tickLine={false}
-            axisLine={false}
-            tick={{ fontSize: 10 }}
-          />
+          <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 10 }} />
           <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 10 }} />
           <ChartTooltip content={<ChartTooltipContent indicator="dot" />} />
           <ChartLegend content={<ChartLegendContent />} />
@@ -315,20 +369,22 @@ function PercentilesChart({ result }: { result: ComparisonResult }) {
   )
 }
 
-// ---------- Distribution ----------
+function DistributionChart({
+  boxData,
+  dbKeyLabels,
+}: {
+  boxData: Array<{ label: string; db_key: string; min: number; q1: number; median: number; q3: number; max: number; sample_count: number }>
+  dbKeyLabels: Record<string, string>
+}) {
+  if (boxData.length === 0) return null
 
-function DistributionChart({ result }: { result: ComparisonResult }) {
-  const data = result.charts_data.box_plot
-  if (data.length === 0) return null
-
-  const mapped = data.map((d) => ({
-    name: `${d.test_name} · ${resolveDbKeyLabel(d.db_key, result.db_key_labels)}`,
+  const mapped = boxData.map((d) => ({
+    name: `${d.label} · ${resolveDbKeyLabel(d.db_key, dbKeyLabels)}`,
     min: d.min,
     q1Offset: d.q1 - d.min,
     medianOffset: d.median - d.q1,
     q3Offset: d.q3 - d.median,
     maxOffset: d.max - d.q3,
-    iqr: d.q3 - d.q1,
     median: d.median,
     q1: d.q1,
     q3: d.q3,
@@ -344,23 +400,12 @@ function DistributionChart({ result }: { result: ComparisonResult }) {
   }
 
   return (
-    <ChartCard
-      title="Распределение latency"
-      description="Five-number summary (min · Q1 · median · Q3 · max)"
-      icon={BarChart3}
-    >
+    <ChartCard title="Распределение latency" description="Five-number summary (min · Q1 · median · Q3 · max)" icon={BarChart3}>
       <ChartContainer config={config} className="h-[280px] w-full">
         <BarChart data={mapped} layout="vertical" stackOffset="expand">
           <CartesianGrid horizontal={false} strokeDasharray="3 3" />
           <XAxis type="number" tickLine={false} axisLine={false} tick={{ fontSize: 10 }} />
-          <YAxis
-            type="category"
-            dataKey="name"
-            tickLine={false}
-            axisLine={false}
-            tick={{ fontSize: 10 }}
-            width={140}
-          />
+          <YAxis type="category" dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 10 }} width={140} />
           <Tooltip
             cursor={{ fill: "var(--muted)", opacity: 0.3 }}
             content={({ active, payload }) => {
@@ -397,139 +442,21 @@ function DistributionChart({ result }: { result: ComparisonResult }) {
   )
 }
 
-// ---------- Normalized charts ----------
-
-function NormalizedThroughputChart({ result }: { result: ComparisonResult }) {
-  const data = buildByThreads(result, "throughput_per_thread")
-  const families = extractFamilies(data)
-
-  const config: ChartConfig = Object.fromEntries(
-    families.map((f, i) => [f, { label: f, color: `var(--chart-${(i % 5) + 1})` }])
-  )
-
-  return (
-    <ChartCard
-      title="Throughput на поток"
-      description="Нормализованная пропускная способность по уровням нагрузки"
-      icon={LineIcon}
-    >
-      <ChartContainer config={config} className="h-[280px] w-full">
-        <LineChart data={data}>
-          <CartesianGrid vertical={false} strokeDasharray="3 3" />
-          <XAxis
-            dataKey="threads"
-            tickLine={false}
-            axisLine={false}
-            tick={{ fontSize: 10 }}
-            label={{ value: "Потоки", position: "insideBottom", offset: -4, fontSize: 10 }}
-          />
-          <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 10 }} />
-          <ChartTooltip content={<ChartTooltipContent indicator="line" />} />
-          <ChartLegend content={<ChartLegendContent />} />
-          {families.map((family) => (
-            <Line
-              key={family}
-              type="monotone"
-              dataKey={family}
-              stroke={`var(--color-${family})`}
-              strokeWidth={2}
-              dot={{ r: 4 }}
-            />
-          ))}
-        </LineChart>
-      </ChartContainer>
-    </ChartCard>
-  )
-}
-
-function ScalingEfficiencyChart({ result }: { result: ComparisonResult }) {
-  const data = buildByThreads(result, "scaling_efficiency")
-  const families = extractFamilies(data)
-
-  const config: ChartConfig = Object.fromEntries(
-    families.map((f, i) => [f, { label: f, color: `var(--chart-${(i % 5) + 1})` }])
-  )
-
-  return (
-    <ChartCard
-      title="Scaling efficiency"
-      description="Эффективность масштабирования относительно baseline (100% = идеально)"
-      icon={Activity}
-    >
-      <ChartContainer config={config} className="h-[280px] w-full">
-        <LineChart data={data}>
-          <CartesianGrid vertical={false} strokeDasharray="3 3" />
-          <XAxis
-            dataKey="threads"
-            tickLine={false}
-            axisLine={false}
-            tick={{ fontSize: 10 }}
-          />
-          <YAxis
-            tickLine={false}
-            axisLine={false}
-            tick={{ fontSize: 10 }}
-            tickFormatter={(v) => `${Math.round(v * 100)}%`}
-            domain={[0, 1.1]}
-          />
-          <ChartTooltip
-            content={
-              <ChartTooltipContent
-                indicator="line"
-                formatter={(value, name, item) => (
-                  <div className="flex w-full justify-between gap-4">
-                    <span className="text-muted-foreground">{item.dataKey}</span>
-                    <span className="font-mono font-medium tabular-nums">
-                      {((value as number) * 100).toFixed(1)}%
-                    </span>
-                  </div>
-                )}
-              />
-            }
-          />
-          <ChartLegend content={<ChartLegendContent />} />
-          <ReferenceLine
-            y={1}
-            stroke="var(--muted-foreground)"
-            strokeDasharray="3 3"
-            label={{ value: "Идеально", fontSize: 10, fill: "var(--muted-foreground)" }}
-          />
-          {families.map((family) => (
-            <Line
-              key={family}
-              type="monotone"
-              dataKey={family}
-              stroke={`var(--color-${family})`}
-              strokeWidth={2}
-              dot={{ r: 4 }}
-            />
-          ))}
-        </LineChart>
-      </ChartContainer>
-    </ChartCard>
-  )
-}
-
-// ---------- Throughput Timeline ----------
-
 function ThroughputTimeline({
-  result,
-  testNameById,
-  showNormalized,
+  series,
+  dbKeyLabels,
 }: {
-  result: ComparisonResult
-  testNameById: Record<string, string>
-  showNormalized: boolean
+  series: Record<string, Array<{ timestamp?: string | null; throughput?: number | null; tps?: number | null }>>
+  dbKeyLabels: Record<string, string>
 }) {
   const { merged, seriesKeys } = useMemo(() => {
     const resolveSeriesLabel = (seriesKey: string) => {
-      const [testId, ...rest] = seriesKey.split(":")
-      const dbKey = rest.join(":")
-      const dbLabel = dbKey ? resolveDbKeyLabel(dbKey, result.db_key_labels) : ""
-      return dbLabel || testId
+      const parts = seriesKey.split(":")
+      const dbKey = parts.length > 1 ? parts.slice(1).join(":") : seriesKey
+      return resolveDbKeyLabel(dbKey, dbKeyLabels)
     }
 
-    const seriesEntries = Object.entries(result.charts_data.throughput_series)
+    const seriesEntries = Object.entries(series)
     if (seriesEntries.length === 0) return { merged: [], seriesKeys: [] as string[] }
 
     const all: Record<string, Array<{ t: number; v: number }>> = {}
@@ -558,7 +485,7 @@ function ThroughputTimeline({
       return row
     })
     return { merged: m, seriesKeys: Object.keys(all) }
-  }, [result, testNameById])
+  }, [series, dbKeyLabels])
 
   if (merged.length === 0) return null
 
@@ -569,35 +496,104 @@ function ThroughputTimeline({
   return (
     <ChartCard
       title="Throughput по времени"
-      description={
-        showNormalized
-          ? "Нормализованные временные ряды (относительное время)"
-          : "Временные ряды пропускной способности (относительное время)"
-      }
+      description="Временные ряды пропускной способности (относительное время)"
       icon={LineIcon}
     >
       <ChartContainer config={config} className="h-[320px] w-full">
         <LineChart data={merged}>
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
-          <XAxis
-            dataKey="time"
-            tickLine={false}
-            axisLine={false}
-            tick={{ fontSize: 10 }}
-            interval="preserveStartEnd"
-            minTickGap={32}
-          />
+          <XAxis dataKey="time" tickLine={false} axisLine={false} tick={{ fontSize: 10 }} interval="preserveStartEnd" minTickGap={32} />
           <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 10 }} />
           <ChartTooltip content={<ChartTooltipContent indicator="line" />} />
           <ChartLegend content={<ChartLegendContent />} />
           {seriesKeys.map((key) => (
+            <Line key={key} type="monotone" dataKey={key} stroke={`var(--color-${key})`} strokeWidth={1.75} dot={false} />
+          ))}
+        </LineChart>
+      </ChartContainer>
+    </ChartCard>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Series-specific charts
+// ═══════════════════════════════════════════════════════════════════════════
+
+function SeriesTrajectoryChart({
+  title,
+  description,
+  data,
+  dbKeyLabels,
+  unit,
+}: {
+  title: string
+  description: string
+  data: Record<string, SeriesChartPoint[]>
+  dbKeyLabels: Record<string, string>
+  unit: string
+}) {
+  const { chartData, dbLabels } = useMemo(() => {
+    const entries = Object.entries(data)
+    if (entries.length === 0) return { chartData: [], dbLabels: [] }
+
+    const dbLabels = entries.map(([k]) => resolveDbKeyLabel(k, dbKeyLabels))
+
+    const allLevels = entries[0][1].map((pt) => pt.load_label)
+    const chartData = allLevels.map((label, idx) => {
+      const row: Record<string, string | number | null> = { load: label }
+      entries.forEach(([dbKey, points], dbIdx) => {
+        const dbLabel = dbLabels[dbIdx]
+        row[dbLabel] = points[idx]?.value ?? null
+      })
+      return row
+    })
+
+    return { chartData, dbLabels }
+  }, [data, dbKeyLabels])
+
+  if (chartData.length === 0) return null
+
+  const config: ChartConfig = Object.fromEntries(
+    dbLabels.map((label, i) => [label, { label, color: DB_COLORS[i % DB_COLORS.length] }])
+  )
+
+  return (
+    <ChartCard title={title} description={description} icon={LineIcon}>
+      <ChartContainer config={config} className="h-[280px] w-full">
+        <LineChart data={chartData}>
+          <CartesianGrid vertical={false} strokeDasharray="3 3" />
+          <XAxis dataKey="load" tickLine={false} axisLine={false} tick={{ fontSize: 10 }} />
+          <YAxis
+            tickLine={false}
+            axisLine={false}
+            tick={{ fontSize: 10 }}
+            tickFormatter={(v) => (unit === "%" ? `${v.toFixed(0)}%` : `${v}`)}
+          />
+          <ChartTooltip
+            content={
+              <ChartTooltipContent
+                indicator="dot"
+                formatter={(value, name) => (
+                  <div className="flex w-full justify-between gap-4">
+                    <span className="text-muted-foreground">{name}</span>
+                    <span className="font-mono font-medium tabular-nums">
+                      {typeof value === "number" ? value.toFixed(2) : "—"} {unit}
+                    </span>
+                  </div>
+                )}
+              />
+            }
+          />
+          <ChartLegend content={<ChartLegendContent />} />
+          {dbLabels.map((label, i) => (
             <Line
-              key={key}
+              key={label}
               type="monotone"
-              dataKey={key}
-              stroke={`var(--color-${key})`}
-              strokeWidth={1.75}
-              dot={false}
+              dataKey={label}
+              stroke={DB_COLORS[i % DB_COLORS.length]}
+              strokeWidth={2}
+              dot={{ r: 4 }}
+              connectNulls
             />
           ))}
         </LineChart>
@@ -606,28 +602,102 @@ function ThroughputTimeline({
   )
 }
 
-// ---------- Helpers ----------
+function DegradationSummaryChart({
+  result,
+}: {
+  result: Extract<ComparisonResult, { analysis_mode: "series" }>
+}) {
+  const data = useMemo(() => {
+    return Object.entries(result.per_db).map(([dbKey, summary]) => ({
+      name: resolveDbKeyLabel(dbKey, result.db_key_labels),
+      p95: summary.degradation.overall_p95,
+      p99: summary.degradation.overall_p99,
+    }))
+  }, [result])
 
-function buildByThreads(
-  result: ComparisonResult,
-  field: "throughput_per_thread" | "scaling_efficiency"
-): Array<Record<string, number | string>> {
-  const rows = new Map<number, Record<string, number | string>>()
-  for (const test of result.tests) {
-    const metrics = result.normalized_metrics[test.id] || {}
-    for (const [dbKey, n] of Object.entries(metrics)) {
-      const threads = n.threads
-      const value = n[field]
-      if (threads == null || value == null) continue
-      const family = toDbFamilyLabel(dbKey, result.db_key_labels)
-      const row = rows.get(threads) || { threads }
-      row[family] = value
-      rows.set(threads, row)
-    }
+  if (data.length === 0) return null
+
+  const config: ChartConfig = {
+    p95: { label: "Деградация p95", color: "var(--chart-4)" },
+    p99: { label: "Деградация p99", color: "var(--chart-5)" },
   }
-  return Array.from(rows.values()).sort((a, b) => Number(a.threads) - Number(b.threads))
+
+  return (
+    <ChartCard
+      title="Индекс деградации"
+      description="Суммарная деградация p95/p99 по СУБД"
+      icon={Activity}
+    >
+      <ChartContainer config={config} className="h-[280px] w-full">
+        <BarChart data={data} barGap={4} barCategoryGap="30%">
+          <CartesianGrid vertical={false} strokeDasharray="3 3" />
+          <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
+          <YAxis
+            tickLine={false}
+            axisLine={false}
+            tick={{ fontSize: 10 }}
+            tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
+          />
+          <ChartTooltip
+            content={
+              <ChartTooltipContent
+                indicator="dot"
+                formatter={(value) => (
+                  <span className="font-mono tabular-nums">
+                    {((value as number) * 100).toFixed(1)}%
+                  </span>
+                )}
+              />
+            }
+          />
+          <ChartLegend content={<ChartLegendContent />} />
+          <Bar dataKey="p95" radius={[4, 4, 0, 0]} fill="var(--chart-4)" />
+          <Bar dataKey="p99" radius={[4, 4, 0, 0]} fill="var(--chart-5)" />
+        </BarChart>
+      </ChartContainer>
+    </ChartCard>
+  )
 }
 
-function extractFamilies(data: Array<Record<string, number | string>>): string[] {
-  return Array.from(new Set(data.flatMap((d) => Object.keys(d).filter((k) => k !== "threads"))))
+function StabilityIndexChart({
+  result,
+}: {
+  result: Extract<ComparisonResult, { analysis_mode: "series" }>
+}) {
+  const data = useMemo(() => {
+    return Object.entries(result.per_db)
+      .filter(([, s]) => s.stability_index != null)
+      .map(([dbKey, summary]) => ({
+        name: resolveDbKeyLabel(dbKey, result.db_key_labels),
+        stability: summary.stability_index,
+        elasticity: summary.elasticity,
+      }))
+  }, [result])
+
+  if (data.length === 0) return null
+
+  const config: ChartConfig = {
+    stability: { label: "Индекс стабильности", color: "var(--chart-1)" },
+    elasticity: { label: "Эластичность", color: "var(--chart-3)" },
+  }
+
+  return (
+    <ChartCard
+      title="Стабильность и эластичность"
+      description="CV-индекс стабильности и эластичность throughput/нагрузку"
+      icon={Activity}
+    >
+      <ChartContainer config={config} className="h-[280px] w-full">
+        <BarChart data={data} barGap={4} barCategoryGap="30%">
+          <CartesianGrid vertical={false} strokeDasharray="3 3" />
+          <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
+          <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 10 }} />
+          <ChartTooltip content={<ChartTooltipContent indicator="dot" />} />
+          <ChartLegend content={<ChartLegendContent />} />
+          <Bar dataKey="stability" radius={[4, 4, 0, 0]} fill="var(--chart-1)" />
+          <Bar dataKey="elasticity" radius={[4, 4, 0, 0]} fill="var(--chart-3)" />
+        </BarChart>
+      </ChartContainer>
+    </ChartCard>
+  )
 }

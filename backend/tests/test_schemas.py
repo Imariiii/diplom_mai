@@ -8,9 +8,9 @@ import pytest
 from pydantic import ValidationError
 
 from backend.comparison.schemas import (
+    AnalysisMode,
     AnalysisReportConfig,
     ComparisonRequest,
-    ComparisonType,
     DescriptiveStats,
     MetricStatsBundle,
     PairwiseComparison,
@@ -18,45 +18,59 @@ from backend.comparison.schemas import (
 
 
 # =========================================================================
+# AnalysisMode
+# =========================================================================
+
+class TestAnalysisMode:
+    def test_values(self):
+        assert AnalysisMode.PER_TEST.value == "per_test"
+        assert AnalysisMode.SERIES.value == "series"
+
+
+# =========================================================================
 # ComparisonRequest
 # =========================================================================
 
 class TestComparisonRequest:
-    def test_valid_two_ids(self):
+    def test_per_test_single_id(self):
+        req = ComparisonRequest(analysis_mode="per_test", test_ids=[uuid.uuid4()])
+        assert len(req.test_ids) == 1
+        assert req.analysis_mode == AnalysisMode.PER_TEST
+
+    def test_per_test_multiple_ids_raises(self):
+        with pytest.raises(ValidationError):
+            ComparisonRequest(analysis_mode="per_test", test_ids=[uuid.uuid4(), uuid.uuid4()])
+
+    def test_series_two_ids(self):
         ids = [uuid.uuid4(), uuid.uuid4()]
-        req = ComparisonRequest(test_ids=ids)
+        req = ComparisonRequest(analysis_mode="series", test_ids=ids)
         assert len(req.test_ids) == 2
 
-    def test_valid_five_ids(self):
+    def test_series_five_ids(self):
         ids = [uuid.uuid4() for _ in range(5)]
-        req = ComparisonRequest(test_ids=ids)
+        req = ComparisonRequest(analysis_mode="series", test_ids=ids)
         assert len(req.test_ids) == 5
 
-    def test_too_few_ids_raises(self):
+    def test_series_single_id_raises(self):
         with pytest.raises(ValidationError):
-            ComparisonRequest(test_ids=[uuid.uuid4()])
+            ComparisonRequest(analysis_mode="series", test_ids=[uuid.uuid4()])
 
-    def test_too_many_ids_raises(self):
+    def test_series_too_many_ids_raises(self):
         with pytest.raises(ValidationError):
-            ComparisonRequest(test_ids=[uuid.uuid4() for _ in range(6)])
-
-    def test_empty_ids_raises(self):
-        with pytest.raises(ValidationError):
-            ComparisonRequest(test_ids=[])
+            ComparisonRequest(analysis_mode="series", test_ids=[uuid.uuid4() for _ in range(6)])
 
     def test_baseline_id_optional(self):
         ids = [uuid.uuid4(), uuid.uuid4()]
-        req = ComparisonRequest(test_ids=ids)
+        req = ComparisonRequest(analysis_mode="series", test_ids=ids)
         assert req.baseline_id is None
 
     def test_baseline_id_set(self):
         ids = [uuid.uuid4(), uuid.uuid4()]
-        req = ComparisonRequest(test_ids=ids, baseline_id=ids[0])
+        req = ComparisonRequest(analysis_mode="series", test_ids=ids, baseline_id=ids[0])
         assert req.baseline_id == ids[0]
 
     def test_report_config_optional(self):
-        ids = [uuid.uuid4(), uuid.uuid4()]
-        req = ComparisonRequest(test_ids=ids)
+        req = ComparisonRequest(analysis_mode="per_test", test_ids=[uuid.uuid4()])
         assert req.report_config is None
 
 
@@ -70,8 +84,8 @@ class TestDescriptiveStats:
             count=100, mean=50.0, median=48.0, std=10.0,
             min=20.0, max=90.0, p50=48.0, p95=70.0, p99=85.0,
         )
-        assert ds.cv == 0.0  # default
-        assert ds.iqr == 0.0  # default
+        assert ds.cv == 0.0
+        assert ds.iqr == 0.0
 
     def test_with_cv_and_iqr(self):
         ds = DescriptiveStats(
@@ -127,28 +141,14 @@ class TestAnalysisReportConfig:
 
 
 # =========================================================================
-# ComparisonType enum
-# =========================================================================
-
-class TestComparisonType:
-    def test_values(self):
-        assert ComparisonType.CROSS_DATABASE.value == "cross_database"
-        assert ComparisonType.SCALABILITY.value == "scalability"
-        assert ComparisonType.CONFIG_COMPARISON.value == "config_comparison"
-        assert ComparisonType.TEMPORAL.value == "temporal"
-        assert ComparisonType.GENERAL.value == "general"
-        assert ComparisonType.MIXED.value == "mixed"
-
-
-# =========================================================================
 # PairwiseComparison
 # =========================================================================
 
 class TestPairwiseComparison:
     def test_minimal(self):
         pc = PairwiseComparison(
-            baseline_test_id=uuid.uuid4(),
-            compared_test_id=uuid.uuid4(),
+            baseline_id="db_mysql",
+            compared_id="db_pg",
             db_key="db1",
             metric="throughput",
             interpretation="Test",
@@ -156,3 +156,27 @@ class TestPairwiseComparison:
         assert pc.is_significant is False
         assert pc.warning is None
         assert pc.p_value is None
+
+    def test_with_all_fields(self):
+        pc = PairwiseComparison(
+            baseline_id="level_1",
+            compared_id="level_2",
+            db_key="conn_pg",
+            metric="latency_ms",
+            baseline_mean=45.0,
+            compared_mean=55.0,
+            pct_difference=22.2,
+            test_used="welch_ttest",
+            statistic=3.5,
+            p_value=0.001,
+            is_significant=True,
+            interpretation="Latency выросла значительно",
+            effect_size=0.9,
+            effect_size_label="large",
+            ci_lower=5.0,
+            ci_upper=15.0,
+            p_value_adjusted=0.003,
+            is_significant_adjusted=True,
+        )
+        assert pc.is_significant_adjusted is True
+        assert pc.effect_size_label == "large"
