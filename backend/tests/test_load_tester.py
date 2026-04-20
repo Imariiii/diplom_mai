@@ -1,0 +1,349 @@
+"""
+Unit-тесты для ядра backend/load_tester/tester.py.
+Проверяют сбор sample-метрик, перцентили, выполнение запросов,
+воркеры и streaming callback без реальных БД.
+"""
+import asyncio
+import time
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock
+
+import numpy as np
+import pytest
+
+from backend.load_tester.tester import LoadTester
+from backend.websocket_manager import TestStreamingCallback as StreamingCallback
+
+
+class _AsyncConnectionManager:
+    """Простой async context manager для mock engine.connect()."""
+
+    def __init__(self, connection):
+        self._connection = connection
+
+    async def __aenter__(self):
+        return self._connection
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _AsyncEngine:
+    """Обёртка над mock connection для async with engine.connect()."""
+
+    def __init__(self, connection):
+        self._connection = connection
+
+    def connect(self):
+        return _AsyncConnectionManager(self._connection)
+
+
+@pytest.fixture
+def tester():
+    """Создать LoadTester без полной инициализации инфраструктуры."""
+    lt = LoadTester.__new__(LoadTester)
+    lt.db_connection = MagicMock()
+    lt.db_connection.get_dbms_type.return_value = "postgresql"
+    lt.db_connection.get_connection_name.return_value = "PostgreSQL"
+    lt.db_connection.ensure_pool_size = AsyncMock()
+    lt._metrics_callback = None
+    lt._status_callback = None
+    lt._backup_callback = None
+    lt._is_streaming = False
+    lt._streaming_interval = 1.0
+    lt.get_system_metrics = AsyncMock(return_value={
+        "cpu_usage": 10.0,
+        "memory_usage_percent": 20.0,
+        "memory_usage_mb": 512.0,
+        "disk_iops": 5.0,
+        "network_in_mbps": 1.5,
+        "network_out_mbps": 2.5,
+    })
+    lt.get_dbms_metrics = AsyncMock(return_value={
+        "cache_hit_ratio": 95.0,
+        "buffer_pool_hit_ratio": 90.0,
+        "lock_waits": 2,
+        "deadlocks": 0,
+    })
+    return lt
+
+
+class TestBuildMetricSamples:
+    def test_build_metric_samples_creates_latency_and_throughput_records(self, tester):
+        base_ts = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        results = [
+            {"query_id": "q1", "execution_time_ms": 10.0, "error": None, "timestamp": base_ts.isoformat()},
+            {"query_id": "q1", "execution_time_ms": 20.0, "error": None, "timestamp": (base_ts + timedelta(milliseconds=500)).isoformat()},
+            {"query_id": "q1", "execution_time_ms": 30.0, "error": None, "timestamp": (base_ts + timedelta(seconds=1)).isoformat()},
+            {"query_id": "q1", "execution_time_ms": 40.0, "error": None, "timestamp": (base_ts + timedelta(seconds=3)).isoformat()},
+            {"query_id": "q1", "execution_time_ms": 50.0, "error": "boom", "timestamp": (base_ts + timedelta(seconds=3, milliseconds=100)).isoformat()},
+        ]
+
+        samples = tester.build_metric_samples(results, "conn_pg", query_id="q1")
+
+        latency_samples = [sample for sample in samples if sample["sample_type"] == "request_latency"]
+        throughput_samples = [sample for sample in samples if sample["sample_type"] == "throughput_window"]
+
+        assert len(latency_samples) == 5
+        assert [sample["latency_ms"] for sample in latency_samples] == [10.0, 20.0, 30.0, 40.0, 50.0]
+        assert [sample["is_error"] for sample in latency_samples] == [False, False, False, False, True]
+
+        assert len(throughput_samples) == 3
+        assert [sample["throughput"] for sample in throughput_samples] == [2.0, 1.0, 2.0]
+        assert [sample["latency_ms"] for sample in throughput_samples] == [15.0, 30.0, 45.0]
+        assert [sample["timestamp"] for sample in throughput_samples] == [
+            base_ts,
+            base_ts + timedelta(seconds=1),
+            base_ts + timedelta(seconds=3),
+        ]
+
+    def test_build_metric_samples_empty_input(self, tester):
+        assert tester.build_metric_samples([], "conn_pg") == []
+
+    def test_build_throughput_windows_empty_input(self):
+        assert LoadTester._build_throughput_windows([], [], "postgresql", "conn_pg", None) == []
+
+
+class TestCalculatePercentileExtended:
+    @pytest.mark.parametrize("size", [10, 100, 1000, 10000])
+    @pytest.mark.parametrize("percentile", [50, 95, 99])
+    def test_percentile_close_to_numpy_for_various_sizes(self, tester, size, percentile):
+        rng = np.random.RandomState(size + percentile)
+        data = rng.normal(100.0, 15.0, size).tolist()
+
+        custom = tester.calculate_percentile(data, percentile)
+        reference = float(np.percentile(data, percentile))
+        max_deviation = max(abs(reference) * 0.02, 1.0)
+        if size <= 10:
+            max_deviation = max(max_deviation, 5.0)
+
+        assert abs(custom - reference) <= max_deviation
+
+    def test_percentile_single_value(self, tester):
+        for percentile in (0, 50, 95, 99, 100):
+            assert tester.calculate_percentile([42.0], percentile) == 42.0
+
+    def test_percentile_empty(self, tester):
+        assert tester.calculate_percentile([], 95) == 0.0
+
+
+class TestExecuteQuery:
+    @pytest.mark.asyncio
+    async def test_execute_query_success(self, tester):
+        result_proxy = MagicMock()
+        result_proxy.returns_rows = True
+        result_proxy.fetchall.return_value = [(1,), (2,), (3,)]
+
+        connection = MagicMock()
+        connection.execute = AsyncMock(return_value=result_proxy)
+        connection.commit = AsyncMock()
+        engine = _AsyncEngine(connection)
+
+        tester.db_connection.get_engine_async = AsyncMock(return_value=engine)
+
+        result = await tester.execute_query("conn_pg", "SELECT 1", "q1")
+
+        assert result["error"] is None
+        assert result["rows_count"] == 3
+        assert result["execution_time_ms"] >= 0
+        connection.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_execute_query_records_error_and_time(self, tester):
+        connection = MagicMock()
+        connection.execute = AsyncMock(side_effect=RuntimeError("db boom"))
+        connection.commit = AsyncMock()
+        engine = _AsyncEngine(connection)
+
+        tester.db_connection.get_engine_async = AsyncMock(return_value=engine)
+
+        result = await tester.execute_query("conn_pg", "SELECT 1", "q1")
+
+        assert result["rows_count"] == 0
+        assert "db boom" in result["error"]
+        assert result["execution_time_ms"] >= 0
+        connection.commit.assert_not_called()
+
+
+class TestRunWorkers:
+    @pytest.mark.asyncio
+    async def test_run_workers_sequential_path(self, tester):
+        async def query_func():
+            await asyncio.sleep(0.005)
+            return {
+                "execution_time_ms": 5.0,
+                "error": None,
+            }
+
+        start_time = time.perf_counter()
+        results = await tester._run_workers("conn_pg", iterations=4, virtual_users=1, query_func=query_func)
+        elapsed = time.perf_counter() - start_time
+
+        assert len(results) == 4
+        assert all(result["error"] is None for result in results)
+        assert elapsed >= 0.04
+        assert elapsed < 0.5
+
+    @pytest.mark.asyncio
+    async def test_run_workers_parallel_path_is_faster_and_emits_metrics(self, tester):
+        async def query_func():
+            await asyncio.sleep(0.004)
+            return {
+                "execution_time_ms": 4.0,
+                "error": None,
+            }
+
+        sequential_start = time.perf_counter()
+        sequential_results = await tester._run_workers("conn_pg", iterations=12, virtual_users=1, query_func=query_func)
+        sequential_elapsed = time.perf_counter() - sequential_start
+
+        tester._is_streaming = True
+        tester._streaming_interval = 0.002
+        tester._emit_metrics = AsyncMock()
+
+        parallel_start = time.perf_counter()
+        parallel_results = await tester._run_workers("conn_pg", iterations=4, virtual_users=3, query_func=query_func)
+        parallel_elapsed = time.perf_counter() - parallel_start
+
+        assert len(sequential_results) == 12
+        assert len(parallel_results) == 12
+        assert parallel_elapsed < sequential_elapsed
+        tester.db_connection.ensure_pool_size.assert_awaited_once_with("conn_pg", 3)
+        assert tester._emit_metrics.await_count >= 1
+
+
+class TestEmitMetrics:
+    @pytest.mark.asyncio
+    async def test_emit_metrics_calls_callback_with_enriched_metrics(self, tester):
+        tester._metrics_callback = MagicMock()
+        tester._metrics_callback.on_metrics = AsyncMock()
+        tester._is_streaming = True
+
+        await tester._emit_metrics(
+            db_key="conn_pg",
+            response_time=12.5,
+            tps=34.0,
+            successful=10,
+            failed=1,
+        )
+
+        tester._metrics_callback.on_metrics.assert_awaited_once()
+        kwargs = tester._metrics_callback.on_metrics.await_args.kwargs
+        assert kwargs["db_key"] == "conn_pg"
+        assert kwargs["db_type"] == "postgresql"
+        assert kwargs["db_name"] == "PostgreSQL"
+        assert kwargs["response_time"] == 12.5
+        assert kwargs["tps"] == 34.0
+        assert kwargs["cpu_usage"] == 10.0
+        assert kwargs["cache_hit_ratio"] == 95.0
+
+    @pytest.mark.asyncio
+    async def test_emit_metrics_swallows_callback_errors(self, tester):
+        tester._metrics_callback = MagicMock()
+        tester._metrics_callback.on_metrics = AsyncMock(side_effect=RuntimeError("ws fail"))
+        tester._is_streaming = True
+
+        await tester._emit_metrics(
+            db_key="conn_pg",
+            response_time=10.0,
+            tps=20.0,
+            successful=5,
+            failed=0,
+        )
+
+        tester._metrics_callback.on_metrics.assert_awaited_once()
+
+
+class TestSelfCheckIntegration:
+    @pytest.mark.asyncio
+    async def test_run_single_test_attaches_self_check(self, tester):
+        tester.query_manager = MagicMock()
+        tester.query_manager.get_query.return_value = {"sql": "SELECT 1"}
+        tester.prepare_database_for_test = AsyncMock(return_value={
+            "needs_restore": False,
+            "affected_tables": [],
+        })
+        tester.restore_database_after_test = AsyncMock(return_value={
+            "restored": False,
+            "duration_ms": 0.0,
+            "verified": True,
+            "errors": [],
+        })
+        tester._run_workers = AsyncMock(return_value=[
+            {"execution_time_ms": 20.0, "error": None, "timestamp": datetime.now(timezone.utc).isoformat()},
+            {"execution_time_ms": 25.0, "error": None, "timestamp": datetime.now(timezone.utc).isoformat()},
+        ])
+        tester.build_metric_samples = MagicMock(return_value=[{"sample_type": "request_latency"}])
+
+        stats = await tester.run_single_test(
+            db_key="conn_pg",
+            query_id="q1",
+            iterations=2,
+            virtual_users=1,
+        )
+
+        assert "self_check" in stats
+        assert "littles_law" in stats["self_check"]
+        assert isinstance(stats["self_check"]["warnings"], list)
+
+    @pytest.mark.asyncio
+    async def test_run_scenario_test_attaches_self_check(self, tester):
+        tester._emit_backup_status = AsyncMock()
+        tester._emit_status = AsyncMock()
+        tester._prime_random_value_cache = AsyncMock()
+        tester.prepare_database_for_test = AsyncMock(return_value={
+            "needs_restore": False,
+            "affected_tables": [],
+        })
+        tester.restore_database_after_test = AsyncMock(return_value={
+            "restored": False,
+            "duration_ms": 0.0,
+            "verified": True,
+            "errors": [],
+        })
+        tester._run_workers = AsyncMock(return_value=[
+            {"execution_time_ms": 12.0, "error": None, "timestamp": datetime.now(timezone.utc).isoformat()},
+            {"execution_time_ms": 15.0, "error": None, "timestamp": datetime.now(timezone.utc).isoformat()},
+        ])
+        tester.build_metric_samples = MagicMock(return_value=[{"sample_type": "request_latency"}])
+
+        stats = await tester.run_scenario_test(
+            db_key="conn_pg",
+            scenario={
+                "name": "read_scenario",
+                "scenario_type": "read_only",
+                "queries": [{"sql_template": "SELECT 1", "weight": 1, "params": []}],
+            },
+            iterations=2,
+            virtual_users=1,
+            use_indexes=False,
+        )
+
+        assert "self_check" in stats
+        assert "littles_law" in stats["self_check"]
+        assert isinstance(stats["self_check"]["warnings"], list)
+
+
+class TestRealtimeThroughputSamples:
+    @pytest.mark.asyncio
+    async def test_streaming_callback_buffers_throughput_realtime_samples(self):
+        manager = MagicMock()
+        manager.send_metrics_update = AsyncMock()
+        manager.send_operation_status = AsyncMock()
+        repository = AsyncMock()
+        repository.add_time_series_point = AsyncMock()
+        repository.add_metric_sample_batch = AsyncMock()
+        callback = StreamingCallback("test-1", manager, repository=repository)
+
+        await callback.on_metrics(
+            db_key="conn_pg",
+            db_type="postgresql",
+            db_name="PostgreSQL",
+            response_time=15.0,
+            tps=50.0,
+            successful=5,
+            failed=1,
+        )
+
+        assert len(callback.metric_samples_buffer) == 1
+        assert callback.metric_samples_buffer[0]["sample_type"] == "throughput_realtime"

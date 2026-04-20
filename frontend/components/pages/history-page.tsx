@@ -13,6 +13,7 @@ import {
   XCircle,
   Loader2,
   AlertCircle,
+  AlertTriangle,
   GitCompare,
   Database,
 } from "lucide-react"
@@ -45,6 +46,14 @@ const STATUS_CONFIG = {
   running:   { label: "Выполняется", icon: Loader2,       color: "bg-blue-500/10 text-blue-500 border-blue-500/20" },
   completed: { label: "Завершён",    icon: CheckCircle,   color: "bg-green-500/10 text-green-500 border-green-500/20" },
   failed:    { label: "Ошибка",      icon: XCircle,       color: "bg-red-500/10 text-red-500 border-red-500/20" },
+}
+
+function getResultSelfCheckWarnings(result: HistoryTestResult): string[] {
+  const warnings = result.metrics?.self_check?.warnings
+  if (!Array.isArray(warnings)) {
+    return []
+  }
+  return warnings.filter((warning): warning is string => typeof warning === "string" && warning.length > 0)
 }
 
 // ==================== Селектор логической БД ====================
@@ -320,6 +329,12 @@ export function HistoryPage() {
   if (selectedTest) {
     const logicalDbName = getLogicalDbName(selectedTest.logical_database_id)
     const connectionNames = getConnectionNamesLabel(selectedTest)
+    const resultsWithWarnings = selectedTest.results
+      .map((result) => ({
+        result,
+        warnings: getResultSelfCheckWarnings(result),
+      }))
+      .filter((item) => item.warnings.length > 0)
     return (
       <div className="p-6 space-y-6">
         <div className="flex items-center gap-4">
@@ -375,6 +390,42 @@ export function HistoryPage() {
           </TabsList>
 
           <TabsContent value="results">
+            {resultsWithWarnings.length > 0 && (
+              <Alert className="mb-4 border-amber-500/30 bg-amber-500/5">
+                <AlertTriangle className="h-4 w-4 text-amber-500" />
+                <AlertTitle>Предупреждения самопроверки</AlertTitle>
+                <AlertDescription className="space-y-3">
+                  <p className="text-sm text-muted-foreground">
+                    Для части результатов система нашла возможные расхождения в согласованности метрик.
+                  </p>
+                  <div className="space-y-3">
+                    {resultsWithWarnings.map(({ result, warnings }) => {
+                      const resultDbType = (result.metrics as any)?.dbms_type || result.db_type
+                      const resultDbName =
+                        (result.metrics as any)?.db_name
+                        || DB_NAMES[resultDbType]
+                        || result.db_type
+                      return (
+                        <div
+                          key={`warning-${result.id}`}
+                          className="rounded-md border border-amber-500/20 bg-background/60 p-3"
+                        >
+                          <p className="text-sm font-medium">
+                            {resultDbName}
+                            {result.query_id ? ` · ${result.query_id}` : ""}
+                          </p>
+                          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+                            {warnings.map((warning) => (
+                              <li key={`${result.id}-${warning}`}>{warning}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </AlertDescription>
+              </Alert>
+            )}
             <Card className="bg-card border-border">
               <CardContent className="p-0">
                 <Table>

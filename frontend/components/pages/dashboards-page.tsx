@@ -1,8 +1,9 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Database, Cpu, BarChart3, Lock } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { Database, Cpu, BarChart3, Lock, AlertTriangle } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { useAppStore } from "@/lib/store"
 import { useTestWebSocket } from "@/hooks/use-test-websocket"
 import { apiClient } from "@/lib/api"
@@ -62,6 +63,7 @@ export function DashboardsPage() {
                   successful: number
                   failed: number
                   indexInfo?: any
+                  selfCheckWarnings: string[]
                 }> = {}
 
                 response.results.forEach((result: any) => {
@@ -74,7 +76,7 @@ export function DashboardsPage() {
                         aggregateByDb[dbKey] = {
                           avgTimes: [], p50Times: [], p95Times: [], p99Times: [],
                           minTimes: [], maxTimes: [], tpsValues: [], throughputValues: [],
-                          activeConnections: [], successful: 0, failed: 0,
+                          activeConnections: [], successful: 0, failed: 0, selfCheckWarnings: [],
                         }
                       }
                       const bucket = aggregateByDb[dbKey]
@@ -90,6 +92,13 @@ export function DashboardsPage() {
                       bucket.successful += stats.successful || 0
                       bucket.failed += stats.failed || 0
                       if (stats.index_info) bucket.indexInfo = stats.index_info
+                      if (Array.isArray(stats.self_check?.warnings)) {
+                        stats.self_check.warnings.forEach((warning: unknown) => {
+                          if (typeof warning === "string" && !bucket.selfCheckWarnings.includes(warning)) {
+                            bucket.selfCheckWarnings.push(warning)
+                          }
+                        })
+                      }
                     })
                   } else if (result.db_key && result.stats) {
                     const dbKey = result.db_key
@@ -98,7 +107,7 @@ export function DashboardsPage() {
                       aggregateByDb[dbKey] = {
                         avgTimes: [], p50Times: [], p95Times: [], p99Times: [],
                         minTimes: [], maxTimes: [], tpsValues: [], throughputValues: [],
-                        activeConnections: [], successful: 0, failed: 0,
+                          activeConnections: [], successful: 0, failed: 0, selfCheckWarnings: [],
                       }
                     }
                     const bucket = aggregateByDb[dbKey]
@@ -114,6 +123,13 @@ export function DashboardsPage() {
                     bucket.successful += stats.successful || 0
                     bucket.failed += stats.failed || 0
                     if (stats.index_info) bucket.indexInfo = stats.index_info
+                    if (Array.isArray(stats.self_check?.warnings)) {
+                      stats.self_check.warnings.forEach((warning: unknown) => {
+                        if (typeof warning === "string" && !bucket.selfCheckWarnings.includes(warning)) {
+                          bucket.selfCheckWarnings.push(warning)
+                        }
+                      })
+                    }
                   }
                 })
 
@@ -131,6 +147,7 @@ export function DashboardsPage() {
                     databaseType: dbType,
                     databaseName: connName || DB_NAMES[dbType] || dbType,
                     indexInfo: bucket.indexInfo,
+                    selfCheckWarnings: bucket.selfCheckWarnings,
                     metrics: {
                       avgResponseTime: average(bucket.avgTimes),
                       p50ResponseTime: average(bucket.p50Times),
@@ -277,6 +294,10 @@ export function DashboardsPage() {
       ) || [])
 
   const isTestFinished = currentTest?.status === "completed" || currentTest?.status === "failed"
+  const selfCheckResults = useMemo(
+    () => currentTest?.results?.filter((result) => (result.selfCheckWarnings?.length || 0) > 0) || [],
+    [currentTest?.results]
+  )
 
   if (!currentTest && Object.keys(realtimeData).length === 0) {
     return <EmptyStateCard />
@@ -294,6 +315,30 @@ export function DashboardsPage() {
           backupStatus={backupStatus}
           formatTime={formatTime}
         />
+      )}
+
+      {isTestFinished && selfCheckResults.length > 0 && (
+        <Alert className="border-amber-500/30 bg-amber-500/5">
+          <AlertTriangle className="h-4 w-4 text-amber-500" />
+          <AlertTitle>Предупреждения самопроверки</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              После завершения теста система обнаружила потенциально неконсистентные метрики.
+            </p>
+            <div className="space-y-3">
+              {selfCheckResults.map((result) => (
+                <div key={result.databaseId} className="rounded-md border border-amber-500/20 bg-background/60 p-3">
+                  <p className="text-sm font-medium">{result.databaseName}</p>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+                    {result.selfCheckWarnings?.map((warning) => (
+                      <li key={`${result.databaseId}-${warning}`}>{warning}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </AlertDescription>
+        </Alert>
       )}
 
       <Tabs defaultValue="database" className="space-y-4">

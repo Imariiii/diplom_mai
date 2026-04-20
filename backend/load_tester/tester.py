@@ -13,6 +13,7 @@ from backend.database.dialects import get_dialect
 from backend.database.queries import QueryManager
 from backend.database.state_manager import DatabaseStateManager
 from backend.load_tester.index_manager import IndexManager
+from backend.load_tester.self_check import cross_validate_metrics, verify_littles_law
 
 
 class LoadTester:
@@ -252,6 +253,25 @@ class LoadTester:
         index = int(len(sorted_data) * percentile / 100)
         index = min(index, len(sorted_data) - 1)
         return sorted_data[index]
+
+    def _build_self_check(self, stats: Dict[str, Any]) -> Dict[str, Any]:
+        """Сформировать блок самопроверки для рассчитанных метрик."""
+        avg_time_ms = stats.get('avg_time_ms') or 0
+        virtual_users = stats.get('virtual_users') or 0
+        throughput = stats.get('throughput') or 0
+        littles_law = verify_littles_law(
+            virtual_users=int(virtual_users),
+            avg_latency_sec=float(avg_time_ms) / 1000.0,
+            throughput_rps=float(throughput),
+        )
+        warnings = cross_validate_metrics(stats)
+        if littles_law.get('warning'):
+            warnings.append(littles_law['warning'])
+
+        return {
+            'littles_law': littles_law,
+            'warnings': warnings,
+        }
 
     def build_metric_samples(
         self,
@@ -500,6 +520,7 @@ class LoadTester:
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
         
+        stats['self_check'] = self._build_self_check(stats)
         stats['raw_samples'] = self.build_metric_samples(results, db_key, query_id=query_id)
         return stats
     
@@ -1070,6 +1091,7 @@ class LoadTester:
             'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
+        stats['self_check'] = self._build_self_check(stats)
         stats['raw_samples'] = self.build_metric_samples(
             results,
             db_key,

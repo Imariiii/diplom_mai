@@ -319,7 +319,7 @@ class TestStreamingCallback:
                     'db_type': db_type,
                     'connection_key': db_key,
                     'query_id': None,
-                    'sample_type': 'throughput_window',
+                    'sample_type': 'throughput_realtime',
                     'timestamp': now,
                     'latency_ms': response_time,
                     'throughput': tps,

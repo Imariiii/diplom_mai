@@ -48,6 +48,18 @@ export interface TestStats {
   lock_waits?: number
   deadlocks?: number
   active_connections?: number
+  self_check?: {
+    warnings?: string[]
+    littles_law?: {
+      valid: boolean
+      reason?: string | null
+      computed_concurrency?: number
+      expected_concurrency?: number
+      ratio?: number | null
+      tolerance?: number
+      warning?: string | null
+    }
+  }
 }
 
 export interface TestResult {
@@ -114,7 +126,9 @@ export interface HistoryTestResult {
   test_run_id: string
   db_type: string
   query_id: string | null
-  metrics: Record<string, number>
+  metrics: Record<string, any> & {
+    self_check?: TestStats["self_check"]
+  }
   system_metrics: Record<string, number> | null
   dbms_metrics: Record<string, number> | null
   created_at: string | null

@@ -538,14 +538,25 @@ class ComparisonService:
 
         return latency_values
 
-    def _extract_throughput_values(self, metric_samples: List[Dict[str, Any]]) -> List[float]:
-        """Извлечь throughput samples из throughput_window записей"""
-        throughput_values = []
+    def _select_throughput_samples(self, metric_samples: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Выбрать throughput samples с приоритетом batch-окон над realtime."""
+        batch_samples = []
+        realtime_samples = []
 
         for point in metric_samples:
-            if point.get("sample_type") != "throughput_window":
-                continue
+            sample_type = point.get("sample_type")
+            if sample_type == "throughput_window":
+                batch_samples.append(point)
+            elif sample_type == "throughput_realtime":
+                realtime_samples.append(point)
 
+        return batch_samples if batch_samples else realtime_samples
+
+    def _extract_throughput_values(self, metric_samples: List[Dict[str, Any]]) -> List[float]:
+        """Извлечь throughput samples с приоритетом batch throughput_window."""
+        throughput_values = []
+
+        for point in self._select_throughput_samples(metric_samples):
             value = point.get("throughput")
             if value is None:
                 value = point.get("tps")
@@ -564,7 +575,7 @@ class ComparisonService:
         Tries three sources in order:
         1. TimeSeries table filtered by db_type
         2. TimeSeries table without db_type filter (in case of type mismatch)
-        3. MetricSample throughput_window records filtered by connection_key
+        3. MetricSample throughput records filtered by connection_key
         """
         points: List[Dict[str, Any]] = []
 
@@ -602,7 +613,7 @@ class ComparisonService:
     async def _build_series_from_metric_samples(
         self, test_id: str, db_key: str,
     ) -> List[Dict[str, Any]]:
-        """Build a timeline from throughput_window MetricSample records."""
+        """Build a timeline from throughput MetricSample records."""
         get_samples = getattr(self.repository, "get_metric_samples", None)
         if not callable(get_samples):
             return []
@@ -613,9 +624,7 @@ class ComparisonService:
             return []
 
         series = []
-        for sample in raw:
-            if sample.get("sample_type") != "throughput_window":
-                continue
+        for sample in self._select_throughput_samples(raw):
             sample_key = (
                 sample.get("connection_key")
                 or sample.get("db_name")

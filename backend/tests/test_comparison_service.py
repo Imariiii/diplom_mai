@@ -91,6 +91,34 @@ def _make_metric_samples(db_key: str, n: int = 100, seed: int = 42) -> List[Dict
     return samples
 
 
+def _make_throughput_samples(
+    db_key: str,
+    batch_values: Optional[List[float]] = None,
+    realtime_values: Optional[List[float]] = None,
+) -> List[Dict[str, Any]]:
+    """Build throughput samples for source-priority checks."""
+    samples: List[Dict[str, Any]] = []
+    for value in batch_values or []:
+        samples.append({
+            "sample_type": "throughput_window",
+            "connection_key": db_key,
+            "latency_ms": None,
+            "throughput": value,
+            "tps": None,
+            "is_error": False,
+        })
+    for value in realtime_values or []:
+        samples.append({
+            "sample_type": "throughput_realtime",
+            "connection_key": db_key,
+            "latency_ms": None,
+            "throughput": value,
+            "tps": None,
+            "is_error": False,
+        })
+    return samples
+
+
 # ---------------------------------------------------------------------------
 # Fixture: mock repository
 # ---------------------------------------------------------------------------
@@ -100,6 +128,49 @@ def mock_repo():
     repo = AsyncMock()
     repo.get_time_series = AsyncMock(return_value=[])
     return repo
+
+
+# ---------------------------------------------------------------------------
+# Throughput sample source priority
+# ---------------------------------------------------------------------------
+
+class TestThroughputSamplePriority:
+    def _service(self):
+        return ComparisonService(repository=AsyncMock())
+
+    def test_extract_prefers_batch_windows_over_realtime(self):
+        svc = self._service()
+        samples = _make_throughput_samples(
+            "conn_pg",
+            batch_values=[100.0, 120.0],
+            realtime_values=[900.0, 950.0],
+        )
+
+        assert svc._extract_throughput_values(samples) == [100.0, 120.0]
+
+    def test_extract_falls_back_to_realtime(self):
+        svc = self._service()
+        samples = _make_throughput_samples(
+            "conn_pg",
+            batch_values=[],
+            realtime_values=[80.0, 82.0, 85.0],
+        )
+
+        assert svc._extract_throughput_values(samples) == [80.0, 82.0, 85.0]
+
+    @pytest.mark.asyncio
+    async def test_build_series_from_metric_samples_uses_priority_source(self):
+        repo = AsyncMock()
+        repo.get_metric_samples = AsyncMock(return_value=_make_throughput_samples(
+            "conn_pg",
+            batch_values=[40.0, 45.0],
+            realtime_values=[400.0, 450.0],
+        ))
+        svc = ComparisonService(repository=repo)
+
+        series = await svc._build_series_from_metric_samples("test-id", "conn_pg")
+
+        assert [point["throughput"] for point in series] == [40.0, 45.0]
 
 
 # ---------------------------------------------------------------------------

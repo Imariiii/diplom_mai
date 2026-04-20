@@ -47,6 +47,10 @@ export interface TestRun {
   connection_db_types?: Record<string, string>
 }
 
+export interface SelfCheckWarningSummary {
+  warnings: string[]
+}
+
 // Метрики базы данных
 export interface DatabaseMetrics {
   // Время отклика
@@ -106,6 +110,7 @@ export interface TestResult {
   databaseType: string
   databaseName: string
   indexInfo?: IndexInfo
+  selfCheckWarnings?: string[]
   metrics: DatabaseMetrics
   systemMetrics?: SystemMetrics
   transactionMetrics?: TransactionMetrics

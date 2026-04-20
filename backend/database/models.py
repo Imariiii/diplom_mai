@@ -344,7 +344,7 @@ class MetricSample(Base):
     db_type = Column(String(50), nullable=False)
     connection_key = Column(String(255), nullable=True)
     query_id = Column(String(100), nullable=True)
-    sample_type = Column(String(50), nullable=False)  # request_latency | throughput_window
+    sample_type = Column(String(50), nullable=False)  # request_latency | throughput_window | throughput_realtime
     timestamp = Column(DateTime(timezone=True), nullable=False)
     latency_ms = Column(Float, nullable=True)
     throughput = Column(Float, nullable=True)
