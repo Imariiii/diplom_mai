@@ -50,11 +50,13 @@ import { StatisticalSummary } from "@/components/comparison/statistical-summary"
 import { AnalysisReport } from "@/components/comparison/analysis-report"
 import { TestConfigSection } from "@/components/comparison/test-config-section"
 
-const COMPARISON_TYPE_LABELS: Record<ComparisonResult["comparison_type"], string> = {
+const COMPARISON_TYPE_LABELS: Record<string, string> = {
   cross_database: "Сравнение СУБД",
   scalability: "Анализ масштабируемости",
-  mixed: "Смешанное сравнение",
+  config_comparison: "Сравнение конфигураций",
   temporal: "Временное сравнение",
+  general: "Общее сравнение",
+  mixed: "Сравнение конфигураций",
 }
 
 export function ComparisonPage() {
@@ -105,7 +107,7 @@ export function ComparisonPage() {
   }, [comparisonTestIds, comparisonBaselineId])
 
   const supportsNormalizedView = Boolean(
-    result && (result.comparison_type === "scalability" || result.comparison_type === "mixed")
+    result && result.traits && !result.traits.same_load_params
   )
 
   const exportJson = () => {

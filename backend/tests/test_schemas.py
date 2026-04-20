@@ -134,8 +134,10 @@ class TestComparisonType:
     def test_values(self):
         assert ComparisonType.CROSS_DATABASE.value == "cross_database"
         assert ComparisonType.SCALABILITY.value == "scalability"
-        assert ComparisonType.MIXED.value == "mixed"
+        assert ComparisonType.CONFIG_COMPARISON.value == "config_comparison"
         assert ComparisonType.TEMPORAL.value == "temporal"
+        assert ComparisonType.GENERAL.value == "general"
+        assert ComparisonType.MIXED.value == "mixed"
 
 
 # =========================================================================

@@ -84,7 +84,7 @@ export function StatisticalSummary({ result }: StatisticalSummaryProps) {
     .filter((m) => activeMetric === "all" || m === activeMetric)
     .map((m) => {
       let items = grouped[m]
-      if (showOnlySignificant) items = items.filter((p) => p.is_significant)
+      if (showOnlySignificant) items = items.filter((p) => p.is_significant_adjusted ?? p.is_significant)
       if (activeDb !== "all") items = items.filter((p) => p.db_key === activeDb)
       return [m, items] as const
     })
@@ -92,9 +92,9 @@ export function StatisticalSummary({ result }: StatisticalSummaryProps) {
 
   const allFiltered = filteredEntries.flatMap(([, items]) => items)
 
-  const totalSignificant = result.pairwise_comparisons.filter((p) => p.is_significant).length
+  const totalSignificant = result.pairwise_comparisons.filter((p) => p.is_significant_adjusted ?? p.is_significant).length
   const totalLarge = result.pairwise_comparisons.filter(
-    (p) => p.is_significant && p.effect_size_label === "large"
+    (p) => (p.is_significant_adjusted ?? p.is_significant) && p.effect_size_label === "large"
   ).length
 
   return (
@@ -278,7 +278,7 @@ function CompactTable({
             return (
               <tr
                 key={`${item.baseline_test_id}-${item.compared_test_id}-${item.db_key}-${item.metric}`}
-                className={`hover:bg-muted/20 ${item.is_significant ? "" : "opacity-60"}`}
+                className={`hover:bg-muted/20 ${(item.is_significant_adjusted ?? item.is_significant) ? "" : "opacity-60"}`}
               >
                 <td className="px-4 py-2 font-medium">{comparedName}</td>
                 <td className="px-3 py-2 text-muted-foreground">
@@ -288,7 +288,11 @@ function CompactTable({
                   {METRIC_LABELS[item.metric] || item.metric}
                 </td>
                 <td className="px-3 py-2 text-center font-mono tabular-nums">
-                  {item.p_value != null ? item.p_value.toExponential(1) : "—"}
+                  {item.p_value_adjusted != null
+                    ? item.p_value_adjusted.toExponential(1)
+                    : item.p_value != null
+                      ? item.p_value.toExponential(1)
+                      : "—"}
                 </td>
                 <td className="px-3 py-2 text-center font-mono tabular-nums">
                   {item.effect_size != null ? Math.abs(item.effect_size).toFixed(2) : "—"}
@@ -338,19 +342,19 @@ function ComparisonCard({
   return (
     <div
       className={`relative rounded-lg border p-3 ${
-        item.is_significant
+        (item.is_significant_adjusted ?? item.is_significant)
           ? "border-border bg-muted/20"
           : "border-dashed border-border/60 bg-transparent"
       }`}
     >
-      {item.is_significant && effectKey !== "negligible" && (
+      {(item.is_significant_adjusted ?? item.is_significant) && effectKey !== "negligible" && (
         <div className={`absolute inset-y-0 left-0 w-1 rounded-l-lg ${effectCfg.dotCls}`} />
       )}
 
       <div className="flex items-start justify-between gap-3 pl-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            {item.is_significant ? (
+            {(item.is_significant_adjusted ?? item.is_significant) ? (
               <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
             ) : (
               <AlertCircle className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -399,7 +403,7 @@ function ComparisonCard({
           variant="outline"
           className="font-mono text-[10px]"
         >
-          p = {item.p_value != null ? item.p_value.toExponential(1) : "—"}
+          p = {item.p_value_adjusted != null ? item.p_value_adjusted.toExponential(1) : item.p_value != null ? item.p_value.toExponential(1) : "—"}
         </Badge>
         <Badge variant="outline" className="text-[10px]">
           {item.test_used}

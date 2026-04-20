@@ -13,6 +13,7 @@ from backend.comparison.schemas import (
     AnalysisReportConfig,
     ComparisonResult,
     ComparisonTestInfo,
+    ComparisonTraits,
     ComparisonType,
     DescriptiveStats,
     MetricStatsBundle,
@@ -155,6 +156,7 @@ def cross_database_result(two_test_ids):
         ],
         baseline_id=baseline_id,
         comparison_type=ComparisonType.CROSS_DATABASE,
+        traits=ComparisonTraits(multiple_dbs=True),
         descriptive_stats={
             str(baseline_id): {"db1": MetricStatsBundle(
                 latency_ms=make_descriptive_stats(mean=45.0),
@@ -185,6 +187,7 @@ def scalability_result():
         ],
         baseline_id=id1,
         comparison_type=ComparisonType.SCALABILITY,
+        traits=ComparisonTraits(same_load_params=False, diff_virtual_users=True),
         descriptive_stats={
             str(id1): {"db1": MetricStatsBundle(
                 throughput=make_descriptive_stats(mean=100.0),
@@ -229,6 +232,7 @@ def temporal_result():
         ],
         baseline_id=id1,
         comparison_type=ComparisonType.TEMPORAL,
+        traits=ComparisonTraits(is_temporal=True),
         descriptive_stats={
             str(id1): {"db1": MetricStatsBundle(
                 throughput=make_descriptive_stats(mean=100.0),

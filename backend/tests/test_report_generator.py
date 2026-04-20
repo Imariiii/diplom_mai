@@ -11,6 +11,7 @@ from backend.analysis.report_generator import ComparisonReportGenerator
 from backend.comparison.schemas import (
     AnalysisReportConfig,
     ComparisonResult,
+    ComparisonTraits,
     ComparisonType,
     MetricStatsBundle,
     PairwiseComparison,
@@ -67,12 +68,15 @@ class TestCrossDatabaseVerdict:
 # =========================================================================
 
 class TestTemporalVerdict:
+    _temporal_traits = ComparisonTraits(is_temporal=True)
+
     def test_improvement(self, generator):
         id1, id2 = make_uuid(), make_uuid()
         result = ComparisonResult(
             tests=[make_test_info(id1, "Jan"), make_test_info(id2, "Feb")],
             baseline_id=id1,
             comparison_type=ComparisonType.TEMPORAL,
+            traits=self._temporal_traits,
             descriptive_stats={},
             pairwise_comparisons=[
                 make_pairwise(id1, id2, metric="throughput",
@@ -88,6 +92,7 @@ class TestTemporalVerdict:
             tests=[make_test_info(id1, "Jan"), make_test_info(id2, "Feb")],
             baseline_id=id1,
             comparison_type=ComparisonType.TEMPORAL,
+            traits=self._temporal_traits,
             descriptive_stats={},
             pairwise_comparisons=[
                 make_pairwise(id1, id2, metric="latency_ms",
@@ -105,6 +110,7 @@ class TestTemporalVerdict:
             tests=[make_test_info(id1, "A"), make_test_info(id2, "B")],
             baseline_id=id1,
             comparison_type=ComparisonType.TEMPORAL,
+            traits=self._temporal_traits,
             descriptive_stats={},
             pairwise_comparisons=[],
         )
@@ -130,31 +136,39 @@ class TestScalabilityVerdict:
             ],
             baseline_id=id1,
             comparison_type=ComparisonType.SCALABILITY,
+            traits=ComparisonTraits(
+                same_scenario=True, same_db_targets=True, multiple_dbs=False,
+                same_load_params=False, diff_virtual_users=True,
+            ),
             descriptive_stats={},
             pairwise_comparisons=[],
             normalized_metrics={},
         )
         verdict = generator.generate_verdict(result)
-        assert "недостаточно" in verdict.lower() or "масштабируемости" in verdict.lower()
+        assert "параметр" in verdict.lower() or "нормализованные" in verdict.lower()
 
 
 # =========================================================================
 # Вердикты — MIXED
 # =========================================================================
 
-class TestMixedVerdict:
-    def test_mixed_fallback(self, generator):
+class TestConfigComparisonVerdict:
+    def test_config_comparison_fallback(self, generator):
         id1, id2 = make_uuid(), make_uuid()
         result = ComparisonResult(
-            tests=[make_test_info(id1, "A"), make_test_info(id2, "B")],
+            tests=[make_test_info(id1, "A", virtual_users=4), make_test_info(id2, "B", virtual_users=8)],
             baseline_id=id1,
-            comparison_type=ComparisonType.MIXED,
+            comparison_type=ComparisonType.CONFIG_COMPARISON,
+            traits=ComparisonTraits(
+                same_scenario=True, same_db_targets=True, multiple_dbs=True,
+                same_load_params=False, diff_virtual_users=True,
+            ),
             descriptive_stats={},
             pairwise_comparisons=[],
             normalized_metrics={},
         )
         verdict = generator.generate_verdict(result)
-        assert "mixed" in verdict.lower() or "нормализованные" in verdict.lower()
+        assert "нормализованные" in verdict.lower() or "параметр" in verdict.lower()
 
 
 # =========================================================================

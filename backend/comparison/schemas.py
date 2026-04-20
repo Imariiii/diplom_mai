@@ -11,12 +11,30 @@ from pydantic.dataclasses import dataclass
 
 
 class ComparisonType(str, Enum):
-    """Тип сравнительного анализа"""
+    """Тип сравнительного анализа (derived label from traits)"""
 
     CROSS_DATABASE = "cross_database"
     SCALABILITY = "scalability"
-    MIXED = "mixed"
+    CONFIG_COMPARISON = "config_comparison"
     TEMPORAL = "temporal"
+    GENERAL = "general"
+
+    # Keep MIXED as an alias so old serialized data still deserialises
+    MIXED = "mixed"
+
+
+@dataclass
+class ComparisonTraits:
+    """Boolean dimensions describing the comparison rather than a rigid type."""
+
+    same_scenario: bool = True
+    same_db_targets: bool = True
+    multiple_dbs: bool = False
+    same_load_params: bool = True
+    diff_virtual_users: bool = False
+    diff_iterations: bool = False
+    diff_warmup: bool = False
+    is_temporal: bool = False
 
 
 class ComparisonRequest(BaseModel):
@@ -135,6 +153,8 @@ class PairwiseComparison(BaseModel):
     effect_size_label: Optional[str] = None
     ci_lower: Optional[float] = None
     ci_upper: Optional[float] = None
+    p_value_adjusted: Optional[float] = None
+    is_significant_adjusted: bool = False
 
 
 class BarChartPoint(BaseModel):
@@ -244,12 +264,26 @@ class ParameterImpactSummary(BaseModel):
     summary_text: str = ""
 
 
+@dataclass
+class ResourceMetrics:
+    """System and DBMS resource metrics snapshot for one test + db_key."""
+
+    cpu_usage: Optional[float] = None
+    memory_usage_percent: Optional[float] = None
+    disk_iops: Optional[float] = None
+    cache_hit_ratio: Optional[float] = None
+    buffer_pool_hit_ratio: Optional[float] = None
+    lock_waits: Optional[int] = None
+    deadlocks: Optional[int] = None
+
+
 class ComparisonResult(BaseModel):
     """Полный результат сравнительного анализа"""
 
     tests: List[ComparisonTestInfo]
     baseline_id: UUID
     comparison_type: ComparisonType
+    traits: Optional[ComparisonTraits] = None
     warnings: List[str] = Field(default_factory=list)
     descriptive_stats: Dict[str, Dict[str, MetricStatsBundle]] = Field(default_factory=dict)
     normalized_metrics: Dict[str, Dict[str, NormalizedMetrics]] = Field(default_factory=dict)
@@ -258,6 +292,7 @@ class ComparisonResult(BaseModel):
     analysis_report: Optional[AnalysisReport] = None
     db_key_labels: Dict[str, str] = Field(default_factory=dict, description="Маппинг db_key (UUID) -> человекочитаемое имя")
     parameter_impacts: List[ParameterImpactSummary] = Field(default_factory=list)
+    resource_metrics: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
 
 ComparisonRequest.model_rebuild()

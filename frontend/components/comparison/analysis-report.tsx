@@ -22,11 +22,13 @@ interface AnalysisReportProps {
   comparisonType?: ComparisonType
 }
 
-const COMPARISON_TYPE_LABELS: Record<ComparisonType, string> = {
+const COMPARISON_TYPE_LABELS: Record<string, string> = {
   cross_database: "Сравнение СУБД",
   scalability: "Анализ масштабируемости",
-  mixed: "Смешанное сравнение",
+  config_comparison: "Сравнение конфигураций",
   temporal: "Временное сравнение",
+  general: "Общее сравнение",
+  mixed: "Сравнение конфигураций",
 }
 
 const SECTION_CONFIG: Record<

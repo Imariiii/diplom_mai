@@ -55,7 +55,7 @@ const DB_COLORS = [
 export function ComparisonCharts({ result, useNormalized = false }: ComparisonChartsProps) {
   const testNameById = Object.fromEntries(result.tests.map((t) => [t.id, t.name]))
   const showNormalized =
-    useNormalized && (result.comparison_type === "scalability" || result.comparison_type === "mixed")
+    useNormalized && result.traits != null && !result.traits.same_load_params
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">

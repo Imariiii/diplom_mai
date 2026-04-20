@@ -14,6 +14,8 @@ try:
 except ImportError:  # pragma: no cover - зависит от окружения
     sp_stats = None
 
+from typing import Sequence
+
 from backend.comparison.schemas import DescriptiveStats, PairwiseComparison
 
 
@@ -298,3 +300,37 @@ def compare_two_samples(
     comparison.is_significant = bool(p_value < SIGNIFICANCE_LEVEL)
     comparison.interpretation = interpret_result(pct_diff, float(p_value), metric, comparison.effect_size_label)
     return comparison
+
+
+def apply_fdr_correction(
+    comparisons: Sequence[PairwiseComparison],
+) -> None:
+    """Apply Benjamini-Hochberg FDR correction in-place.
+
+    Adjusts p_value_adjusted and is_significant_adjusted on each comparison
+    that has a non-None p_value.
+    """
+    indexed: list[tuple[int, float]] = []
+    for i, c in enumerate(comparisons):
+        if c.p_value is not None:
+            indexed.append((i, c.p_value))
+
+    if not indexed:
+        return
+
+    indexed.sort(key=lambda t: t[1])
+    m = len(indexed)
+
+    adjusted = [0.0] * m
+    for rank_0, (_, p) in enumerate(indexed):
+        rank = rank_0 + 1
+        adjusted[rank_0] = p * m / rank
+
+    # Enforce monotonicity from the bottom
+    for k in range(m - 2, -1, -1):
+        adjusted[k] = min(adjusted[k], adjusted[k + 1])
+
+    for rank_0, (orig_idx, _) in enumerate(indexed):
+        adj_p = min(adjusted[rank_0], 1.0)
+        comparisons[orig_idx].p_value_adjusted = adj_p
+        comparisons[orig_idx].is_significant_adjusted = adj_p < SIGNIFICANCE_LEVEL

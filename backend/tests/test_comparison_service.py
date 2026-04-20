@@ -106,7 +106,7 @@ def mock_repo():
 # _detect_comparison_type (no DB needed)
 # ---------------------------------------------------------------------------
 
-class TestDetectComparisonType:
+class TestDetectTraits:
     def _service(self):
         return ComparisonService(repository=AsyncMock())
 
@@ -117,7 +117,10 @@ class TestDetectComparisonType:
             _make_test_data(id1, "MySQL", db_keys=["conn_mysql"]),
             _make_test_data(id2, "PG", db_keys=["conn_pg"]),
         ]
-        ct = svc._detect_comparison_type(tests)
+        traits = svc._detect_traits(tests)
+        assert traits.multiple_dbs
+        assert traits.same_load_params
+        ct = svc._derive_comparison_type(traits)
         assert ct == ComparisonType.CROSS_DATABASE
 
     def test_scalability(self):
@@ -127,7 +130,10 @@ class TestDetectComparisonType:
             _make_test_data(id1, "4VU", virtual_users=4, db_keys=["conn_pg"]),
             _make_test_data(id2, "8VU", virtual_users=8, db_keys=["conn_pg"]),
         ]
-        ct = svc._detect_comparison_type(tests)
+        traits = svc._detect_traits(tests)
+        assert traits.diff_virtual_users
+        assert not traits.multiple_dbs
+        ct = svc._derive_comparison_type(traits)
         assert ct == ComparisonType.SCALABILITY
 
     def test_temporal(self):
@@ -137,18 +143,52 @@ class TestDetectComparisonType:
             _make_test_data(id1, "Run1", db_keys=["conn_pg"], created_at="2025-01-01T00:00:00Z"),
             _make_test_data(id2, "Run2", db_keys=["conn_pg"], created_at="2025-02-01T00:00:00Z"),
         ]
-        ct = svc._detect_comparison_type(tests)
+        traits = svc._detect_traits(tests)
+        assert traits.is_temporal
+        assert traits.same_load_params
+        ct = svc._derive_comparison_type(traits)
         assert ct == ComparisonType.TEMPORAL
 
-    def test_mixed(self):
+    def test_config_comparison_multi_db_diff_vu(self):
+        """Same scenario, multiple DBs, different VU -> CONFIG_COMPARISON (was 'mixed')."""
+        svc = self._service()
+        id1, id2 = uuid.uuid4(), uuid.uuid4()
+        tests = [
+            _make_test_data(id1, "A", virtual_users=4, db_keys=["conn_mysql", "conn_pg"]),
+            _make_test_data(id2, "B", virtual_users=8, db_keys=["conn_mysql", "conn_pg"]),
+        ]
+        traits = svc._detect_traits(tests)
+        assert traits.diff_virtual_users
+        assert traits.multiple_dbs
+        ct = svc._derive_comparison_type(traits)
+        assert ct == ComparisonType.CONFIG_COMPARISON
+
+    def test_same_scenario_diff_vu_single_db(self):
+        """Same scenario, single DB, different VU -> SCALABILITY."""
+        svc = self._service()
+        id1, id2 = uuid.uuid4(), uuid.uuid4()
+        tests = [
+            _make_test_data(id1, "A", virtual_users=10, db_keys=["conn_pg"]),
+            _make_test_data(id2, "B", virtual_users=50, db_keys=["conn_pg"]),
+        ]
+        traits = svc._detect_traits(tests)
+        assert traits.diff_virtual_users
+        assert not traits.multiple_dbs
+        ct = svc._derive_comparison_type(traits)
+        assert ct == ComparisonType.SCALABILITY
+
+    def test_diff_db_targets_subsets(self):
+        """Tests with different DB subsets."""
         svc = self._service()
         id1, id2 = uuid.uuid4(), uuid.uuid4()
         tests = [
             _make_test_data(id1, "A", virtual_users=4, db_keys=["conn_mysql", "conn_pg"]),
             _make_test_data(id2, "B", virtual_users=8, db_keys=["conn_mysql"]),
         ]
-        ct = svc._detect_comparison_type(tests)
-        assert ct == ComparisonType.MIXED
+        traits = svc._detect_traits(tests)
+        assert not traits.same_db_targets
+        assert traits.multiple_dbs
+        assert traits.diff_virtual_users
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +252,9 @@ class TestAnalyze:
         result = await svc.analyze([id1, id2])
 
         assert result.comparison_type == ComparisonType.CROSS_DATABASE
+        assert result.traits is not None
+        assert result.traits.multiple_dbs
+        assert result.traits.same_load_params
         assert result.baseline_id == id1
         assert len(result.tests) == 2
         assert str(id1) in result.descriptive_stats
@@ -241,6 +284,8 @@ class TestAnalyze:
         result = await svc.analyze([id1, id2])
 
         assert result.comparison_type == ComparisonType.TEMPORAL
+        assert result.traits is not None
+        assert result.traits.is_temporal
         assert len(result.pairwise_comparisons) > 0
 
     @pytest.mark.asyncio
@@ -318,4 +363,6 @@ class TestAnalyze:
         result = await svc.analyze([id1, id2])
 
         assert result.comparison_type == ComparisonType.SCALABILITY
+        assert result.traits is not None
+        assert result.traits.diff_virtual_users
         assert str(id1) in result.normalized_metrics or str(id2) in result.normalized_metrics

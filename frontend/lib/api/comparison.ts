@@ -12,8 +12,31 @@ export interface ComparisonRequest {
 export type ComparisonType =
   | "cross_database"
   | "scalability"
-  | "mixed"
+  | "config_comparison"
   | "temporal"
+  | "general"
+  | "mixed"
+
+export interface ComparisonTraits {
+  same_scenario: boolean
+  same_db_targets: boolean
+  multiple_dbs: boolean
+  same_load_params: boolean
+  diff_virtual_users: boolean
+  diff_iterations: boolean
+  diff_warmup: boolean
+  is_temporal: boolean
+}
+
+export interface ResourceMetrics {
+  cpu_usage?: number | null
+  memory_usage_percent?: number | null
+  disk_iops?: number | null
+  cache_hit_ratio?: number | null
+  buffer_pool_hit_ratio?: number | null
+  lock_waits?: number | null
+  deadlocks?: number | null
+}
 
 export interface ScenarioQueryInfo {
   sql_template: string
@@ -106,6 +129,8 @@ export interface PairwiseComparison {
   effect_size_label?: string | null
   ci_lower?: number | null
   ci_upper?: number | null
+  p_value_adjusted?: number | null
+  is_significant_adjusted: boolean
 }
 
 export interface BarChartPoint {
@@ -203,6 +228,7 @@ export interface ComparisonResult {
   tests: ComparisonTestInfo[]
   baseline_id: string
   comparison_type: ComparisonType
+  traits?: ComparisonTraits | null
   warnings: string[]
   descriptive_stats: Record<string, Record<string, MetricStatsBundle>>
   normalized_metrics: Record<string, Record<string, NormalizedMetrics>>
@@ -211,6 +237,7 @@ export interface ComparisonResult {
   analysis_report?: AnalysisReport | null
   db_key_labels: Record<string, string>
   parameter_impacts: ParameterImpactSummary[]
+  resource_metrics?: Record<string, Record<string, ResourceMetrics>>
 }
 
 export async function analyzeComparison(request: ComparisonRequest): Promise<ComparisonResult> {

@@ -7,6 +7,7 @@ from backend.comparison.schemas import (
     AnalysisReport,
     AnalysisReportConfig,
     AnalysisSection,
+    ComparisonTraits,
     ComparisonType,
     ComparisonResult,
     MetricStatsBundle,
@@ -76,15 +77,20 @@ class ComparisonReportGenerator:
             sections=sections,
         )
 
+    def _get_traits(self, result: ComparisonResult) -> ComparisonTraits:
+        """Get traits, falling back to defaults when absent."""
+        return result.traits or ComparisonTraits()
+
     def generate_verdict(self, result: ComparisonResult) -> str:
         """Сгенерировать основной вердикт сравнения"""
-        if result.comparison_type == ComparisonType.CROSS_DATABASE:
+        traits = self._get_traits(result)
+        if traits.multiple_dbs and traits.same_load_params:
             return self._generate_cross_database_verdict(result)
-        if result.comparison_type == ComparisonType.SCALABILITY:
-            return self._generate_scalability_verdict(result)
-        if result.comparison_type == ComparisonType.TEMPORAL:
+        if not traits.same_load_params:
+            return self._generate_config_comparison_verdict(result)
+        if traits.is_temporal:
             return self._generate_temporal_verdict(result)
-        return self._generate_mixed_verdict(result)
+        return self._generate_cross_database_verdict(result)
 
     def _generate_cross_database_verdict(self, result: ComparisonResult) -> str:
         """Сгенерировать вердикт для прямого сравнения СУБД"""
@@ -145,30 +151,29 @@ class ComparisonReportGenerator:
 
         return "Статистически значимых различий по пропускной способности не обнаружено"
 
-    def _generate_scalability_verdict(self, result: ComparisonResult) -> str:
-        """Сгенерировать вердикт для анализа масштабируемости"""
-        reports = self._build_scalability_reports(result)
-        if not reports:
-            return "Для анализа масштабируемости недостаточно данных: нужно минимум две точки нагрузки на одну СУБД"
+    def _generate_config_comparison_verdict(self, result: ComparisonResult) -> str:
+        """Verdict for tests with differing load parameters (scalability or config_comparison)."""
+        traits = self._get_traits(result)
 
-        ranked_reports = sorted(
-            reports,
-            key=lambda item: (
-                item["pattern_rank"],
-                item["efficiency_tail"] if item["efficiency_tail"] is not None else -1.0,
-            ),
-            reverse=True,
-        )
-        return ranked_reports[0]["verdict"]
+        scalability_reports = self._build_scalability_reports(result)
+        if scalability_reports:
+            ranked = sorted(
+                scalability_reports,
+                key=lambda item: (
+                    item["pattern_rank"],
+                    item["efficiency_tail"] if item["efficiency_tail"] is not None else -1.0,
+                ),
+                reverse=True,
+            )
+            return ranked[0]["verdict"]
 
-    def _generate_mixed_verdict(self, result: ComparisonResult) -> str:
-        """Сгенерировать вердикт для mixed-сравнения"""
-        mixed_report = self._build_mixed_scaling_report(result)
-        if mixed_report:
-            return mixed_report
+        if traits.multiple_dbs:
+            mixed_report = self._build_mixed_scaling_report(result)
+            if mixed_report:
+                return mixed_report
 
         return (
-            "Сравнение выполнено в mixed-режиме: тесты различаются и по конфигурации, и по целевым СУБД. "
+            "Тесты выполнены с различными параметрами нагрузки. "
             "Для итогового выбора ориентируйтесь на нормализованные метрики throughput_per_thread и scaling efficiency"
         )
 
@@ -231,11 +236,12 @@ class ComparisonReportGenerator:
                     if tail_pattern:
                         patterns.append(tail_pattern)
 
-        if result.comparison_type == ComparisonType.SCALABILITY:
+        traits = self._get_traits(result)
+        if not traits.same_load_params:
             patterns.extend(self._analyze_scalability_patterns(result))
-        elif result.comparison_type == ComparisonType.MIXED:
-            patterns.extend(self._analyze_mixed_patterns(result))
-        elif result.comparison_type == ComparisonType.TEMPORAL:
+            if traits.multiple_dbs:
+                patterns.extend(self._analyze_mixed_patterns(result))
+        if traits.is_temporal:
             patterns.extend(self._analyze_temporal_patterns(result))
 
         if not patterns:
@@ -257,11 +263,12 @@ class ComparisonReportGenerator:
                 "Перед принятием архитектурного решения повторите сравнение после устранения предупреждений о нехватке данных"
             )
 
-        if result.comparison_type == ComparisonType.SCALABILITY:
+        traits = self._get_traits(result)
+        if not traits.same_load_params:
             recommendations.extend(self._generate_scalability_recommendations(result))
-        elif result.comparison_type == ComparisonType.MIXED:
-            recommendations.extend(self._generate_mixed_recommendations(result))
-        elif result.comparison_type == ComparisonType.TEMPORAL:
+            if traits.multiple_dbs:
+                recommendations.extend(self._generate_mixed_recommendations(result))
+        if traits.is_temporal:
             recommendations.extend(self._generate_temporal_recommendations(result))
 
         if not recommendations:
@@ -312,7 +319,8 @@ class ComparisonReportGenerator:
                         "в том числе за счёт кластерных индексов и предсказуемых PK lookup"
                     )
 
-        if result.comparison_type in (ComparisonType.SCALABILITY, ComparisonType.MIXED):
+        traits = self._get_traits(result)
+        if not traits.same_load_params:
             hypotheses.extend(self._generate_scalability_hypotheses(result))
 
         if not hypotheses:
@@ -772,8 +780,10 @@ class ComparisonReportGenerator:
         type_labels = {
             ComparisonType.CROSS_DATABASE: "сравнение СУБД",
             ComparisonType.SCALABILITY: "анализ масштабируемости",
-            ComparisonType.MIXED: "смешанное сравнение",
+            ComparisonType.CONFIG_COMPARISON: "сравнение конфигураций",
             ComparisonType.TEMPORAL: "временной анализ",
+            ComparisonType.GENERAL: "сравнение",
+            ComparisonType.MIXED: "сравнение конфигураций",
         }
         type_label = type_labels.get(result.comparison_type, "сравнение")
 

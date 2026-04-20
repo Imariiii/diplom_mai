@@ -25,6 +25,7 @@ export type {
 export type {
   ComparisonRequest,
   ComparisonType,
+  ComparisonTraits,
   ComparisonResult,
   ComparisonTestInfo,
   ScenarioInfo,
@@ -47,6 +48,7 @@ export type {
   MetricEffectDirection,
   MetricEffectMagnitude,
   ParameterImpactSummary,
+  ResourceMetrics,
 } from "./api/comparison"
 
 // Функции - реэкспорт из модулей
