@@ -8,7 +8,6 @@ import { ConfigPage } from "@/components/pages/config-page"
 import { DatabaseStatePage } from "@/components/pages/database-state-page"
 import { ScenariosPage } from "@/components/pages/scenarios-page"
 import { DashboardsPage } from "@/components/pages/dashboards-page"
-import { ReportsPage } from "@/components/pages/reports-page"
 import { HistoryPage } from "@/components/pages/history-page"
 import { ComparisonPage } from "@/components/pages/comparison-page"
 import { useAppStore } from "@/lib/store"
@@ -26,7 +25,6 @@ export default function Page() {
         {currentPage === "config" && <ConfigPage />}
         {currentPage === "scenarios" && <ScenariosPage />}
         {currentPage === "dashboards" && <DashboardsPage />}
-        {currentPage === "reports" && <ReportsPage />}
         {currentPage === "history" && <HistoryPage />}
         {currentPage === "comparison" && <ComparisonPage />}
         {currentPage === "database-state" && <DatabaseStatePage />}

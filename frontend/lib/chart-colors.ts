@@ -1,5 +1,5 @@
 // Унифицированная палитра цветов для СУБД
-// Используется в dashboards-page.tsx и reports-page.tsx
+// Используется в dashboards-page.tsx
 
 export const DB_COLORS: Record<string, string> = {
   postgresql: "#3b82f6",  // Синий

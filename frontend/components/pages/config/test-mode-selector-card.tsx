@@ -19,7 +19,7 @@ const testModes: { id: TestMode; name: string; description: string; icon: React.
   {
     id: "custom_query",
     name: "Конкретный запрос",
-    description: "Выбор SQL-запроса из списка или ввод своего",
+    description: "Ввод произвольного SQL-запроса для тестирования",
     icon: Code,
   },
 ]

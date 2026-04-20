@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { Play, Users, Clock, Gauge } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/lib/store"
-import { apiClient, type Query } from "@/lib/api"
+import { apiClient } from "@/lib/api"
 import { toast } from "sonner"
 import type {
   TestRun,
@@ -30,14 +30,12 @@ export function ConfigPage() {
     setCurrentPage,
   } = useAppStore()
   const [isRunning, setIsRunning] = useState(false)
-  const [queries, setQueries] = useState<Query[]>([])
   const [scenarios, setScenarios] = useState<ScenarioTemplate[]>([])
   const [scenariosLoading, setScenariosLoading] = useState(true)
   const [logicalDatabases, setLogicalDatabases] = useState<LogicalDatabaseWithConnections[]>([])
   const [selectedLogicalDbId, setSelectedLogicalDbId] = useState<string | null>(null)
   const [selectedLogicalDatabaseDetail, setSelectedLogicalDatabaseDetail] = useState<LogicalDatabaseDetail | null>(null)
   const [healthStatus, setHealthStatus] = useState<Record<string, boolean>>({})
-  const [useCustomSql, setUseCustomSql] = useState(false)
 
   // Подключения выбранной логической БД
   const connections: DatabaseConnection[] = selectedLogicalDbId
@@ -45,19 +43,6 @@ export function ConfigPage() {
     : []
 
   useEffect(() => {
-    apiClient
-      .getQueries()
-      .then((data) => {
-        setQueries(data)
-        if (data.length > 0 && !testConfig.selectedQueryId) {
-          setTestConfig({ selectedQueryId: data[0].id })
-        }
-      })
-      .catch((error) => {
-        console.error("Ошибка загрузки запросов:", error)
-        toast.error("Не удалось загрузить список запросов")
-      })
-
     apiClient
       .getScenarioTemplates()
       .then((response) => {
@@ -161,16 +146,9 @@ export function ConfigPage() {
     }
 
     if (testConfig.testMode === "custom_query") {
-      if (useCustomSql) {
-        if (!testConfig.customSql.trim()) {
-          toast.error("Введите SQL-запрос")
-          return false
-        }
-      } else {
-        if (!testConfig.selectedQueryId) {
-          toast.error("Выберите запрос из списка")
-          return false
-        }
+      if (!testConfig.customSql.trim()) {
+        toast.error("Введите SQL-запрос")
+        return false
       }
     }
 
@@ -189,10 +167,7 @@ export function ConfigPage() {
         const selectedScenario = scenarios.find(s => s.id === testConfig.scenario)
         toast.info(`Запуск тестирования: ${selectedScenario?.name}`)
       } else {
-        const queryDesc = useCustomSql
-          ? "пользовательский запрос"
-          : queries.find(q => q.id === testConfig.selectedQueryId)?.name || "выбранный запрос"
-        toast.info(`Запуск тестирования: ${queryDesc}`)
+        toast.info("Запуск тестирования: пользовательский SQL-запрос")
       }
 
       const asyncResponse = await apiClient.runAsyncTest({
@@ -253,7 +228,6 @@ export function ConfigPage() {
   }
 
   const selectedScenario = scenarios?.find(s => s.id === testConfig.scenario)
-  const selectedQuery = queries?.find(q => q.id === testConfig.selectedQueryId)
   const selectedConnections = connections.filter((connection) =>
     testConfig.databases.includes(connection.id)
   )
@@ -279,10 +253,7 @@ export function ConfigPage() {
     if (testConfig.databases.length === 0) return false
     if (hasMissingProfiles || hasMixedProfiles) return false
     if (testConfig.testMode === "custom_query") {
-      if (useCustomSql) {
-        return testConfig.customSql.trim().length > 0
-      }
-      return !!testConfig.selectedQueryId
+      return testConfig.customSql.trim().length > 0
     }
     return true
   }
@@ -353,13 +324,8 @@ export function ConfigPage() {
 
       {testConfig.testMode === "custom_query" && (
         <QuerySelectorCard
-          queries={queries}
-          selectedQueryId={testConfig.selectedQueryId}
-          useCustomSql={useCustomSql}
           customSql={testConfig.customSql}
-          onQueryChange={(id) => setTestConfig({ selectedQueryId: id })}
           onCustomSqlChange={(sql) => setTestConfig({ customSql: sql })}
-          onToggleCustom={setUseCustomSql}
         />
       )}
 
@@ -404,8 +370,6 @@ export function ConfigPage() {
         selectedDatabases={testConfig.databases}
         testMode={testConfig.testMode}
         selectedScenario={selectedScenario}
-        selectedQuery={selectedQuery}
-        useCustomSql={useCustomSql}
         useIndexes={testConfig.useIndexes}
         virtualUsers={testConfig.virtualUsers}
         iterations={testConfig.iterations}

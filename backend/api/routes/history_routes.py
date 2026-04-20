@@ -64,6 +64,21 @@ async def compare_history_tests(test_id_1: str, test_id_2: str):
     return comparison
 
 
+@router.get("/tests/{test_id}/time-series")
+async def get_history_test_time_series(
+    test_id: str,
+    db_type: Optional[str] = Query(None, description="Фильтр по типу СУБД"),
+    limit: int = Query(500, le=2000, description="Максимальное количество точек на СУБД"),
+):
+    """Получить временные ряды метрик теста для построения графиков"""
+    repo = get_test_repository()
+    test = await repo.get_test_run(test_id)
+    if not test:
+        raise HTTPException(status_code=404, detail=f"Тест {test_id} не найден")
+    points = await repo.get_time_series(test_id, db_type=db_type, limit=limit)
+    return {"test_id": test_id, "points": points, "count": len(points)}
+
+
 @router.delete("/tests/{test_id}")
 async def delete_history_test(test_id: str):
     """Удалить тест из истории"""

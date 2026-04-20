@@ -1,9 +1,10 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import { Database, Cpu, BarChart3, Lock, AlertTriangle } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { Database, Cpu, BarChart3, Lock, AlertTriangle, CheckCircle2, History, SlidersHorizontal } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/lib/store"
 import { useTestWebSocket } from "@/hooks/use-test-websocket"
 import { apiClient } from "@/lib/api"
@@ -18,8 +19,12 @@ import { TransactionMetricsTab } from "./dashboards/transaction-metrics-tab"
 import { DbmsMetricsTab } from "./dashboards/dbms-metrics-tab"
 
 export function DashboardsPage() {
-  const { currentTest, realtimeData, testConfig, setCurrentTest, addTestToHistory, clearRealtimeData, connectionNames, setConnectionNames, connectionDbTypes, setConnectionDbTypes } = useAppStore()
+  const { currentTest, realtimeData, testConfig, setCurrentTest, addTestToHistory, clearRealtimeData, connectionNames, setConnectionNames, connectionDbTypes, setConnectionDbTypes, setCurrentPage, setComparisonSelection } = useAppStore()
   const [statusMessage, setStatusMessage] = useState<string>("")
+
+  // Ref always holds the latest currentTest so the cleanup closure is never stale.
+  const currentTestRef = useRef(currentTest)
+  currentTestRef.current = currentTest
 
   const {
     isConnected,
@@ -219,10 +224,11 @@ export function DashboardsPage() {
 
   useEffect(() => {
     return () => {
-      if (currentTest?.status !== "completed") {
+      if (currentTestRef.current?.status !== "completed") {
         clearRealtimeData()
       }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTest?.id])
 
   const getDbDisplayName = (dbId: string) => {
@@ -315,6 +321,51 @@ export function DashboardsPage() {
           backupStatus={backupStatus}
           formatTime={formatTime}
         />
+      )}
+
+      {isTestFinished && currentTest?.status === "completed" && (
+        <div className="rounded-xl border border-success/30 bg-success/5 p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-success/15 text-success">
+                <CheckCircle2 className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="font-semibold text-foreground">Тест завершён успешно</p>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  Результаты сохранены в истории.
+                  {elapsedSeconds > 0 && (
+                    <> Время выполнения: <span className="font-mono">{formatTime(elapsedSeconds)}</span>.</>
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2 sm:flex-nowrap">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => setCurrentPage("history")}
+              >
+                <History className="h-4 w-4" />
+                История тестов
+              </Button>
+              <Button
+                size="sm"
+                className="gap-2"
+                onClick={() => {
+                  if (currentTest?.id) {
+                    setComparisonSelection([currentTest.id], null, "per_test")
+                    setCurrentPage("comparison")
+                  }
+                }}
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+                Сводка по прогону
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
 
       {isTestFinished && selfCheckResults.length > 0 && (

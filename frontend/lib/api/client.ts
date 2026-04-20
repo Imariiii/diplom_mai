@@ -138,6 +138,17 @@ class ApiClient {
     return this.request(`/history/tests/${testId}`, { method: 'DELETE' })
   }
 
+  async getHistoryTestTimeSeries(
+    testId: string,
+    params?: { db_type?: string; limit?: number },
+  ): Promise<{ test_id: string; points: any[]; count: number }> {
+    const queryParams = new URLSearchParams()
+    if (params?.db_type) queryParams.set('db_type', params.db_type)
+    if (params?.limit) queryParams.set('limit', params.limit.toString())
+    const qs = queryParams.toString()
+    return this.request(`/history/tests/${testId}/time-series${qs ? `?${qs}` : ''}`)
+  }
+
   async analyzeComparison(request: { analysis_mode: string; test_ids: string[]; baseline_id?: string; report_config?: any }): Promise<any> {
     return this.request('/api/comparison/analyze', {
       method: 'POST',

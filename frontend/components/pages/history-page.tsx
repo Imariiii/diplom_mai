@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   GitCompare,
   Database,
+  Activity,
 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -28,6 +29,7 @@ import { apiClient, type HistoryTestRun, type HistoryTestResult } from "@/lib/ap
 import { useAppStore } from "@/lib/store"
 import { DB_NAMES, getDbColor, CHART_COLORS, METRIC_COLORS } from "@/lib/chart-colors"
 import type { LogicalDatabaseWithConnections } from "@/lib/types"
+import { HistoryTimeSeriesTab } from "./history-time-series-tab"
 import { cn } from "@/lib/utils"
 import {
   BarChart,
@@ -125,6 +127,7 @@ export function HistoryPage() {
 
   const [logicalDatabases, setLogicalDatabases] = useState<LogicalDatabaseWithConnections[]>([])
   const [selectedLogicalDbId, setSelectedLogicalDbId] = useState<string | null>(null)
+  const [activeDetailTab, setActiveDetailTab] = useState("results")
 
   const pageSize = 20
 
@@ -198,6 +201,10 @@ export function HistoryPage() {
   useEffect(() => {
     void fetchTests()
   }, [page])
+
+  useEffect(() => {
+    setActiveDetailTab("results")
+  }, [selectedTest?.id])
 
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return "-"
@@ -386,10 +393,14 @@ export function HistoryPage() {
           </CardContent>
         </Card>
 
-        <Tabs defaultValue="results" className="space-y-4">
+        <Tabs value={activeDetailTab} onValueChange={setActiveDetailTab} className="space-y-4">
           <TabsList>
             <TabsTrigger value="results">Результаты</TabsTrigger>
             <TabsTrigger value="charts">Графики</TabsTrigger>
+            <TabsTrigger value="monitoring" className="gap-1.5">
+              <Activity className="h-3.5 w-3.5" />
+              Мониторинг
+            </TabsTrigger>
             <TabsTrigger value="config">Конфигурация</TabsTrigger>
           </TabsList>
 
@@ -546,6 +557,12 @@ export function HistoryPage() {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          <TabsContent value="monitoring">
+            {activeDetailTab === "monitoring" && (
+              <HistoryTimeSeriesTab testId={selectedTest.id} />
+            )}
           </TabsContent>
 
           <TabsContent value="config">

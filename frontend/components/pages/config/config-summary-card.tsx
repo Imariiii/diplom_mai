@@ -1,15 +1,12 @@
 "use client"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import type { Query } from "@/lib/api"
 import type { DatabaseConnection, ScenarioTemplate } from "@/lib/types"
 
 interface ConfigSummaryCardProps {
   selectedDatabases: string[]
   testMode: string
   selectedScenario?: ScenarioTemplate
-  selectedQuery?: Query
-  useCustomSql: boolean
   useIndexes: boolean
   virtualUsers: number
   iterations: number
@@ -23,8 +20,6 @@ export function ConfigSummaryCard({
   selectedDatabases,
   testMode,
   selectedScenario,
-  selectedQuery,
-  useCustomSql,
   useIndexes,
   virtualUsers,
   iterations,
@@ -76,11 +71,7 @@ export function ConfigSummaryCard({
           ) : (
             <div>
               <span className="text-muted-foreground">Запрос:</span>
-              <span className="ml-2 font-medium">
-                {useCustomSql
-                  ? "Пользовательский SQL"
-                  : (selectedQuery?.name || "Не выбрано")}
-              </span>
+              <span className="ml-2 font-medium">Пользовательский SQL</span>
             </div>
           )}
           <div>

@@ -4,8 +4,8 @@ import { create } from "zustand"
 import type { TestConfig, TestRun, TimeSeriesPoint } from "./types"
 
 interface AppState {
-  currentPage: "home" | "connections" | "config" | "scenarios" | "dashboards" | "reports" | "history" | "comparison" | "database-state"
-  setCurrentPage: (page: "home" | "connections" | "config" | "scenarios" | "dashboards" | "reports" | "history" | "comparison" | "database-state") => void
+  currentPage: "home" | "connections" | "config" | "scenarios" | "dashboards" | "history" | "comparison" | "database-state"
+  setCurrentPage: (page: "home" | "connections" | "config" | "scenarios" | "dashboards" | "history" | "comparison" | "database-state") => void
   sidebarOpen: boolean
   setSidebarOpen: (open: boolean) => void
 
