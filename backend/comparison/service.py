@@ -10,14 +10,15 @@ from backend.comparison.schemas import (
     AnalysisReportConfig,
     BarChartPoint,
     BoxPlotPoint,
+    ChangedParameter,
     ComparisonType,
     ComparisonChartsData,
     ComparisonResult,
     ComparisonTestInfo,
     ConnectionInfo,
+    MetricEffect,
     MetricStatsBundle,
     NormalizedMetrics,
-    ParameterImpact,
     ParameterImpactSummary,
     ScenarioInfo,
     ScenarioQueryInfo,
@@ -145,6 +146,7 @@ class ComparisonService:
             tests=tests,
             baseline_id=baseline_uuid,
             descriptive_stats=descriptive_stats,
+            db_key_labels=db_key_labels,
         )
 
         comparison_result = ComparisonResult(
@@ -1102,6 +1104,7 @@ class ComparisonService:
         tests: List[Dict[str, Any]],
         baseline_id: UUID,
         descriptive_stats: Dict[str, Dict[str, MetricStatsBundle]],
+        db_key_labels: Dict[str, str],
     ) -> List[ParameterImpactSummary]:
         """Построить анализ влияния параметров конфигурации на результаты"""
         baseline_test = None
@@ -1116,14 +1119,14 @@ class ComparisonService:
         baseline_key = str(baseline_id)
         baseline_stats = descriptive_stats.get(baseline_key, {})
 
-        summaries: List[ParameterImpactSummary] = []
-
         tracked_params = [
             ("virtual_users", "Виртуальные пользователи"),
             ("iterations", "Итерации"),
             ("use_indexes", "Индексы"),
             ("warmup_time", "Прогрев"),
         ]
+
+        summaries: List[ParameterImpactSummary] = []
 
         for test_data in tests:
             compared_id = UUID(str(test_data["id"]))
@@ -1134,40 +1137,41 @@ class ComparisonService:
             compared_key = str(compared_id)
             compared_stats = descriptive_stats.get(compared_key, {})
 
-            impacts: List[ParameterImpact] = []
-
+            changed_parameters: List[ChangedParameter] = []
             for param_key, param_label in tracked_params:
                 baseline_val = baseline_config.get(param_key)
                 compared_val = compared_config.get(param_key)
-
                 if baseline_val == compared_val:
                     continue
-
-                change_desc = self._format_param_change(param_key, baseline_val, compared_val)
-                effects = self._compute_param_effects(
-                    param_key, baseline_val, compared_val,
-                    baseline_stats, compared_stats,
-                )
-
-                impacts.append(ParameterImpact(
+                changed_parameters.append(ChangedParameter(
                     parameter=param_key,
+                    label=param_label,
                     baseline_value=baseline_val,
                     compared_value=compared_val,
-                    change_description=change_desc,
-                    effects=effects,
+                    change_description=self._format_param_change(
+                        param_key, baseline_val, compared_val
+                    ),
                 ))
 
-            summary_text = self._format_impact_summary(
+            metric_effects = self._compute_metric_effects(
+                baseline_stats, compared_stats, db_key_labels,
+            )
+            top_insights = self._build_top_insights(metric_effects)
+
+            summary_text = self._format_impact_summary_v2(
                 test_data.get("name", ""),
                 baseline_test.get("name", ""),
-                impacts,
+                changed_parameters,
+                top_insights,
             )
 
             summaries.append(ParameterImpactSummary(
                 test_id=compared_id,
                 test_name=test_data.get("name", ""),
                 vs_baseline=baseline_test.get("name", ""),
-                impacts=impacts,
+                changed_parameters=changed_parameters,
+                metric_effects=metric_effects,
+                top_insights=top_insights,
                 summary_text=summary_text,
             ))
 
@@ -1191,92 +1195,148 @@ class ComparisonService:
             return f"{int(base_num)} → {int(comp_num)} ({pct:+.0f}%)"
         return f"{int(base_num)} → {int(comp_num)}"
 
-    def _compute_param_effects(
+    @staticmethod
+    def _classify_magnitude(pct: float) -> str:
+        """Classify effect magnitude by absolute percent change."""
+        abs_pct = abs(pct)
+        if abs_pct < 5:
+            return "negligible"
+        if abs_pct < 15:
+            return "small"
+        if abs_pct < 30:
+            return "medium"
+        return "large"
+
+    def _compute_metric_effects(
         self,
-        param_key: str,
-        baseline_val,
-        compared_val,
         baseline_stats: Dict[str, MetricStatsBundle],
         compared_stats: Dict[str, MetricStatsBundle],
-    ) -> List[str]:
-        """Вычислить эффекты изменения параметра на метрики"""
-        effects = []
+        db_key_labels: Dict[str, str],
+    ) -> List[MetricEffect]:
+        """Compute metric effects once per (baseline, compared) pair across all DBs."""
+        effects: List[MetricEffect] = []
         common_db_keys = set(baseline_stats.keys()) & set(compared_stats.keys())
+
+        metrics_spec = [
+            ("throughput", lambda b: b.throughput and b.throughput.mean, lambda b: b.throughput.mean, True),
+            ("latency_mean", lambda b: b.latency_ms and b.latency_ms.mean, lambda b: b.latency_ms.mean, False),
+            ("latency_p99", lambda b: b.latency_ms and b.latency_ms.p99, lambda b: b.latency_ms.p99, False),
+            ("latency_cv", lambda b: b.latency_ms and b.latency_ms.cv, lambda b: b.latency_ms.cv, False),
+        ]
 
         for db_key in sorted(common_db_keys):
             b_bundle = baseline_stats[db_key]
             c_bundle = compared_stats[db_key]
 
-            if b_bundle.throughput and c_bundle.throughput:
-                b_tp = b_bundle.throughput.mean
-                c_tp = c_bundle.throughput.mean
-                if b_tp > 0:
-                    pct = ((c_tp - b_tp) / b_tp) * 100
-                    direction = "рост" if pct > 0 else "снижение"
-                    effects.append(
-                        f"Throughput: {direction} на {abs(pct):.1f}% ({b_tp:.1f} → {c_tp:.1f} req/s)"
-                    )
+            for metric_name, has_val, get_val, higher_is_better in metrics_spec:
+                if not (has_val(b_bundle) and has_val(c_bundle)):
+                    continue
+                b_val = get_val(b_bundle)
+                c_val = get_val(c_bundle)
+                if b_val == 0:
+                    continue
 
-            if b_bundle.latency_ms and c_bundle.latency_ms:
-                b_lat = b_bundle.latency_ms.mean
-                c_lat = c_bundle.latency_ms.mean
-                if b_lat > 0:
-                    pct = ((c_lat - b_lat) / b_lat) * 100
-                    direction = "рост" if pct > 0 else "снижение"
-                    effects.append(
-                        f"Latency mean: {direction} на {abs(pct):.1f}% ({b_lat:.2f} → {c_lat:.2f} мс)"
-                    )
+                pct = ((c_val - b_val) / b_val) * 100
 
-                b_p99 = b_bundle.latency_ms.p99
-                c_p99 = c_bundle.latency_ms.p99
-                if b_p99 > 0:
-                    pct99 = ((c_p99 - b_p99) / b_p99) * 100
-                    direction99 = "рост" if pct99 > 0 else "снижение"
-                    effects.append(
-                        f"Latency p99: {direction99} на {abs(pct99):.1f}% ({b_p99:.2f} → {c_p99:.2f} мс)"
-                    )
+                if abs(pct) < 0.5:
+                    direction = "flat"
+                elif pct > 0:
+                    direction = "up"
+                else:
+                    direction = "down"
 
-                b_cv = b_bundle.latency_ms.cv
-                c_cv = c_bundle.latency_ms.cv
-                if b_cv > 0 and c_cv > 0:
-                    if c_cv > b_cv * 1.2:
-                        effects.append(f"Стабильность снизилась (CV: {b_cv:.2f} → {c_cv:.2f})")
-                    elif c_cv < b_cv * 0.8:
-                        effects.append(f"Стабильность повысилась (CV: {b_cv:.2f} → {c_cv:.2f})")
+                is_improvement = (
+                    (higher_is_better and direction == "up")
+                    or (not higher_is_better and direction == "down")
+                )
+
+                effects.append(MetricEffect(
+                    db_key=db_key,
+                    db_label=db_key_labels.get(db_key),
+                    metric=metric_name,
+                    baseline_value=round(b_val, 4),
+                    compared_value=round(c_val, 4),
+                    pct_change=round(pct, 2),
+                    direction=direction,
+                    is_improvement=is_improvement,
+                    magnitude=self._classify_magnitude(pct),
+                ))
 
         return effects
 
-    def _format_impact_summary(
+    @staticmethod
+    def _build_top_insights(effects: List[MetricEffect], limit: int = 3) -> List[str]:
+        """Select top N most impactful insights, prioritizing regressions."""
+        magnitude_rank = {"large": 3, "medium": 2, "small": 1, "negligible": 0}
+
+        sorted_effects = sorted(
+            effects,
+            key=lambda e: (
+                0 if not e.is_improvement else 1,
+                -magnitude_rank.get(e.magnitude, 0),
+                -abs(e.pct_change),
+            ),
+        )
+
+        metric_labels = {
+            "throughput": "throughput",
+            "latency_mean": "latency mean",
+            "latency_p99": "latency p99",
+            "latency_cv": "стабильность (CV)",
+        }
+        metric_units = {
+            "throughput": "req/s",
+            "latency_mean": "мс",
+            "latency_p99": "мс",
+            "latency_cv": "",
+        }
+
+        insights: List[str] = []
+        for e in sorted_effects[:limit]:
+            if e.magnitude == "negligible":
+                continue
+            db = e.db_label or e.db_key
+            m_label = metric_labels.get(e.metric, e.metric)
+            unit = metric_units.get(e.metric, "")
+
+            direction_word = "вырос" if e.direction == "up" else "снизился"
+            fmt_base = f"{e.baseline_value:.1f}" if unit else f"{e.baseline_value:.2f}"
+            fmt_comp = f"{e.compared_value:.1f}" if unit else f"{e.compared_value:.2f}"
+            unit_str = f" {unit}" if unit else ""
+
+            insights.append(
+                f"{db}: {m_label} {direction_word} на {abs(e.pct_change):.1f}% "
+                f"({fmt_base} → {fmt_comp}{unit_str})"
+            )
+        return insights
+
+    def _format_impact_summary_v2(
         self,
         test_name: str,
         baseline_name: str,
-        impacts: List[ParameterImpact],
+        changed_params: List[ChangedParameter],
+        top_insights: List[str],
     ) -> str:
         """Сформировать текстовое резюме влияния параметров"""
-        if not impacts:
+        if not changed_params:
             return f"Конфигурация теста «{test_name}» совпадает с baseline «{baseline_name}»"
 
+        param_gen_labels = {
+            "virtual_users": "числа виртуальных пользователей",
+            "iterations": "числа итераций",
+            "use_indexes": "использования индексов",
+            "warmup_time": "времени прогрева",
+        }
+
         parts = []
-        for impact in impacts:
-            param_labels = {
-                "virtual_users": "числа виртуальных пользователей",
-                "iterations": "числа итераций",
-                "use_indexes": "использования индексов",
-                "warmup_time": "времени прогрева",
-            }
-            label = param_labels.get(impact.parameter, impact.parameter)
-            parts.append(f"изменение {label} ({impact.change_description})")
+        for cp in changed_params:
+            label = param_gen_labels.get(cp.parameter, cp.parameter)
+            parts.append(f"изменение {label} ({cp.change_description})")
 
         summary = f"В тесте «{test_name}» относительно baseline «{baseline_name}»: {', '.join(parts)}."
 
-        all_effects = []
-        for impact in impacts:
-            all_effects.extend(impact.effects)
-        if all_effects:
-            summary += " Результаты: " + "; ".join(all_effects[:4])
-            if len(all_effects) > 4:
-                summary += f" и ещё {len(all_effects) - 4} изменений"
-            summary += "."
+        if top_insights:
+            summary += " " + "; ".join(top_insights) + "."
 
         return summary
 

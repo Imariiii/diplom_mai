@@ -1,8 +1,9 @@
 "use client"
 
 import {
-  ArrowUpRight,
-  ArrowDownRight,
+  AlertTriangle,
+  TrendingUp,
+  TrendingDown,
   Minus,
   Database,
   Hash,
@@ -12,7 +13,11 @@ import {
   Zap,
 } from "lucide-react"
 
-import type { ParameterImpactSummary, ComparisonResult } from "@/lib/api"
+import type {
+  ParameterImpactSummary,
+  MetricEffect,
+  ComparisonResult,
+} from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 
 interface ParameterImpactProps {
@@ -20,17 +25,24 @@ interface ParameterImpactProps {
 }
 
 const PARAM_ICONS: Record<string, React.ReactNode> = {
-  virtual_users: <Hash className="h-4 w-4" />,
-  iterations: <Layers className="h-4 w-4" />,
-  use_indexes: <Database className="h-4 w-4" />,
-  warmup_time: <Timer className="h-4 w-4" />,
+  virtual_users: <Hash className="h-3.5 w-3.5" />,
+  iterations: <Layers className="h-3.5 w-3.5" />,
+  use_indexes: <Database className="h-3.5 w-3.5" />,
+  warmup_time: <Timer className="h-3.5 w-3.5" />,
 }
 
-const PARAM_LABELS: Record<string, string> = {
-  virtual_users: "Виртуальные пользователи",
-  iterations: "Итерации",
-  use_indexes: "Индексы",
-  warmup_time: "Прогрев",
+const METRIC_LABELS: Record<string, string> = {
+  throughput: "Throughput",
+  latency_mean: "Latency mean",
+  latency_p99: "Latency p99",
+  latency_cv: "Стабильность (CV)",
+}
+
+const METRIC_UNITS: Record<string, string> = {
+  throughput: "req/s",
+  latency_mean: "мс",
+  latency_p99: "мс",
+  latency_cv: "",
 }
 
 export function ParameterImpact({ result }: ParameterImpactProps) {
@@ -59,18 +71,45 @@ export function ParameterImpact({ result }: ParameterImpactProps) {
 
       <div className="grid gap-3 xl:grid-cols-2">
         {result.parameter_impacts.map((summary) => (
-          <ImpactCard key={summary.test_id} summary={summary} />
+          <ImpactCard
+            key={summary.test_id}
+            summary={summary}
+            dbKeyLabels={result.db_key_labels}
+          />
         ))}
       </div>
     </section>
   )
 }
 
-function ImpactCard({ summary }: { summary: ParameterImpactSummary }) {
-  if (summary.impacts.length === 0) return null
+function ImpactCard({
+  summary,
+  dbKeyLabels,
+}: {
+  summary: ParameterImpactSummary
+  dbKeyLabels?: Record<string, string>
+}) {
+  if (
+    summary.changed_parameters.length === 0 &&
+    summary.metric_effects.length === 0
+  )
+    return null
+
+  const dbKeys = Array.from(
+    new Set(summary.metric_effects.map((e) => e.db_key))
+  )
+  const metricKeys = Array.from(
+    new Set(summary.metric_effects.map((e) => e.metric))
+  )
+
+  const effectMap = new Map<string, MetricEffect>()
+  for (const e of summary.metric_effects) {
+    effectMap.set(`${e.db_key}:${e.metric}`, e)
+  }
 
   return (
     <div className="rounded-xl border border-border bg-card p-4 md:p-5">
+      {/* Header: test vs baseline + changed param badges */}
       <div className="flex flex-wrap items-center gap-2">
         <p className="font-mono text-sm font-medium">{summary.test_name}</p>
         <span className="text-xs text-muted-foreground">vs</span>
@@ -79,73 +118,132 @@ function ImpactCard({ summary }: { summary: ParameterImpactSummary }) {
         </Badge>
       </div>
 
-      <div className="mt-4 space-y-3">
-        {summary.impacts.map((impact) => (
-          <div
-            key={impact.parameter}
-            className="rounded-lg border border-border/60 bg-muted/30 p-3"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="text-muted-foreground">
-                  {PARAM_ICONS[impact.parameter] || <Settings className="h-4 w-4" />}
-                </span>
-                <p className="truncate text-sm font-medium">
-                  {PARAM_LABELS[impact.parameter] || impact.parameter}
-                </p>
-              </div>
-              <Badge
-                variant="secondary"
-                className="shrink-0 font-mono text-[11px] tabular-nums"
-              >
-                {impact.change_description}
-              </Badge>
-            </div>
+      {/* Changed parameters as pill badges */}
+      {summary.changed_parameters.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {summary.changed_parameters.map((cp) => (
+            <Badge
+              key={cp.parameter}
+              variant="secondary"
+              className="gap-1.5 font-mono text-[11px] tabular-nums"
+            >
+              <span className="text-muted-foreground">
+                {PARAM_ICONS[cp.parameter] || <Settings className="h-3.5 w-3.5" />}
+              </span>
+              {cp.label}: {cp.change_description}
+            </Badge>
+          ))}
+        </div>
+      )}
 
-            {impact.effects.length > 0 && (
-              <ul className="mt-2.5 space-y-1 border-l-2 border-border/60 pl-3">
-                {impact.effects.map((effect, idx) => (
-                  <EffectItem key={idx} effect={effect} />
+      {/* Top insights */}
+      {summary.top_insights.length > 0 && (
+        <div className="mt-3 space-y-1">
+          {summary.top_insights.map((insight, idx) => (
+            <InsightRow key={idx} text={insight} />
+          ))}
+        </div>
+      )}
+
+      {/* Metric × DB matrix table */}
+      {metricKeys.length > 0 && dbKeys.length > 0 && (
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border/60">
+                <th className="pb-2 pr-3 text-left font-medium text-muted-foreground">
+                  Метрика
+                </th>
+                {dbKeys.map((dbKey) => (
+                  <th
+                    key={dbKey}
+                    className="pb-2 px-2 text-center font-medium text-muted-foreground"
+                  >
+                    {dbKeyLabels?.[dbKey] || dbKey}
+                  </th>
                 ))}
-              </ul>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {summary.summary_text && (
-        <div className="mt-4 rounded-lg bg-primary/5 p-3">
-          <p className="text-sm italic leading-relaxed text-foreground/80">
-            {summary.summary_text}
-          </p>
+              </tr>
+            </thead>
+            <tbody>
+              {metricKeys.map((metric) => (
+                <tr key={metric} className="border-b border-border/40 last:border-b-0">
+                  <td className="py-2 pr-3 font-medium">
+                    {METRIC_LABELS[metric] || metric}
+                  </td>
+                  {dbKeys.map((dbKey) => {
+                    const effect = effectMap.get(`${dbKey}:${metric}`)
+                    if (!effect) {
+                      return (
+                        <td key={dbKey} className="px-2 py-2 text-center text-muted-foreground">
+                          —
+                        </td>
+                      )
+                    }
+                    return (
+                      <td key={dbKey} className="px-2 py-2 text-center">
+                        <EffectCell effect={effect} />
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
   )
 }
 
-function EffectItem({ effect }: { effect: string }) {
-  const isLatencyMetric = /latency/i.test(effect)
-  const isGrowth = /рост|повысилась|увелич/i.test(effect)
-  const isDrop = /снижение|снизилась|упал/i.test(effect)
-
-  // For latency: growth is bad, drop is good
-  // For throughput/efficiency: growth is good, drop is bad
-  const isGood = isLatencyMetric
-    ? isDrop || /повысилась/i.test(effect)
-    : isGrowth || /повысилась/i.test(effect)
-  const isBad = isLatencyMetric ? isGrowth : isDrop
+function InsightRow({ text }: { text: string }) {
+  const isNegative = /снизился|упал|вырос.*(latency|cv)/i.test(text)
+  const Icon = isNegative ? AlertTriangle : TrendingUp
 
   return (
-    <li className="flex items-start gap-2 text-sm leading-relaxed">
-      {isGood ? (
-        <ArrowUpRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
-      ) : isBad ? (
-        <ArrowDownRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
-      ) : (
-        <Minus className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-      )}
-      <span className="text-muted-foreground">{effect}</span>
-    </li>
+    <div className="flex items-start gap-2 text-sm">
+      <Icon
+        className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${
+          isNegative ? "text-warning" : "text-success"
+        }`}
+      />
+      <span className="text-muted-foreground leading-relaxed">{text}</span>
+    </div>
+  )
+}
+
+function EffectCell({ effect }: { effect: MetricEffect }) {
+  const unit = METRIC_UNITS[effect.metric] || ""
+
+  const colorCls =
+    effect.magnitude === "negligible"
+      ? "bg-muted text-muted-foreground"
+      : effect.is_improvement
+        ? "bg-success/10 text-success"
+        : "bg-warning/10 text-warning"
+
+  const DirIcon =
+    effect.direction === "up"
+      ? TrendingUp
+      : effect.direction === "down"
+        ? TrendingDown
+        : Minus
+
+  const fmtVal = (v: number) =>
+    unit === "req/s" ? v.toFixed(0) : unit === "мс" ? v.toFixed(2) : v.toFixed(2)
+
+  return (
+    <div className="flex flex-col items-center gap-0.5">
+      <span
+        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] tabular-nums ${colorCls}`}
+      >
+        <DirIcon className="h-3 w-3" />
+        {effect.pct_change >= 0 ? "+" : ""}
+        {effect.pct_change.toFixed(1)}%
+      </span>
+      <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
+        {fmtVal(effect.baseline_value)} → {fmtVal(effect.compared_value)}
+        {unit ? ` ${unit}` : ""}
+      </span>
+    </div>
   )
 }

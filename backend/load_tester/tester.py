@@ -259,9 +259,16 @@ class LoadTester:
         db_key: str,
         query_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Преобразовать raw результаты выполнения в sample-метрики для БД истории"""
+        """Преобразовать raw результаты выполнения в sample-метрики для БД истории.
+
+        Generates both request_latency (one per request) and throughput_window
+        (one per 1-second time bucket) records so that the comparison service
+        has structured throughput data without falling back to aggregates.
+        """
         db_type = self.db_connection.get_dbms_type(db_key)
         samples = []
+
+        parsed_timestamps: List[datetime] = []
 
         for result in results:
             timestamp_raw = result.get('timestamp')
@@ -278,6 +285,8 @@ class LoadTester:
             if timestamp is None:
                 timestamp = datetime.now(timezone.utc)
 
+            parsed_timestamps.append(timestamp)
+
             samples.append({
                 'db_type': db_type,
                 'connection_key': db_key,
@@ -291,7 +300,59 @@ class LoadTester:
                 'error_message': result.get('error'),
             })
 
+        samples.extend(
+            self._build_throughput_windows(
+                results, parsed_timestamps, db_type, db_key, query_id,
+            )
+        )
+
         return samples
+
+    @staticmethod
+    def _build_throughput_windows(
+        results: List[Dict[str, Any]],
+        timestamps: List[datetime],
+        db_type: str,
+        db_key: str,
+        query_id: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        """Aggregate request results into 1-second throughput windows."""
+        if not timestamps:
+            return []
+
+        buckets: Dict[int, List[float]] = {}
+        epoch_base = int(min(timestamps).timestamp())
+        for ts, result in zip(timestamps, results):
+            bucket = int(ts.timestamp()) - epoch_base
+            latency = result.get('execution_time_ms')
+            if latency is not None:
+                buckets.setdefault(bucket, []).append(latency)
+
+        if not buckets:
+            return []
+
+        window_samples = []
+        for bucket_offset in sorted(buckets):
+            latencies = buckets[bucket_offset]
+            count = len(latencies)
+            avg_latency = sum(latencies) / count if count else 0
+            bucket_ts = datetime.fromtimestamp(
+                epoch_base + bucket_offset, tz=timezone.utc
+            )
+            window_samples.append({
+                'db_type': db_type,
+                'connection_key': db_key,
+                'query_id': query_id,
+                'sample_type': 'throughput_window',
+                'timestamp': bucket_ts,
+                'latency_ms': avg_latency,
+                'throughput': float(count),
+                'tps': float(count),
+                'is_error': False,
+                'error_message': None,
+            })
+
+        return window_samples
     
     async def execute_query(self, db_key: str, query: str, query_id: str) -> Dict:
         """Выполнение одного запроса с измерением времени"""

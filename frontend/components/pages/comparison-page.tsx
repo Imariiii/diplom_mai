@@ -8,12 +8,12 @@ import {
   Scale,
   SlidersHorizontal,
   AlertTriangle,
-  LayoutDashboard,
   BarChart3,
   Table2,
   Sigma,
   FileText,
   Settings2,
+  Zap,
 } from "lucide-react"
 
 import {
@@ -70,7 +70,7 @@ export function ComparisonPage() {
     include_hypotheses: true,
   })
   const [useNormalizedView, setUseNormalizedView] = useState(true)
-  const [activeTab, setActiveTab] = useState("overview")
+  const [activeTab, setActiveTab] = useState("params")
 
   useEffect(() => {
     let cancelled = false
@@ -124,7 +124,7 @@ export function ComparisonPage() {
 
   const tabs = useMemo(
     () => [
-      { value: "overview", label: "Обзор", icon: LayoutDashboard },
+      { value: "params", label: "Параметры", icon: Zap },
       { value: "charts", label: "Графики", icon: BarChart3 },
       { value: "table", label: "Таблица", icon: Table2 },
       { value: "stats", label: "Статистика", icon: Sigma },
@@ -282,6 +282,10 @@ export function ComparisonPage() {
       <div className="mx-auto max-w-[1400px] space-y-6 px-4 py-6 md:px-6">
         <ExecutiveSummary result={result} />
 
+        {result.warnings.length > 0 && (
+          <WarningsCard warnings={result.warnings} />
+        )}
+
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <TabsList className="h-auto w-full justify-start overflow-x-auto rounded-lg border border-border bg-card p-1">
             {tabs.map((t) => {
@@ -299,11 +303,8 @@ export function ComparisonPage() {
             })}
           </TabsList>
 
-          <TabsContent value="overview" className="space-y-6 focus-visible:outline-none">
+          <TabsContent value="params" className="space-y-6 focus-visible:outline-none">
             <ParameterImpact result={result} />
-            {result.warnings.length > 0 && (
-              <WarningsCard warnings={result.warnings} />
-            )}
           </TabsContent>
 
           <TabsContent value="charts" className="space-y-4 focus-visible:outline-none">

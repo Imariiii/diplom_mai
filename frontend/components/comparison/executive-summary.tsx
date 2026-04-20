@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo } from "react"
 import {
   Activity,
   Zap,
@@ -44,12 +45,13 @@ export function ExecutiveSummary({ result }: ExecutiveSummaryProps) {
           ? "moderate"
           : "weak"
 
+  const showTrends = result.tests.length >= 3
+
   return (
     <section
       aria-label="Результат сравнения"
       className="relative overflow-hidden rounded-xl border border-border bg-card"
     >
-      {/* Decorative top accent bar */}
       <div className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-primary via-primary to-primary/40" />
 
       <div className="grid gap-0 lg:grid-cols-[1.4fr_1fr]">
@@ -67,7 +69,6 @@ export function ExecutiveSummary({ result }: ExecutiveSummaryProps) {
             {verdict || "Статистически значимых различий между тестами не обнаружено."}
           </h2>
 
-          {/* Winner card */}
           {bestThroughput && bestLatency && (
             <div className="grid gap-2 pt-2 sm:grid-cols-2">
               <WinnerPill
@@ -134,9 +135,123 @@ export function ExecutiveSummary({ result }: ExecutiveSummaryProps) {
           />
         </div>
       </div>
+
+      {/* Sparkline trends strip for 3+ tests */}
+      {showTrends && <TestTrendsStrip result={result} />}
     </section>
   )
 }
+
+// ---------- TestTrendsStrip ----------
+
+function TestTrendsStrip({ result }: { result: ComparisonResult }) {
+  const trends = useMemo(() => buildTrendData(result), [result])
+
+  if (trends.length === 0) return null
+
+  return (
+    <div className="border-t border-border px-6 py-4">
+      <p className="mb-3 text-[11px] uppercase tracking-wider text-muted-foreground">
+        Тренды по тестам
+      </p>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {trends.map((t) => (
+          <div key={t.key} className="space-y-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-medium">{t.label}</span>
+              <span className="font-mono text-muted-foreground tabular-nums">
+                {t.unit}
+              </span>
+            </div>
+            <MiniSparkline values={t.values} />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+interface TrendSeries {
+  key: string
+  label: string
+  unit: string
+  values: number[]
+}
+
+function buildTrendData(result: ComparisonResult): TrendSeries[] {
+  const dbKeys = Array.from(
+    new Set(
+      Object.values(result.descriptive_stats).flatMap((bm) => Object.keys(bm))
+    )
+  )
+  const series: TrendSeries[] = []
+
+  for (const dbKey of dbKeys) {
+    const dbLabel = resolveDbKeyLabel(dbKey, result.db_key_labels)
+    const tpValues: number[] = []
+    const latValues: number[] = []
+
+    for (const test of result.tests) {
+      const bundle = result.descriptive_stats[test.id]?.[dbKey]
+      tpValues.push(bundle?.throughput?.mean ?? 0)
+      latValues.push(bundle?.latency_ms?.mean ?? 0)
+    }
+
+    if (tpValues.some((v) => v > 0)) {
+      series.push({
+        key: `tp-${dbKey}`,
+        label: `${dbLabel} · Throughput`,
+        unit: "req/s",
+        values: tpValues,
+      })
+    }
+    if (latValues.some((v) => v > 0)) {
+      series.push({
+        key: `lat-${dbKey}`,
+        label: `${dbLabel} · Latency`,
+        unit: "мс",
+        values: latValues,
+      })
+    }
+  }
+
+  return series
+}
+
+function MiniSparkline({ values }: { values: number[] }) {
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const range = max - min || 1
+  const h = 24
+  const w = 100
+
+  const points = values
+    .map((v, i) => {
+      const x = (i / Math.max(1, values.length - 1)) * w
+      const y = h - ((v - min) / range) * (h - 4) - 2
+      return `${x},${y}`
+    })
+    .join(" ")
+
+  return (
+    <svg
+      viewBox={`0 0 ${w} ${h}`}
+      className="h-6 w-full text-primary"
+      preserveAspectRatio="none"
+    >
+      <polyline
+        points={points}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+// ---------- Sub-components ----------
 
 function IntensityBadge({ intensity }: { intensity: "strong" | "moderate" | "weak" | "neutral" }) {
   const map = {

@@ -16,7 +16,7 @@ import {
 } from "recharts"
 import { BarChart3, LineChart as LineIcon, Activity } from "lucide-react"
 
-import type { ComparisonResult } from "@/lib/api"
+import type { ComparisonResult, BarChartPoint } from "@/lib/api"
 import {
   ChartContainer,
   ChartLegend,
@@ -44,6 +44,14 @@ function toDbFamilyLabel(dbKey: string, labels?: Record<string, string>): string
   return resolved
 }
 
+const DB_COLORS = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+]
+
 export function ComparisonCharts({ result, useNormalized = false }: ComparisonChartsProps) {
   const testNameById = Object.fromEntries(result.tests.map((t) => [t.id, t.name]))
   const showNormalized =
@@ -58,8 +66,8 @@ export function ComparisonCharts({ result, useNormalized = false }: ComparisonCh
         </>
       ) : (
         <>
-          <LatencyChart result={result} />
-          <ThroughputChart result={result} />
+          <GroupedLatencyChart result={result} />
+          <GroupedThroughputChart result={result} />
           <PercentilesChart result={result} />
           <DistributionChart result={result} />
         </>
@@ -111,39 +119,71 @@ function ChartCard({
   )
 }
 
-// ---------- Raw charts (Latency/Throughput/Percentiles/Distribution) ----------
+// ---------- Grouped charts helpers ----------
 
-function LatencyChart({ result }: { result: ComparisonResult }) {
-  const data = result.charts_data.bar_chart.map((item) => ({
-    name: `${item.test_name} · ${resolveDbKeyLabel(item.db_key, result.db_key_labels)}`,
-    mean: item.latency_mean,
-    p95: item.latency_p95,
-    p99: item.latency_p99,
-  }))
+interface GroupedDataPoint {
+  testName: string
+  [dbLabel: string]: string | number | null | undefined
+}
 
-  const config: ChartConfig = {
-    mean: { label: "Mean", color: "var(--chart-2)" },
-    p95: { label: "p95", color: "var(--chart-1)" },
-    p99: { label: "p99", color: "var(--chart-5)" },
-  }
+function buildGroupedData(
+  barData: BarChartPoint[],
+  dbKeyLabels: Record<string, string>,
+  getValue: (pt: BarChartPoint) => number | null | undefined
+): { data: GroupedDataPoint[]; dbLabels: string[] } {
+  const testNames = Array.from(new Set(barData.map((d) => d.test_name)))
+  const dbKeysRaw = Array.from(new Set(barData.map((d) => d.db_key)))
+  const dbLabels = dbKeysRaw.map((k) => resolveDbKeyLabel(k, dbKeyLabels))
+  const dbKeyToLabel = Object.fromEntries(
+    dbKeysRaw.map((k, i) => [k, dbLabels[i]])
+  )
+
+  const data: GroupedDataPoint[] = testNames.map((name) => {
+    const row: GroupedDataPoint = { testName: name }
+    for (const pt of barData.filter((d) => d.test_name === name)) {
+      const label = dbKeyToLabel[pt.db_key] || pt.db_key
+      row[label] = getValue(pt)
+    }
+    return row
+  })
+
+  return { data, dbLabels: Array.from(new Set(dbLabels)) }
+}
+
+// ---------- Grouped Latency Chart ----------
+
+function GroupedLatencyChart({ result }: { result: ComparisonResult }) {
+  const { data, dbLabels } = useMemo(
+    () =>
+      buildGroupedData(
+        result.charts_data.bar_chart,
+        result.db_key_labels,
+        (pt) => pt.latency_mean
+      ),
+    [result]
+  )
+
+  const config: ChartConfig = Object.fromEntries(
+    dbLabels.map((label, i) => [
+      label,
+      { label, color: DB_COLORS[i % DB_COLORS.length] },
+    ])
+  )
 
   return (
     <ChartCard
       title="Latency"
-      description="Среднее + хвостовые перцентили (мс)"
+      description="Среднее по СУБД (мс)"
       icon={Activity}
     >
       <ChartContainer config={config} className="h-[280px] w-full">
-        <BarChart data={data} barGap={4}>
+        <BarChart data={data} barGap={2} barCategoryGap="20%">
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
           <XAxis
-            dataKey="name"
+            dataKey="testName"
             tickLine={false}
             axisLine={false}
-            tick={{ fontSize: 10 }}
-            angle={-12}
-            textAnchor="end"
-            height={52}
+            tick={{ fontSize: 11 }}
           />
           <YAxis
             tickLine={false}
@@ -153,30 +193,49 @@ function LatencyChart({ result }: { result: ComparisonResult }) {
           />
           <ChartTooltip content={<ChartTooltipContent indicator="dot" />} />
           <ChartLegend content={<ChartLegendContent />} />
-          <Bar dataKey="mean" radius={[4, 4, 0, 0]} fill="var(--color-mean)" />
-          <Bar dataKey="p95" radius={[4, 4, 0, 0]} fill="var(--color-p95)" />
-          <Bar dataKey="p99" radius={[4, 4, 0, 0]} fill="var(--color-p99)" />
+          {dbLabels.map((label, i) => (
+            <Bar
+              key={label}
+              dataKey={label}
+              radius={[4, 4, 0, 0]}
+              fill={DB_COLORS[i % DB_COLORS.length]}
+            />
+          ))}
         </BarChart>
       </ChartContainer>
     </ChartCard>
   )
 }
 
-function ThroughputChart({ result }: { result: ComparisonResult }) {
-  const raw = result.charts_data.bar_chart.map((item) => ({
-    name: `${item.test_name} · ${resolveDbKeyLabel(item.db_key, result.db_key_labels)}`,
-    throughput: item.throughput_mean,
-  }))
-  const maxVal = Math.max(...raw.map((r) => r.throughput), 1)
+// ---------- Grouped Throughput Chart ----------
 
-  const config: ChartConfig = {
-    throughput: { label: "Throughput", color: "var(--chart-2)" },
-  }
+function GroupedThroughputChart({ result }: { result: ComparisonResult }) {
+  const { data, dbLabels } = useMemo(
+    () =>
+      buildGroupedData(
+        result.charts_data.bar_chart,
+        result.db_key_labels,
+        (pt) => pt.throughput_mean
+      ),
+    [result]
+  )
+
+  const maxVal = Math.max(
+    ...result.charts_data.bar_chart.map((d) => d.throughput_mean ?? 0),
+    1
+  )
+
+  const config: ChartConfig = Object.fromEntries(
+    dbLabels.map((label, i) => [
+      label,
+      { label, color: DB_COLORS[i % DB_COLORS.length] },
+    ])
+  )
 
   return (
     <ChartCard
       title="Throughput"
-      description="Пропускная способность (req/s)"
+      description="Пропускная способность по СУБД (req/s)"
       icon={BarChart3}
       badge={
         <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
@@ -185,32 +244,32 @@ function ThroughputChart({ result }: { result: ComparisonResult }) {
       }
     >
       <ChartContainer config={config} className="h-[280px] w-full">
-        <BarChart data={raw}>
+        <BarChart data={data} barGap={2} barCategoryGap="20%">
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
           <XAxis
-            dataKey="name"
+            dataKey="testName"
             tickLine={false}
             axisLine={false}
-            tick={{ fontSize: 10 }}
-            angle={-12}
-            textAnchor="end"
-            height={52}
+            tick={{ fontSize: 11 }}
           />
           <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 10 }} />
           <ChartTooltip content={<ChartTooltipContent indicator="line" />} />
-          <Bar dataKey="throughput" radius={[4, 4, 0, 0]}>
-            {raw.map((entry, idx) => (
-              <Cell
-                key={idx}
-                fill={entry.throughput === maxVal ? "var(--success)" : "var(--chart-2)"}
-              />
-            ))}
-          </Bar>
+          <ChartLegend content={<ChartLegendContent />} />
+          {dbLabels.map((label, i) => (
+            <Bar
+              key={label}
+              dataKey={label}
+              radius={[4, 4, 0, 0]}
+              fill={DB_COLORS[i % DB_COLORS.length]}
+            />
+          ))}
         </BarChart>
       </ChartContainer>
     </ChartCard>
   )
 }
+
+// ---------- Percentiles ----------
 
 function PercentilesChart({ result }: { result: ComparisonResult }) {
   const hasPercentiles = result.charts_data.bar_chart.some((d) => d.latency_p95 != null)
@@ -243,9 +302,6 @@ function PercentilesChart({ result }: { result: ComparisonResult }) {
             tickLine={false}
             axisLine={false}
             tick={{ fontSize: 10 }}
-            angle={-12}
-            textAnchor="end"
-            height={52}
           />
           <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 10 }} />
           <ChartTooltip content={<ChartTooltipContent indicator="dot" />} />
@@ -258,6 +314,8 @@ function PercentilesChart({ result }: { result: ComparisonResult }) {
     </ChartCard>
   )
 }
+
+// ---------- Distribution ----------
 
 function DistributionChart({ result }: { result: ComparisonResult }) {
   const data = result.charts_data.box_plot
@@ -467,9 +525,8 @@ function ThroughputTimeline({
     const resolveSeriesLabel = (seriesKey: string) => {
       const [testId, ...rest] = seriesKey.split(":")
       const dbKey = rest.join(":")
-      const name = testNameById[testId] || testId
       const dbLabel = dbKey ? resolveDbKeyLabel(dbKey, result.db_key_labels) : ""
-      return dbLabel ? `${name} · ${dbLabel}` : name
+      return dbLabel || testId
     }
 
     const seriesEntries = Object.entries(result.charts_data.throughput_series)

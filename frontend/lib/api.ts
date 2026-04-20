@@ -41,7 +41,11 @@ export type {
   BoxPlotPoint,
   ThroughputSeriesPoint,
   ComparisonChartsData,
-  ParameterImpact,
+  ChangedParameter,
+  MetricEffect,
+  MetricEffectMetric,
+  MetricEffectDirection,
+  MetricEffectMagnitude,
   ParameterImpactSummary,
 } from "./api/comparison"
 

@@ -22,6 +22,8 @@ interface ComparisonTableProps {
   useNormalized?: boolean
 }
 
+type CellView = "values" | "delta" | "both"
+
 interface MetricRow {
   key: string
   label: string
@@ -64,6 +66,7 @@ const NORMALIZED_METRIC_ROWS: MetricRow[] = [
 
 export function ComparisonTable({ result, useNormalized = false }: ComparisonTableProps) {
   const [showExtended, setShowExtended] = useState(false)
+  const [cellView, setCellView] = useState<CellView>("both")
 
   const dbKeys = useMemo(
     () =>
@@ -98,7 +101,7 @@ export function ComparisonTable({ result, useNormalized = false }: ComparisonTab
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline" className="gap-1 font-mono text-[11px]">
             <Crown className="h-3 w-3" />
             Baseline: {result.tests.find((t) => t.id === result.baseline_id)?.name}
@@ -118,9 +121,9 @@ export function ComparisonTable({ result, useNormalized = false }: ComparisonTab
         </div>
       </div>
 
-      {/* DB tabs if multiple */}
-      {dbKeys.length > 1 && (
-        <div className="border-b border-border/60 px-4 pt-3">
+      {/* DB tabs + view mode toggle */}
+      <div className="flex flex-wrap items-center gap-3 border-b border-border/60 px-4 pt-3 pb-3">
+        {dbKeys.length > 1 && (
           <Tabs value={activeDb} onValueChange={setActiveDb}>
             <TabsList className="h-8 bg-transparent p-0 gap-1">
               {dbKeys.map((dbKey) => (
@@ -134,8 +137,33 @@ export function ComparisonTable({ result, useNormalized = false }: ComparisonTab
               ))}
             </TabsList>
           </Tabs>
+        )}
+
+        <div className="ml-auto">
+          <Tabs value={cellView} onValueChange={(v) => setCellView(v as CellView)}>
+            <TabsList className="h-8 bg-transparent p-0 gap-1">
+              <TabsTrigger
+                value="values"
+                className="h-8 rounded-md border border-transparent px-3 text-xs data-[state=active]:border-border data-[state=active]:bg-muted/50"
+              >
+                Значения
+              </TabsTrigger>
+              <TabsTrigger
+                value="delta"
+                className="h-8 rounded-md border border-transparent px-3 text-xs data-[state=active]:border-border data-[state=active]:bg-muted/50"
+              >
+                Δ%
+              </TabsTrigger>
+              <TabsTrigger
+                value="both"
+                className="h-8 rounded-md border border-transparent px-3 text-xs data-[state=active]:border-border data-[state=active]:bg-muted/50"
+              >
+                Оба
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
-      )}
+      </div>
 
       {/* Table body */}
       <div className="overflow-x-auto">
@@ -143,6 +171,7 @@ export function ComparisonTable({ result, useNormalized = false }: ComparisonTab
           result={result}
           dbKey={dbKeys.length > 1 ? activeDb : dbKeys[0] ?? ""}
           metricRows={metricRows}
+          cellView={cellView}
         />
       </div>
     </section>
@@ -153,10 +182,12 @@ function MetricTable({
   result,
   dbKey,
   metricRows,
+  cellView,
 }: {
   result: ComparisonResult
   dbKey: string
   metricRows: MetricRow[]
+  cellView: CellView
 }) {
   const baselineId = result.baseline_id
 
@@ -230,6 +261,11 @@ function MetricTable({
                   ((metricRow.better === "lower" && diff < 0) ||
                     (metricRow.better === "higher" && diff > 0))
 
+                const isBaseline = test.id === baselineId
+
+                const showValues = cellView === "values" || cellView === "both"
+                const showDelta = (cellView === "delta" || cellView === "both") && !isBaseline
+
                 const barWidth =
                   value == null ? 0 : Math.min(100, (Math.abs(value) / maxAbs) * 100)
 
@@ -239,50 +275,62 @@ function MetricTable({
                     className={`px-4 py-3 ${isBest ? "bg-success/5" : ""}`}
                   >
                     <div className="space-y-1.5">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-mono text-sm tabular-nums">
-                          {metricRow.format(value)}
-                        </span>
-                        {isBest && values.length > 1 && (
-                          <Crown className="h-3 w-3 text-success" />
-                        )}
-                      </div>
+                      {/* Absolute value */}
+                      {showValues && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-sm tabular-nums">
+                            {metricRow.format(value)}
+                          </span>
+                          {isBest && values.length > 1 && (
+                            <Crown className="h-3 w-3 text-success" />
+                          )}
+                        </div>
+                      )}
 
-                      {/* mini bar */}
-                      {value != null && (
+                      {/* Delta bar / value */}
+                      {showDelta && diff != null && (
+                        <>
+                          {cellView === "delta" ? (
+                            <DivergentBar diff={diff} isGood={diffIsGood} />
+                          ) : (
+                            <div
+                              className={`flex items-center gap-0.5 text-[11px] tabular-nums ${
+                                diffIsGood
+                                  ? "text-success"
+                                  : diff === 0
+                                    ? "text-muted-foreground"
+                                    : "text-warning"
+                              }`}
+                            >
+                              {diff > 0 ? (
+                                <TrendingUp className="h-3 w-3" />
+                              ) : diff < 0 ? (
+                                <TrendingDown className="h-3 w-3" />
+                              ) : (
+                                <Minus className="h-3 w-3" />
+                              )}
+                              {diff >= 0 ? "+" : ""}
+                              {diff.toFixed(1)}%
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                      {/* Mini bar for values mode */}
+                      {showValues && value != null && (
                         <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
                           <div
                             className={`h-full rounded-full ${
-                              isBest
-                                ? "bg-success"
-                                : "bg-primary/60"
+                              isBest ? "bg-success" : "bg-primary/60"
                             }`}
                             style={{ width: `${Math.max(4, barWidth)}%` }}
                           />
                         </div>
                       )}
 
-                      {/* delta */}
-                      {test.id !== baselineId && diff != null && (
-                        <div
-                          className={`flex items-center gap-0.5 text-[11px] tabular-nums ${
-                            diffIsGood
-                              ? "text-success"
-                              : diff === 0
-                                ? "text-muted-foreground"
-                                : "text-warning"
-                          }`}
-                        >
-                          {diff > 0 ? (
-                            <TrendingUp className="h-3 w-3" />
-                          ) : diff < 0 ? (
-                            <TrendingDown className="h-3 w-3" />
-                          ) : (
-                            <Minus className="h-3 w-3" />
-                          )}
-                          {diff >= 0 ? "+" : ""}
-                          {diff.toFixed(1)}%
-                        </div>
+                      {/* Baseline label in delta-only mode */}
+                      {cellView === "delta" && isBaseline && (
+                        <span className="text-xs text-muted-foreground">baseline</span>
                       )}
                     </div>
                   </td>
@@ -293,5 +341,39 @@ function MetricTable({
         })}
       </tbody>
     </table>
+  )
+}
+
+function DivergentBar({ diff, isGood }: { diff: number; isGood: boolean }) {
+  const clamp = Math.min(50, Math.max(-50, diff))
+  const pct = Math.abs(clamp) / 50 * 50
+
+  const barColor = isGood ? "bg-success" : "bg-warning"
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="relative h-3 w-full rounded-full bg-muted/50 overflow-hidden">
+        <div className="absolute inset-y-0 left-1/2 w-px bg-border" />
+        {clamp >= 0 ? (
+          <div
+            className={`absolute inset-y-0 left-1/2 rounded-r-full ${barColor}`}
+            style={{ width: `${pct}%` }}
+          />
+        ) : (
+          <div
+            className={`absolute inset-y-0 rounded-l-full ${barColor}`}
+            style={{ width: `${pct}%`, right: "50%" }}
+          />
+        )}
+      </div>
+      <span
+        className={`shrink-0 font-mono text-[11px] tabular-nums ${
+          isGood ? "text-success" : "text-warning"
+        }`}
+      >
+        {diff >= 0 ? "+" : ""}
+        {diff.toFixed(1)}%
+      </span>
+    </div>
   )
 }

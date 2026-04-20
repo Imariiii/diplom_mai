@@ -165,19 +165,37 @@ export interface AnalysisReportConfig {
   include_hypotheses: boolean
 }
 
-export interface ParameterImpact {
+export interface ChangedParameter {
   parameter: string
+  label: string
   baseline_value?: any
   compared_value?: any
   change_description: string
-  effects: string[]
+}
+
+export type MetricEffectMetric = "throughput" | "latency_mean" | "latency_p99" | "latency_cv"
+export type MetricEffectDirection = "up" | "down" | "flat"
+export type MetricEffectMagnitude = "negligible" | "small" | "medium" | "large"
+
+export interface MetricEffect {
+  db_key: string
+  db_label?: string | null
+  metric: MetricEffectMetric
+  baseline_value: number
+  compared_value: number
+  pct_change: number
+  direction: MetricEffectDirection
+  is_improvement: boolean
+  magnitude: MetricEffectMagnitude
 }
 
 export interface ParameterImpactSummary {
   test_id: string
   test_name: string
   vs_baseline: string
-  impacts: ParameterImpact[]
+  changed_parameters: ChangedParameter[]
+  metric_effects: MetricEffect[]
+  top_insights: string[]
   summary_text: string
 }
 
