@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import {
   Bar,
   BarChart,
@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { BarChart3, LineChart as LineIcon, Activity } from "lucide-react"
+import { BarChart3, LineChart as LineIcon, Activity, Maximize2 } from "lucide-react"
 
 import {
   type ComparisonResult,
@@ -28,6 +28,13 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 
 interface ComparisonChartsProps {
   result: ComparisonResult
@@ -189,6 +196,7 @@ function ChartCard({
   children,
   className,
   badge,
+  chartHeight = 280,
 }: {
   title: string
   description: string
@@ -196,23 +204,64 @@ function ChartCard({
   children: React.ReactNode
   className?: string
   badge?: React.ReactNode
+  chartHeight?: number
 }) {
+  const [fullscreen, setFullscreen] = useState(false)
+
+  const header = (
+    <div className="flex items-start gap-2.5 min-w-0">
+      <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+        <Icon className="h-3.5 w-3.5" />
+      </div>
+      <div className="min-w-0">
+        <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+      </div>
+    </div>
+  )
+
   return (
-    <div className={`flex flex-col rounded-xl border border-border bg-card ${className ?? ""}`}>
-      <div className="flex items-start justify-between gap-3 border-b border-border/60 p-4">
-        <div className="flex items-start gap-2.5 min-w-0">
-          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-            <Icon className="h-3.5 w-3.5" />
-          </div>
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
-            <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+    <>
+      <div className={`flex flex-col rounded-xl border border-border bg-card ${className ?? ""}`}>
+        <div className="flex items-start justify-between gap-3 border-b border-border/60 p-4">
+          {header}
+          <div className="flex items-center gap-1 shrink-0">
+            {badge}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              onClick={() => setFullscreen(true)}
+              title="Развернуть"
+            >
+              <Maximize2 className="h-3.5 w-3.5" />
+            </Button>
           </div>
         </div>
-        {badge}
+        <div className="p-4">
+          <div style={{ height: chartHeight }}>
+            {children}
+          </div>
+        </div>
       </div>
-      <div className="flex-1 p-4">{children}</div>
-    </div>
+
+      <Dialog open={fullscreen} onOpenChange={setFullscreen}>
+        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-[calc(100vw-2rem)] w-[calc(100vw-2rem)] h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] flex flex-col gap-0 p-0">
+          <DialogHeader className="flex-shrink-0 px-6 pt-6 pb-4 border-b border-border/60">
+            <DialogTitle className="flex items-center gap-2">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                <Icon className="h-3.5 w-3.5" />
+              </div>
+              {title}
+            </DialogTitle>
+            <p className="text-sm text-muted-foreground mt-0.5">{description}</p>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 p-6">
+            {children}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
@@ -267,7 +316,7 @@ function GroupedLatencyChart({
 
   return (
     <ChartCard title="Latency" description="Среднее по СУБД (мс)" icon={Activity}>
-      <ChartContainer config={config} className="h-[280px] w-full">
+      <ChartContainer config={config} className="h-full w-full">
         <BarChart data={data} barGap={2} barCategoryGap="20%">
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
           <XAxis dataKey="testName" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
@@ -312,7 +361,7 @@ function GroupedThroughputChart({
         </span>
       }
     >
-      <ChartContainer config={config} className="h-[280px] w-full">
+      <ChartContainer config={config} className="h-full w-full">
         <BarChart data={data} barGap={2} barCategoryGap="20%">
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
           <XAxis dataKey="testName" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
@@ -353,7 +402,7 @@ function PercentilesChart({
 
   return (
     <ChartCard title="Перцентили latency" description="p50 / p95 / p99 — хвостовые задержки" icon={LineIcon}>
-      <ChartContainer config={config} className="h-[280px] w-full">
+      <ChartContainer config={config} className="h-full w-full">
         <LineChart data={data}>
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
           <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 10 }} />
@@ -401,7 +450,7 @@ function DistributionChart({
 
   return (
     <ChartCard title="Распределение latency" description="Five-number summary (min · Q1 · median · Q3 · max)" icon={BarChart3}>
-      <ChartContainer config={config} className="h-[280px] w-full">
+      <ChartContainer config={config} className="h-full w-full">
         <BarChart data={mapped} layout="vertical" stackOffset="expand">
           <CartesianGrid horizontal={false} strokeDasharray="3 3" />
           <XAxis type="number" tickLine={false} axisLine={false} tick={{ fontSize: 10 }} />
@@ -498,8 +547,9 @@ function ThroughputTimeline({
       title="Throughput по времени"
       description="Временные ряды пропускной способности (относительное время)"
       icon={LineIcon}
+      chartHeight={320}
     >
-      <ChartContainer config={config} className="h-[320px] w-full">
+      <ChartContainer config={config} className="h-full w-full">
         <LineChart data={merged}>
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
           <XAxis dataKey="time" tickLine={false} axisLine={false} tick={{ fontSize: 10 }} interval="preserveStartEnd" minTickGap={32} />
@@ -559,7 +609,7 @@ function SeriesTrajectoryChart({
 
   return (
     <ChartCard title={title} description={description} icon={LineIcon}>
-      <ChartContainer config={config} className="h-[280px] w-full">
+      <ChartContainer config={config} className="h-full w-full">
         <LineChart data={chartData}>
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
           <XAxis dataKey="load" tickLine={false} axisLine={false} tick={{ fontSize: 10 }} />
@@ -628,7 +678,7 @@ function DegradationSummaryChart({
       description="Суммарная деградация p95/p99 по СУБД"
       icon={Activity}
     >
-      <ChartContainer config={config} className="h-[280px] w-full">
+      <ChartContainer config={config} className="h-full w-full">
         <BarChart data={data} barGap={4} barCategoryGap="30%">
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
           <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
@@ -687,7 +737,7 @@ function StabilityIndexChart({
       description="CV-индекс стабильности и эластичность throughput/нагрузку"
       icon={Activity}
     >
-      <ChartContainer config={config} className="h-[280px] w-full">
+      <ChartContainer config={config} className="h-full w-full">
         <BarChart data={data} barGap={4} barCategoryGap="30%">
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
           <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />

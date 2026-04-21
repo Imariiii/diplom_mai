@@ -654,6 +654,134 @@ class LoadTester:
         
         return all_results
     
+    async def run_custom_sql_test(
+        self,
+        custom_sql: str,
+        db_types: List[str],
+        iterations: int = 10,
+        virtual_users: int = 10,
+        warmup_time: int = 5,
+    ) -> List[Dict]:
+        """Run a load test using a user-provided SQL query."""
+        query_id = "custom_sql"
+        query_entry = {
+            "id": query_id,
+            "name": "Пользовательский SQL",
+            "sql": custom_sql,
+            "description": "Пользовательский SQL-запрос",
+        }
+
+        if self._metrics_callback:
+            self._metrics_callback.set_total_queries(1)
+            await self._metrics_callback.on_test_start()
+
+        if warmup_time > 0:
+            print(f"Прогрев системы ({warmup_time} сек)...")
+            await self._emit_status("running", f"Прогрев системы ({warmup_time} сек)...")
+            for db_key in db_types:
+                for _ in range(min(3, iterations)):
+                    await self.execute_query(db_key, custom_sql, query_id)
+                    await asyncio.sleep(0.05)
+            await asyncio.sleep(warmup_time)
+
+        print(f"Тестирование пользовательского SQL-запроса (1/1)")
+        if self._metrics_callback:
+            self._metrics_callback.set_current_query(1)
+        await self._emit_status("running", "Тестирование: пользовательский SQL (1/1)")
+
+        results: Dict[str, Dict] = {}
+        prepare_infos: Dict[str, Dict] = {}
+
+        for db_key in db_types:
+            print(f"Подготовка {db_key}...")
+            prepare_info = await self.prepare_database_for_test(
+                db_key, [custom_sql], self.auto_restore
+            )
+            prepare_infos[db_key] = prepare_info
+
+        try:
+            for db_key in db_types:
+                print(f"Тестирование {db_key}...")
+
+                async def _make_query(dk=db_key):
+                    return await self.execute_query(dk, custom_sql, query_id)
+
+                run_results = await self._run_workers(
+                    db_key=db_key,
+                    iterations=iterations,
+                    virtual_users=virtual_users,
+                    query_func=_make_query,
+                )
+
+                start_time = time.perf_counter()
+                execution_times = [r["execution_time_ms"] for r in run_results if r["error"] is None]
+                total_test_time = sum(r["execution_time_ms"] for r in run_results) / 1000.0 if run_results else 0
+                db_type = self.db_connection.get_dbms_type(db_key)
+
+                if execution_times:
+                    successful = len(execution_times)
+                    failed = len(run_results) - successful
+                    stats = {
+                        "query_id": query_id,
+                        "db_key": db_key,
+                        "db_type": db_type,
+                        "iterations": iterations,
+                        "virtual_users": virtual_users,
+                        "scenario": "custom",
+                        "successful": successful,
+                        "failed": failed,
+                        "avg_time_ms": statistics.mean(execution_times),
+                        "min_time_ms": min(execution_times),
+                        "max_time_ms": max(execution_times),
+                        "p50_time_ms": self.calculate_percentile(execution_times, 50),
+                        "p95_time_ms": self.calculate_percentile(execution_times, 95),
+                        "p99_time_ms": self.calculate_percentile(execution_times, 99),
+                        "total_time_ms": sum(execution_times),
+                        "std_dev_ms": statistics.stdev(execution_times) if len(execution_times) > 1 else 0,
+                        "tps": successful / total_test_time if total_test_time > 0 else 0,
+                        "throughput": successful / total_test_time if total_test_time > 0 else 0,
+                        "active_connections": virtual_users,
+                        "error_count": failed,
+                        "error_rate": (failed / len(run_results)) * 100 if run_results else 0,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                else:
+                    stats = {
+                        "query_id": query_id,
+                        "db_key": db_key,
+                        "db_type": db_type,
+                        "iterations": iterations,
+                        "virtual_users": virtual_users,
+                        "scenario": "custom",
+                        "successful": 0,
+                        "failed": len(run_results),
+                        "error": "Все запросы завершились с ошибкой",
+                        "tps": 0,
+                        "throughput": 0,
+                        "active_connections": virtual_users,
+                        "error_count": len(run_results),
+                        "error_rate": 100,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+
+                stats["self_check"] = self._build_self_check(stats)
+                stats["raw_samples"] = self.build_metric_samples(run_results, db_key, query_id=query_id)
+                results[db_key] = stats
+        finally:
+            for db_key in db_types:
+                if prepare_infos.get(db_key, {}).get("needs_restore"):
+                    await self.restore_database_after_test(
+                        db_key, prepare_infos[db_key], self.auto_restore
+                    )
+
+        return [
+            {
+                "query_id": query_id,
+                "comparison": results,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        ]
+
     async def get_system_metrics(self, db_key: str) -> Dict:
         """Получить системные метрики"""
         try:
@@ -1076,6 +1204,8 @@ class LoadTester:
             'p50_time_ms': self.calculate_percentile(execution_times, 50) if execution_times else 0,
             'p95_time_ms': self.calculate_percentile(execution_times, 95) if execution_times else 0,
             'p99_time_ms': self.calculate_percentile(execution_times, 99) if execution_times else 0,
+            'total_time_ms': sum(execution_times) if execution_times else 0,
+            'std_dev_ms': statistics.stdev(execution_times) if len(execution_times) > 1 else 0,
             'tps': successful_count / total_test_time if total_test_time > 0 else 0,
             'throughput': successful_count / total_test_time if total_test_time > 0 else 0,
             'error_rate': (failed_count / len(results)) * 100 if len(results) > 0 else 0,

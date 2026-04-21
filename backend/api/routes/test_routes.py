@@ -51,6 +51,22 @@ async def run_async_test(request: AsyncTestRequest, background_tasks: Background
     Асинхронный запуск теста с WebSocket обновлениями.
     Возвращает test_id для подписки на обновления.
     """
+    scenario = request.scenario or "mixed_light"
+    if scenario == "custom":
+        if not request.custom_sql:
+            raise HTTPException(
+                status_code=422,
+                detail="Режим 'custom' требует параметр custom_sql с SQL-запросом",
+            )
+        from backend.load_tester.sql_validator import validate_custom_sql
+
+        is_valid, validation_errors = validate_custom_sql(request.custom_sql)
+        if not is_valid:
+            raise HTTPException(
+                status_code=422,
+                detail="Невалидный SQL-запрос: " + "; ".join(validation_errors),
+            )
+
     from backend.initialize import HISTORY_ENABLED, test_repository
     
     test_id = str(uuid.uuid4())
@@ -186,7 +202,16 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         
         scenario = request.scenario or "mixed_light"
 
-        if request.bundle_id or scenario != "custom":
+        if scenario == "custom" and request.custom_sql:
+            print(f"[TEST] Запуск пользовательского SQL-запроса")
+            results = await test_tester.run_custom_sql_test(
+                custom_sql=request.custom_sql,
+                db_types=db_keys,
+                iterations=request.iterations,
+                virtual_users=request.virtual_users,
+                warmup_time=request.warmup_time,
+            )
+        elif request.bundle_id or scenario != "custom":
             if not connection_ids or not connection_repository or not scenario_bundle_repository:
                 raise ValueError("Scenario bundle требует connection_ids и доступного bundle repository")
 
@@ -235,14 +260,12 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                 use_indexes=request.use_indexes,
             )
         else:
-            print(f"[TEST] Запуск полного набора тестов (legacy-режим), сценарий={scenario!r}")
-            results = await test_tester.run_full_test_suite(
-                db_types=db_keys,
-                iterations=request.iterations,
-                virtual_users=request.virtual_users,
-                scenario=scenario,
-                warmup_time=request.warmup_time
-            )
+            error_msg = "Режим 'custom' требует параметр custom_sql с SQL-запросом"
+            print(f"[TEST] {error_msg}")
+            active_tests[test_id]["status"] = "failed"
+            active_tests[test_id]["error"] = error_msg
+            await streaming_callback.on_test_error(error_msg)
+            return
         
         end_time = time.perf_counter()
         actual_duration = end_time - start_time

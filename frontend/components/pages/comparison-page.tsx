@@ -13,7 +13,6 @@ import {
   Sigma,
   FileText,
   Settings2,
-  Zap,
   TrendingUp,
   Activity,
   Target,
@@ -75,7 +74,9 @@ export function ComparisonPage() {
     include_recommendations: true,
     include_hypotheses: true,
   })
-  const [activeTab, setActiveTab] = useState("summary")
+  const [activeTab, setActiveTab] = useState(
+    analysisMode === "per_test" ? "rankings" : "summary"
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -131,7 +132,6 @@ export function ComparisonPage() {
 
   const perTestTabs = useMemo(
     () => [
-      { value: "summary", label: "Сводка", icon: Zap },
       { value: "rankings", label: "Ранги", icon: Award },
       { value: "charts", label: "Графики по СУБД", icon: BarChart3 },
       { value: "stats", label: "Статистика пар", icon: Sigma },
@@ -316,9 +316,6 @@ export function ComparisonPage() {
           {/* Per-test mode tabs */}
           {isPerTestResult(result) && (
             <>
-              <TabsContent value="summary" className="space-y-6 focus-visible:outline-none">
-                <ParameterImpact result={result} />
-              </TabsContent>
               <TabsContent value="rankings" className="space-y-6 focus-visible:outline-none">
                 <ComparisonTable result={result} />
               </TabsContent>

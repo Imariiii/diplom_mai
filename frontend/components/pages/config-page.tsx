@@ -176,6 +176,7 @@ export function ConfigPage() {
         iterations: testConfig.iterations,
         virtual_users: testConfig.virtualUsers,
         scenario: testConfig.testMode === "scenario" ? testConfig.scenario : "custom",
+        custom_sql: testConfig.testMode === "custom_query" ? testConfig.customSql : undefined,
         use_indexes: testConfig.testMode === "scenario" ? testConfig.useIndexes : false,
         warmup_time: testConfig.warmupTime,
         test_name: testName,
@@ -211,18 +212,7 @@ export function ConfigPage() {
       toast.info("Подключение к real-time обновлениям...")
 
     } catch (error) {
-      console.error("Ошибка запуска теста:", error)
-      toast.error(`Ошибка: ${error instanceof Error ? error.message : "Неизвестная ошибка"}`)
-
-      const failedTest: TestRun = {
-        id: Date.now().toString(),
-        name: `Тест ${new Date().toLocaleString("ru")}`,
-        status: "failed",
-        startTime: new Date(),
-        endTime: new Date(),
-        config: { ...testConfig },
-      }
-      setCurrentTest(failedTest)
+      toast.error(error instanceof Error ? error.message : "Неизвестная ошибка при запуске теста")
       setIsRunning(false)
     }
   }

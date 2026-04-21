@@ -353,34 +353,100 @@ class SeriesReportGenerator(_ReportBase):
         load_levels: List[LoadLevel],
         db_key_labels: Dict[str, str],
     ) -> str:
-        parts = []
-        for db_key, s in per_db.items():
-            label = db_key_labels.get(db_key, s.db_label or db_key)
-            deg_text = ""
-            if s.degradation.overall_p95 > 20:
-                deg_text = f", выраженная деградация p95 (средний рост {s.degradation.overall_p95:.0f}%)"
-            elif s.degradation.overall_p95 > 5:
-                deg_text = f", умеренная деградация p95 ({s.degradation.overall_p95:.0f}%)"
+        if not per_db:
+            return "Недостаточно данных для итогового вердикта."
 
-            stab_text = ""
-            if s.stability_index is not None:
-                if s.stability_index < 0.1:
-                    stab_text = ", высокая стабильность"
-                elif s.stability_index > 0.5:
-                    stab_text = ", низкая стабильность"
+        labels = {dk: db_key_labels.get(dk, s.db_label or dk) for dk, s in per_db.items()}
 
-            sat_text = ""
+        max_tp: Dict[str, float] = {}
+        max_lat: Dict[str, float] = {}
+        for dk, s in per_db.items():
+            if s.trajectory:
+                last = s.trajectory[-1]
+                if last.throughput_mean is not None:
+                    max_tp[dk] = last.throughput_mean
+                if last.latency_p95 is not None:
+                    max_lat[dk] = last.latency_p95
+
+        parts: list[str] = []
+
+        if len(max_tp) >= 2:
+            ranked = sorted(max_tp.items(), key=lambda x: x[1], reverse=True)
+            best_dk, best_val = ranked[0]
+            worst_dk, worst_val = ranked[-1]
+            gap_pct = ((best_val - worst_val) / worst_val * 100) if worst_val > 0 else 0
+
+            if gap_pct > 5:
+                parts.append(
+                    f"При максимальной нагрузке лидирует {labels[best_dk]} "
+                    f"({best_val:.0f} req/s, на {gap_pct:.0f}% выше {labels[worst_dk]})"
+                )
+            else:
+                lo = min(max_tp.values())
+                hi = max(max_tp.values())
+                parts.append(
+                    f"Throughput СУБД сопоставим при максимальной нагрузке ({lo:.0f}–{hi:.0f} req/s)"
+                )
+        elif len(max_tp) == 1:
+            dk = next(iter(max_tp))
+            first_tp = next(
+                (tp.throughput_mean for tp in per_db[dk].trajectory if tp.throughput_mean is not None),
+                None,
+            )
+            if first_tp is not None:
+                change = ((max_tp[dk] - first_tp) / first_tp * 100) if first_tp > 0 else 0
+                direction = "рост" if change > 0 else "снижение"
+                parts.append(
+                    f"{labels[dk]}: throughput от {first_tp:.0f} до {max_tp[dk]:.0f} req/s "
+                    f"({direction} {abs(change):.0f}%)"
+                )
+            else:
+                parts.append(f"{labels[dk]}: throughput {max_tp[dk]:.0f} req/s при максимальной нагрузке")
+
+        if len(max_lat) >= 2:
+            best_lat_dk = min(max_lat, key=max_lat.get)
+            worst_lat_dk = max(max_lat, key=max_lat.get)
+            ratio = max_lat[worst_lat_dk] / max_lat[best_lat_dk] if max_lat[best_lat_dk] > 0 else 1
+            if ratio > 1.15:
+                parts.append(
+                    f"Лучшая задержка p95 у {labels[best_lat_dk]} "
+                    f"({max_lat[best_lat_dk]:.1f} мс vs {max_lat[worst_lat_dk]:.1f} мс у {labels[worst_lat_dk]})"
+                )
+
+        saturated = []
+        for dk, s in per_db.items():
             if s.saturation_point:
                 level = next((l for l in load_levels if l.level_id == s.saturation_point), None)
                 if level:
-                    sat_text = f", точка насыщения при {level.label}"
+                    saturated.append((dk, labels[dk], level.label))
 
-            parts.append(f"{label}{deg_text}{stab_text}{sat_text}")
+        if saturated:
+            if len(saturated) == len(per_db):
+                earliest = min(saturated, key=lambda x: x[2])
+                parts.append(f"Все СУБД достигают насыщения, раньше всех — {earliest[1]} (при {earliest[2]})")
+            else:
+                sat_items = [f"{name} при {lvl}" for _, name, lvl in saturated]
+                parts.append(f"Точка насыщения: {', '.join(sat_items)}")
+
+        degraded = [
+            (labels[dk], s.degradation.overall_p95)
+            for dk, s in per_db.items()
+            if s.degradation.overall_p95 > 20
+        ]
+        if degraded:
+            worst = max(degraded, key=lambda x: x[1])
+            if len(degraded) == len(per_db):
+                parts.append(
+                    f"Все СУБД заметно деградируют при росте нагрузки, "
+                    f"сильнее всего — {worst[0]} (p95 +{worst[1]:.0f}%)"
+                )
+            else:
+                parts.append(f"Выраженная деградация p95 у {worst[0]} (+{worst[1]:.0f}%)")
 
         if not parts:
-            return "Недостаточно данных для итогового вердикта по серии"
+            return "Статистически значимых различий между СУБД не выявлено."
 
-        return "Анализ серии прогонов: " + "; ".join(parts) + "."
+        return ". ".join(parts) + "."
 
     def _patterns(
         self,

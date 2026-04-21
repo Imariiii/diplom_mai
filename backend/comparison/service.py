@@ -1076,6 +1076,10 @@ class ComparisonService:
             return None
         if metrics.get("total_time_ms") is not None:
             return float(metrics["total_time_ms"]) / 1000.0
+        tps = metrics.get("tps") or metrics.get("throughput")
+        successful = metrics.get("successful")
+        if tps and successful and float(tps) > 0:
+            return float(successful) / float(tps)
         return None
 
     # ------------------------------------------------------------------
