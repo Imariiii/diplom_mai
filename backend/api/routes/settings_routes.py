@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 @router.get("/restore")
 async def get_restore_settings():
     """Получить настройки восстановления"""
-    from backend.config import get_restore_config
+    from backend.core.config import get_restore_config
     
     config = get_restore_config()
     return {
@@ -28,7 +28,7 @@ async def get_restore_settings():
 @router.put("/restore")
 async def update_restore_settings(request: RestoreSettingsSchema):
     """Обновить настройки восстановления"""
-    from backend.config import update_restore_config
+    from backend.core.config import update_restore_config
     
     updates = {}
     if request.auto_restore is not None:

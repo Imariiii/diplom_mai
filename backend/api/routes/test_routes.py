@@ -136,7 +136,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         repository=test_repository if HISTORY_ENABLED and test_repository else None,
     )
     
-    from backend.config import get_restore_config
+    from backend.core.config import get_restore_config
     restore_config = get_restore_config()
     
     test_tester = LoadTester(connection_repo=connection_repository)

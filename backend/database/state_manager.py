@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Set, Any
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy import text
 
-from backend.config import get_restore_config
+from backend.core.config import get_restore_config
 from backend.database.query_analyzer import QueryAnalyzer
 from backend.database.backup_strategies import BackupInfo, BackupStrategy, SizeEstimate, SqlBackupStrategy
 from backend.database.dialects import get_dialect
