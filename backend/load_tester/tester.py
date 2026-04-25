@@ -183,6 +183,7 @@ class LoadTester:
             'recent_successful': 0,
             'recent_failed': 0,
             'total_completed': 0,
+            'last_emit_time': time.perf_counter(),
         }
         
         async def worker(worker_id: int):
@@ -199,14 +200,13 @@ class LoadTester:
                 await asyncio.sleep(0.001)
         
         async def metrics_emitter():
-            last_emit = time.perf_counter()
             try:
                 while True:
                     await asyncio.sleep(self._streaming_interval)
                     snapshot = None
                     async with results_lock:
                         now = time.perf_counter()
-                        interval = now - last_emit
+                        interval = now - metrics_state['last_emit_time']
                         if metrics_state['recent_times']:
                             snapshot = {
                                 'avg_rt': statistics.mean(metrics_state['recent_times']),
@@ -217,7 +217,7 @@ class LoadTester:
                         metrics_state['recent_times'] = []
                         metrics_state['recent_successful'] = 0
                         metrics_state['recent_failed'] = 0
-                        last_emit = now
+                        metrics_state['last_emit_time'] = now
                     if snapshot:
                         await self._emit_metrics(
                             db_key=db_key,
@@ -243,6 +243,20 @@ class LoadTester:
                 await emitter_task
             except asyncio.CancelledError:
                 pass
+
+            now = time.perf_counter()
+            interval = now - metrics_state['last_emit_time']
+            if metrics_state['recent_times'] or metrics_state['recent_successful'] or metrics_state['recent_failed']:
+                avg_rt = statistics.mean(metrics_state['recent_times']) if metrics_state['recent_times'] else 0
+                total_completed = metrics_state['recent_successful'] + metrics_state['recent_failed']
+                final_tps = total_completed / interval if interval > 0 else total_completed
+                await self._emit_metrics(
+                    db_key=db_key,
+                    response_time=avg_rt,
+                    tps=final_tps,
+                    successful=metrics_state['recent_successful'],
+                    failed=metrics_state['recent_failed'],
+                )
         
         return results
     

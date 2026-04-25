@@ -12,9 +12,17 @@ from backend.database.dialects import get_dialect
 
 TYPE_CATEGORY_MAPPING: Dict[str, str] = {
     "smallint": "integer",
+    "smallint unsigned": "integer",
     "integer": "integer",
+    "integer unsigned": "integer",
     "bigint": "integer",
+    "bigint unsigned": "integer",
     "int": "integer",
+    "int unsigned": "integer",
+    "tinyint": "integer",
+    "tinyint unsigned": "integer",
+    "mediumint": "integer",
+    "mediumint unsigned": "integer",
     "int2": "integer",
     "int4": "integer",
     "int8": "integer",
@@ -38,14 +46,20 @@ TYPE_CATEGORY_MAPPING: Dict[str, str] = {
     "timestamp with time zone": "date",
     "time": "date",
     "char": "string",
+    "nchar": "string",
     "varchar": "string",
+    "nvarchar": "string",
     "character varying": "string",
     "character": "string",
     "text": "string",
+    "tinytext": "string",
+    "mediumtext": "string",
+    "longtext": "string",
     "uuid": "string",
     "json": "string",
     "jsonb": "string",
     "enum": "string",
+    "set": "string",
 }
 
 
@@ -253,6 +267,9 @@ class SchemaAnalyzer:
                 tables[to_table].foreign_keys_in.append(foreign_key)
 
             for table_name, table in tables.items():
+                self._infer_primary_key_heuristic(table)
+
+            for table_name, table in tables.items():
                 try:
                     row_count_result = await conn.execute(text(dialect.get_row_count_sql(table_name)))
                     row = row_count_result.fetchone()
@@ -260,7 +277,7 @@ class SchemaAnalyzer:
                 except Exception as exc:
                     print(f"[SCHEMA_ANALYZER] Не удалось получить row_count для {table_name}: {exc}")
                     table.row_count = 0
-                table.capabilities = self._classify_table(table)
+                table.capabilities = self._classify_table(table, tables)
 
         return SchemaMetadata(
             connection_id=connection_id,
@@ -268,6 +285,22 @@ class SchemaAnalyzer:
             dbms_type=dbms_type,
             tables=tables,
         )
+
+    @staticmethod
+    def _infer_primary_key_heuristic(table: TableInfo) -> None:
+        """Определить вероятный PK эвристически, если constraints не загрузились."""
+        if table.primary_key:
+            return
+        candidates = [
+            col for col in table.columns
+            if col.is_auto_generated
+            and col.category in {"integer", "numeric"}
+            and not col.is_nullable
+        ]
+        if len(candidates) == 1:
+            pk_col = candidates[0]
+            table.primary_key.append(pk_col.name)
+            pk_col.is_primary_key = True
 
     def _categorize_data_type(self, data_type: Optional[str]) -> str:
         """Нормализовать тип данных до одной из прикладных категорий."""
@@ -284,7 +317,7 @@ class SchemaAnalyzer:
             or "identity" in default
         )
 
-    def _classify_table(self, table: TableInfo) -> List[str]:
+    def _classify_table(self, table: TableInfo, all_tables: Optional[Dict[str, "TableInfo"]] = None) -> List[str]:
         """Определить прикладные роли таблицы для шаблонов запросов."""
         capabilities: List[str] = []
         primary_key_column = table.primary_key_column()
@@ -324,7 +357,21 @@ class SchemaAnalyzer:
         if self._is_insert_safe(table):
             capabilities.append("insert_safe")
 
-        if primary_key_column and not table.foreign_keys_in and table.row_count > 0:
+        has_fk_in = bool(table.foreign_keys_in)
+        heuristic_fk_in = False
+        if not has_fk_in and all_tables:
+            expected_fk_col = f"{table.name}_id"
+            for other_name, other_table in all_tables.items():
+                if other_name == table.name:
+                    continue
+                for col in other_table.columns:
+                    if col.name == expected_fk_col and col.category in {"integer", "numeric"}:
+                        heuristic_fk_in = True
+                        break
+                if heuristic_fk_in:
+                    break
+
+        if primary_key_column and not has_fk_in and not heuristic_fk_in and table.row_count > 0:
             capabilities.append("delete_safe")
 
         return capabilities

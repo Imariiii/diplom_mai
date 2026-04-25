@@ -18,7 +18,7 @@ DEFAULT_SCENARIO_TYPES: List[str] = [
     "olap",
 ]
 
-SCENARIO_GENERATOR_VERSION = "logical-scenario-generator-v2"
+SCENARIO_GENERATOR_VERSION = "logical-scenario-generator-v5"
 
 SCENARIO_QUERY_LIMITS: Dict[str, int] = {
     "read_only": 6,
@@ -261,20 +261,42 @@ class ScenarioGenerator:
         queries: List[Dict[str, Any]] = []
         index_hints: List[Dict[str, Any]] = []
         used_templates: Set[str] = set()
+        query_types_seen: Set[str] = set()
 
-        for template in QUERY_TEMPLATES:
-            if scenario_type not in template.scenario_types or template.id in used_templates:
+        is_mixed = "mixed" in scenario_type
+
+        applicable_templates = [
+            t for t in QUERY_TEMPLATES
+            if scenario_type in t.scenario_types
+        ]
+
+        if is_mixed:
+            required_types = {"select", "update", "insert"}
+            for required_type in required_types:
+                for template in applicable_templates:
+                    if template.id in used_templates or template.query_type != required_type:
+                        continue
+                    query = self._build_query_from_template(metadata, template)
+                    if not query:
+                        continue
+                    queries.append(self._strip_private_fields(query))
+                    index_hints.extend(deepcopy(query.get("_index_hints", [])))
+                    used_templates.add(template.id)
+                    query_types_seen.add(template.query_type)
+                    break
+
+        for template in applicable_templates:
+            if len(queries) >= max_queries:
+                break
+            if template.id in used_templates:
                 continue
-
             query = self._build_query_from_template(metadata, template)
             if not query:
                 continue
-
             queries.append(self._strip_private_fields(query))
             index_hints.extend(deepcopy(query.get("_index_hints", [])))
             used_templates.add(template.id)
-            if len(queries) >= max_queries:
-                break
+            query_types_seen.add(template.query_type)
 
         indexes = self._merge_index_hints(
             metadata=metadata,
@@ -647,7 +669,7 @@ class ScenarioGenerator:
         template: QueryTemplateDefinition,
     ) -> Optional[Dict[str, Any]]:
         pk_column = table.primary_key_column()
-        target_column = self._pick_mutable_column(table, {"date"})
+        target_column = self._pick_mutable_column(table, {"date"}, metadata)
         if not pk_column or not target_column:
             return None
         placeholder_name = f"{table.name}_{pk_column.name}"
@@ -686,7 +708,7 @@ class ScenarioGenerator:
         template: QueryTemplateDefinition,
     ) -> Optional[Dict[str, Any]]:
         pk_column = table.primary_key_column()
-        target_column = self._pick_mutable_column(table, {"numeric", "integer"})
+        target_column = self._pick_mutable_column(table, {"numeric", "integer"}, metadata)
         if not pk_column or not target_column:
             return None
         placeholder_name = f"{table.name}_{pk_column.name}"
@@ -726,8 +748,12 @@ class ScenarioGenerator:
             for fk in table.foreign_keys_out
         }
 
+        self._enrich_fk_mapping_heuristic(metadata, table, foreign_key_mapping)
+
         for column in table.columns:
-            if column.is_primary_key and (column.column_default or column.is_auto_generated):
+            if column.is_auto_generated:
+                continue
+            if column.is_primary_key and column.column_default:
                 continue
             if column.is_partition_key:
                 if not column.is_nullable and not column.column_default:
@@ -971,9 +997,20 @@ class ScenarioGenerator:
             return integer_columns[0]
         return None
 
-    def _pick_mutable_column(self, table: TableInfo, categories: Set[str]) -> Optional[ColumnInfo]:
+    def _pick_mutable_column(self, table: TableInfo, categories: Set[str],
+                             metadata: Optional[SchemaMetadata] = None) -> Optional[ColumnInfo]:
         """Выбрать колонку, которую безопасно менять в write-сценариях."""
         foreign_key_columns = {fk.from_column for fk in table.foreign_keys_out}
+        heuristic_fk_columns: Set[str] = set()
+        if metadata:
+            for col in table.columns:
+                if col.name in foreign_key_columns:
+                    continue
+                if col.category in {"integer", "numeric"} and col.name.endswith("_id"):
+                    prefix = col.name[:-3]
+                    if prefix in metadata.tables:
+                        heuristic_fk_columns.add(col.name)
+
         preferred_name_tokens = (
             "last_update",
             "updated_at",
@@ -992,6 +1029,7 @@ class ScenarioGenerator:
             and not column.is_partition_key
             and not column.is_auto_generated
             and column.name not in foreign_key_columns
+            and column.name not in heuristic_fk_columns
         ]
         for token in preferred_name_tokens:
             for column in candidates:
@@ -1029,6 +1067,51 @@ class ScenarioGenerator:
         if category in {"string", "date"}:
             return "'{" + param_name + "}'"
         return "{" + param_name + "}"
+
+    def _enrich_fk_mapping_heuristic(
+        self,
+        metadata: SchemaMetadata,
+        table: TableInfo,
+        fk_mapping: Dict[str, Any],
+    ) -> None:
+        """Эвристическое дополнение FK-mapping для колонок *_id без явных FK constraints."""
+        from backend.database.schema_analyzer import ForeignKeyInfo
+
+        for column in table.columns:
+            if column.name in fk_mapping:
+                continue
+            if column.category not in {"integer", "numeric"}:
+                continue
+            if not column.name.endswith("_id"):
+                continue
+            prefix = column.name[:-3]
+            candidate_table = metadata.tables.get(prefix)
+            if not candidate_table:
+                continue
+            pk_col = candidate_table.primary_key_column()
+            if pk_col:
+                target_column = pk_col.name
+            else:
+                id_col = next(
+                    (c for c in candidate_table.columns if c.name == column.name),
+                    None,
+                )
+                if not id_col:
+                    id_col = next(
+                        (c for c in candidate_table.columns if c.name.endswith("_id")),
+                        None,
+                    )
+                if not id_col:
+                    continue
+                target_column = id_col.name
+
+            fk_mapping[column.name] = ForeignKeyInfo(
+                constraint_name=f"_heuristic_{table.name}_{column.name}",
+                from_table=table.name,
+                from_column=column.name,
+                to_table=prefix,
+                to_column=target_column,
+            )
 
     def _identifier(self, name: str) -> str:
         """Сформировать DBMS-neutral имя таблицы или колонки."""
