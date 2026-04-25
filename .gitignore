@@ -8,10 +8,32 @@ env/
 venv/
 ENV/
 .venv
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
 
-# Environment
+# Покрытие и отчёты pytest / coverage
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+htmlcov/
+backend/tests/htmlcov/
+.hypothesis/
+
+# Сборки Python-пакетов (если появятся)
+dist/
+build/
+
+# Environment (секреты и локальные оверрайды)
 .env
 .env.local
+.env.*.local
+.env.development
+.env.production
 
 # IDE
 .vscode/
@@ -23,12 +45,31 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Project specific
+# Project specific (runtime / данные)
 results/
 *.log
 *.db
 *.sqlite
 description/
+
+# Node.js / pnpm / npm (корень и frontend)
+node_modules/
+frontend/node_modules/
+
+# Next.js (frontend)
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.turbo/
+
+# Playwright (E2E): отчёты и артефакты прогонов
+frontend/playwright-report/
+frontend/test-results/
+playwright-report/
+test-results/
+
+# TypeScript incremental (генерируется сборкой)
+*.tsbuildinfo
 
 # Сгенерированные LaTeX-файлы
 *.aux
@@ -43,8 +84,6 @@ description/
 *.glg-abr
 *.gls
 *.gls-abr
-*.glg
-*.glg-abr
 *.idx
 *.ilg
 *.ind
