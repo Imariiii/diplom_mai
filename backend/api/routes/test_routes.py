@@ -200,6 +200,11 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
     try:
         active_tests[test_id]["status"] = "running"
         await streaming_callback.on_test_start()
+
+        dbms_metric_start_counters = {}
+        for db_key in db_keys:
+            streaming_callback.ensure_dbms_runtime_stats(db_key)
+            dbms_metric_start_counters[db_key] = await test_tester.get_dbms_metric_counters(db_key)
         
         scenario = request.scenario or "mixed_light"
 
@@ -290,7 +295,15 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         for db_key in db_keys:
             try:
                 system_metrics[db_key] = await test_tester.get_system_metrics(db_key)
-                dbms_metrics[db_key] = await test_tester.get_dbms_metrics(db_key)
+                latest_dbms_metrics = await test_tester.get_dbms_metrics(db_key)
+                dbms_metric_end_counters = await test_tester.get_dbms_metric_counters(db_key)
+                dbms_metrics[db_key] = test_tester.build_final_dbms_metrics(
+                    db_key=db_key,
+                    latest_metrics=latest_dbms_metrics,
+                    start_counters=dbms_metric_start_counters.get(db_key, {}),
+                    end_counters=dbms_metric_end_counters,
+                    runtime_stats=streaming_callback.get_dbms_runtime_stats(db_key),
+                )
             except Exception as e:
                 print(f"Ошибка сбора метрик для {db_key}: {e}")
 

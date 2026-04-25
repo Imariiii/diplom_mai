@@ -302,6 +302,18 @@ class PostgreSQLDialect(DbmsDialect):
 
         return metrics
 
+    async def collect_dbms_metric_counters(self, conn) -> Dict[str, Any]:
+        """Собрать накопительные счётчики PostgreSQL для финального delta-расчёта."""
+        result = await conn.execute(text("""
+            SELECT deadlocks
+            FROM pg_stat_database
+            WHERE datname = current_database()
+        """))
+        row = result.fetchone()
+        return {
+            "deadlocks_total": int(row[0] or 0) if row else 0,
+        }
+
     async def terminate_other_connections(self, conn, db_name: Optional[str]) -> int:
         result = await conn.execute(text("""
             SELECT pg_terminate_backend(pid)

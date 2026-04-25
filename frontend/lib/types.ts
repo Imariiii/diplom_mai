@@ -98,7 +98,9 @@ export interface DBMSInternalMetrics {
   cacheHitRatio: number         // Коэффициент попаданий в кэш (%)
   bufferPoolHitRatio: number    // Коэффициент попаданий в буферный пул (%)
   lockWaits: number             // Количество ожиданий блокировок
+  lockWaitsMode?: "current" | "delta" | "sampled_max"
   deadlocks: number             // Количество дедлоков
+  deadlocksMode?: "current" | "delta" | "sampled_max"
   tableSizesMB: Record<string, number>  // Размеры таблиц (MB)
   indexSizesMB: Record<string, number>  // Размеры индексов (MB)
   totalDBSizeMB: number         // Общий размер БД (MB)

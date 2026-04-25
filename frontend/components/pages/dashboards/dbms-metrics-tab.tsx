@@ -8,7 +8,9 @@ interface DbmsMetrics {
   cacheHitRatio?: number
   bufferPoolHitRatio?: number
   lockWaits?: number
+  lockWaitsMode?: "current" | "delta" | "sampled_max"
   deadlocks?: number
+  deadlocksMode?: "current" | "delta" | "sampled_max"
   totalDBSizeMB?: number
   tableSizesMB?: Record<string, number>
 }
@@ -39,6 +41,17 @@ export function DbmsMetricsTab({ databases, realtimeData, getResultForDb, getDbT
     if (!points || points.length === 0) return defaultValue
     const value = points[points.length - 1][metric as keyof RealtimeDataPoint]
     return typeof value === "number" ? value.toFixed(1) : defaultValue
+  }
+
+  const getLockWaitsLabel = (mode?: DbmsMetrics["lockWaitsMode"]) => {
+    if (mode === "delta") return "Ожидания блокировок за прогон"
+    if (mode === "sampled_max") return "Пик ожиданий блокировок"
+    return "Текущие ожидания блокировок"
+  }
+
+  const getDeadlocksLabel = (mode?: DbmsMetrics["deadlocksMode"]) => {
+    if (mode === "delta") return "Дедлоки за прогон"
+    return "Дедлоки"
   }
 
   return (
@@ -73,13 +86,13 @@ export function DbmsMetricsTab({ databases, realtimeData, getResultForDb, getDbT
                     </div>
                   </div>
                   <div className="p-3 bg-muted rounded-lg">
-                    <div className="text-sm text-muted-foreground">Ожидание блокировок</div>
+                    <div className="text-sm text-muted-foreground">{getLockWaitsLabel(dbmsMetrics?.lockWaitsMode)}</div>
                     <div className="text-2xl font-mono text-foreground">
                       {dbmsMetrics?.lockWaits ?? getRealtimeDbmsMetric(dbId, "lockWaits", "0")}
                     </div>
                   </div>
                   <div className="p-3 bg-muted rounded-lg">
-                    <div className="text-sm text-muted-foreground">Дедлоки</div>
+                    <div className="text-sm text-muted-foreground">{getDeadlocksLabel(dbmsMetrics?.deadlocksMode)}</div>
                     <div className="text-2xl font-mono text-foreground">
                       {dbmsMetrics?.deadlocks ?? getRealtimeDbmsMetric(dbId, "deadlocks", "0")}
                     </div>

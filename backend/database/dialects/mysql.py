@@ -197,6 +197,32 @@ class MySQLDialect(DbmsDialect):
             GROUP BY INDEX_NAME
         """
 
+    async def _get_global_status_value(self, conn, status_name: str) -> float:
+        """Получить числовое значение глобальной status-переменной MySQL."""
+        try:
+            result = await conn.execute(text(f"SHOW GLOBAL STATUS LIKE '{status_name}'"))
+            row = result.fetchone()
+            if row and len(row) > 1:
+                return float(row[1] or 0)
+        except Exception:
+            pass
+
+        try:
+            result = await conn.execute(
+                text(
+                    """
+                    SELECT VARIABLE_VALUE
+                    FROM performance_schema.global_status
+                    WHERE VARIABLE_NAME = :status_name
+                    """
+                ),
+                {"status_name": status_name},
+            )
+            row = result.fetchone()
+            return float(row[0] or 0) if row else 0.0
+        except Exception:
+            return 0.0
+
     async def collect_dbms_metrics(self, conn) -> Dict[str, Any]:
         metrics = dict(DEFAULT_DBMS_METRICS)
         metrics["table_sizes_mb"] = {}
@@ -251,6 +277,13 @@ class MySQLDialect(DbmsDialect):
         """)
 
         return metrics
+
+    async def collect_dbms_metric_counters(self, conn) -> Dict[str, Any]:
+        """Собрать накопительные счётчики MySQL для финального delta-расчёта."""
+        return {
+            "lock_waits_total": int(await self._get_global_status_value(conn, "Innodb_row_lock_waits")),
+            "deadlocks_total": int(await self._get_global_status_value(conn, "Innodb_deadlocks")),
+        }
 
     async def terminate_other_connections(self, conn, db_name: Optional[str]) -> int:
         terminated = 0

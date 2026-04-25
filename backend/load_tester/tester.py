@@ -860,12 +860,44 @@ class LoadTester:
             'cache_hit_ratio': 0,
             'buffer_pool_hit_ratio': 0,
             'lock_waits': 0,
+            'lock_waits_mode': 'current',
             'deadlocks': 0,
+            'deadlocks_mode': 'current',
             'active_connections': 0,
             'table_sizes_mb': {},
             'index_sizes_mb': {},
             'total_db_size_mb': 0,
         }
+
+    async def get_dbms_metric_counters(self, db_key: str) -> Dict:
+        """Получить накопительные счётчики СУБД для расчёта delta за прогон."""
+        try:
+            db_type = self.db_connection.get_dbms_type(db_key)
+            engine = await self.db_connection.get_engine_async(db_key)
+            dialect = get_dialect(db_type)
+            async with engine.connect() as conn:
+                return await dialect.collect_dbms_metric_counters(conn)
+        except Exception as e:
+            print(f"Ошибка получения счётчиков СУБД {db_key}: {e}")
+            return {}
+
+    def build_final_dbms_metrics(
+        self,
+        db_key: str,
+        latest_metrics: Dict[str, Any],
+        start_counters: Dict[str, Any],
+        end_counters: Dict[str, Any],
+        runtime_stats: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Сформировать финальные внутренние метрики СУБД для отчёта."""
+        db_type = self.db_connection.get_dbms_type(db_key)
+        dialect = get_dialect(db_type)
+        return dialect.build_final_dbms_metrics(
+            latest_metrics=latest_metrics,
+            start_counters=start_counters,
+            end_counters=end_counters,
+            runtime_stats=runtime_stats,
+        )
     
     async def execute_scenario_query(
         self,

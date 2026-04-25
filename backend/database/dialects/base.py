@@ -11,7 +11,9 @@ DEFAULT_DBMS_METRICS: Dict[str, Any] = {
     "cache_hit_ratio": 0,
     "buffer_pool_hit_ratio": 0,
     "lock_waits": 0,
+    "lock_waits_mode": "current",
     "deadlocks": 0,
+    "deadlocks_mode": "current",
     "active_connections": 0,
     "table_sizes_mb": {},
     "index_sizes_mb": {},
@@ -183,6 +185,42 @@ class DbmsDialect(ABC):
     @abstractmethod
     async def collect_dbms_metrics(self, conn) -> Dict[str, Any]:
         """Собрать внутренние метрики СУБД."""
+
+    async def collect_dbms_metric_counters(self, conn) -> Dict[str, Any]:
+        """Собрать накопительные счётчики СУБД для расчёта delta за прогон."""
+        return {}
+
+    def build_final_dbms_metrics(
+        self,
+        latest_metrics: Dict[str, Any],
+        start_counters: Dict[str, Any],
+        end_counters: Dict[str, Any],
+        runtime_stats: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Сформировать финальные метрики СУБД для сравнения результатов теста."""
+        metrics = dict(latest_metrics or DEFAULT_DBMS_METRICS)
+        runtime_stats = runtime_stats or {}
+
+        start_lock_waits = start_counters.get("lock_waits_total")
+        end_lock_waits = end_counters.get("lock_waits_total")
+        if start_lock_waits is not None and end_lock_waits is not None:
+            metrics["lock_waits"] = max(0, int(end_lock_waits) - int(start_lock_waits))
+            metrics["lock_waits_mode"] = "delta"
+        elif "max_lock_waits" in runtime_stats:
+            metrics["lock_waits"] = int(runtime_stats.get("max_lock_waits") or 0)
+            metrics["lock_waits_mode"] = "sampled_max"
+        else:
+            metrics["lock_waits_mode"] = "current"
+
+        start_deadlocks = start_counters.get("deadlocks_total")
+        end_deadlocks = end_counters.get("deadlocks_total")
+        if start_deadlocks is not None and end_deadlocks is not None:
+            metrics["deadlocks"] = max(0, int(end_deadlocks) - int(start_deadlocks))
+            metrics["deadlocks_mode"] = "delta"
+        else:
+            metrics["deadlocks_mode"] = "current"
+
+        return metrics
 
     @abstractmethod
     async def terminate_other_connections(self, conn, db_name: Optional[str]) -> int:

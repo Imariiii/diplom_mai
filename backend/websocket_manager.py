@@ -208,6 +208,7 @@ class TestStreamingCallback:
         self.current_query = 0  # Текущий обрабатываемый запрос
         self.metrics_buffer: List[TestMetricsUpdate] = []
         self.metric_samples_buffer: List[Dict[str, Any]] = []
+        self.dbms_runtime_stats: Dict[str, Dict[str, Any]] = {}
         self.buffer_size = 10
         self._lock = asyncio.Lock()
 
@@ -236,6 +237,20 @@ class TestStreamingCallback:
     def set_duration(self, duration: int):
         """Устаревший метод, оставлен для совместимости"""
         pass
+
+    def get_dbms_runtime_stats(self, db_key: str) -> Dict[str, Any]:
+        """Получить агрегаты внутренних метрик, собранные во время realtime-стрима."""
+        return self.dbms_runtime_stats.get(db_key, {})
+
+    def ensure_dbms_runtime_stats(self, db_key: str) -> Dict[str, Any]:
+        """Инициализировать агрегаты внутренних метрик для подключения."""
+        return self.dbms_runtime_stats.setdefault(
+            db_key,
+            {
+                "max_lock_waits": 0,
+                "max_deadlocks": 0,
+            },
+        )
     
     def _calculate_progress(self) -> float:
         """Рассчитать прогресс на основе обработанных запросов"""
@@ -293,6 +308,10 @@ class TestStreamingCallback:
             elapsed_seconds=int(elapsed),
             remaining_seconds=0
         )
+
+        stats = self.ensure_dbms_runtime_stats(db_key)
+        stats["max_lock_waits"] = max(int(stats.get("max_lock_waits") or 0), int(lock_waits or 0))
+        stats["max_deadlocks"] = max(int(stats.get("max_deadlocks") or 0), int(deadlocks or 0))
         
         await self.manager.send_metrics_update(update)
 
