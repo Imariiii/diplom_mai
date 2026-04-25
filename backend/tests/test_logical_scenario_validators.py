@@ -26,7 +26,7 @@ def _metadata(connection_id, tables):
 
 
 class TestLogicalDatabaseValidator:
-    def test_compare_metadata_reports_missing_column_as_error(self):
+    def test_compare_metadata_reports_missing_column_as_warning(self):
         reference = _metadata("ref", [
             _table(
                 "payment",
@@ -52,7 +52,8 @@ class TestLogicalDatabaseValidator:
 
         validator._compare_metadata(reference, target, "Target DB", errors, warnings)
 
-        assert "Target DB: в payment отсутствует колонка amount" in errors
+        assert errors == []
+        assert "Target DB: в payment отсутствует колонка amount" in warnings
 
     def test_compare_metadata_warns_on_row_count_drift(self):
         reference = _metadata("ref", [

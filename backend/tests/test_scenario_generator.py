@@ -3,7 +3,7 @@
 """
 from backend.database.query_templates import QUERY_TEMPLATES_BY_ID
 from backend.database.scenario_generator import ScenarioGenerator
-from backend.database.schema_analyzer import ColumnInfo, TableInfo
+from backend.database.schema_analyzer import ColumnInfo, SchemaMetadata, TableInfo
 
 
 class TestScenarioGenerator:
@@ -147,7 +147,12 @@ class TestScenarioGenerator:
         )
 
         query = ScenarioGenerator()._template_insert_basic(
-            metadata=None,
+            metadata=SchemaMetadata(
+                connection_id="test",
+                connection_name="test",
+                dbms_type="postgresql",
+                tables={"payment": table},
+            ),
             table=table,
             template=QUERY_TEMPLATES_BY_ID["insert_basic"],
         )
