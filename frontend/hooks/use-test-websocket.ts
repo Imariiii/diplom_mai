@@ -100,6 +100,9 @@ export function useTestWebSocket({
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const baseElapsedRef = useRef<number>(0)
+  const lastSyncRef = useRef<number | null>(null)
   
   const [isConnected, setIsConnected] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -110,6 +113,23 @@ export function useTestWebSocket({
   
   const { addRealtimeData, setCurrentTest, currentTest, updateConnectionDbType } = useAppStore()
 
+  const stopTimer = useCallback(() => {
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current)
+      timerIntervalRef.current = null
+    }
+  }, [])
+
+  const startTimer = useCallback(() => {
+    if (timerIntervalRef.current) return
+    timerIntervalRef.current = setInterval(() => {
+      if (lastSyncRef.current !== null) {
+        const localExtra = Math.floor((Date.now() - lastSyncRef.current) / 1000)
+        setElapsedSeconds(baseElapsedRef.current + localExtra)
+      }
+    }, 500)
+  }, [])
+
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
       const message: WebSocketMessage = JSON.parse(event.data)
@@ -118,10 +138,13 @@ export function useTestWebSocket({
         case "metrics":
           const metricsData = message.data
           
-          // Обновляем прогресс
+          // Обновляем прогресс и синхронизируем таймер с сервером
           setProgress(metricsData.progress)
+          baseElapsedRef.current = metricsData.elapsed_seconds
+          lastSyncRef.current = Date.now()
           setElapsedSeconds(metricsData.elapsed_seconds)
           setRemainingSeconds(metricsData.remaining_seconds)
+          startTimer()
           
           const point: TimeSeriesPoint = {
             timestamp: new Date(metricsData.timestamp).getTime(),
@@ -159,6 +182,10 @@ export function useTestWebSocket({
           const statusData = message.data
           setStatus(statusData.status)
           setProgress(statusData.progress)
+
+          if (statusData.status === "completed" || statusData.status === "failed") {
+            stopTimer()
+          }
           
           // Обновляем статус текущего теста
           if (currentTest && currentTest.id === statusData.test_id) {
@@ -187,7 +214,7 @@ export function useTestWebSocket({
     } catch (error) {
       console.error("[WS] Error parsing message:", error)
     }
-  }, [addRealtimeData, currentTest, setCurrentTest, onMetrics, onStatus, onBackupStatus])
+  }, [addRealtimeData, currentTest, setCurrentTest, onMetrics, onStatus, onBackupStatus, startTimer, stopTimer])
 
   const connect = useCallback(() => {
     // Не подключаемся если testId пустой или невалидный
@@ -260,6 +287,8 @@ export function useTestWebSocket({
       clearInterval(pingIntervalRef.current)
       pingIntervalRef.current = null
     }
+
+    stopTimer()
     
     if (wsRef.current) {
       wsRef.current.close()
@@ -267,7 +296,7 @@ export function useTestWebSocket({
     }
     
     setIsConnected(false)
-  }, [])
+  }, [stopTimer])
 
   const sendMessage = useCallback((message: object) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {

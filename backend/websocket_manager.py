@@ -204,8 +204,9 @@ class TestStreamingCallback:
         self.manager = connection_manager
         self.repository = repository
         self.start_time = time.perf_counter()
-        self.total_queries = 1  # Общее количество запросов для теста
-        self.current_query = 0  # Текущий обрабатываемый запрос
+        self.total_queries = 1  # Общее количество запросов для расчёта шагового прогресса
+        self.current_query = 0  # Текущий обрабатываемый запрос (для шагового прогресса)
+        self._progress: float = 0.0  # Прямое значение прогресса (0-100)
         self.metrics_buffer: List[TestMetricsUpdate] = []
         self.metric_samples_buffer: List[Dict[str, Any]] = []
         self.dbms_runtime_stats: Dict[str, Dict[str, Any]] = {}
@@ -226,13 +227,19 @@ class TestStreamingCallback:
         except Exception as e:
             print(f"[WS] Ошибка сохранения throughput samples: {e}")
     
+    def set_progress(self, value: float) -> None:
+        """Напрямую установить значение прогресса (0-100)"""
+        self._progress = max(0.0, min(100.0, float(value)))
+
     def set_total_queries(self, total: int):
         """Установить общее количество запросов для расчёта прогресса"""
         self.total_queries = max(1, total)
     
     def set_current_query(self, current: int):
-        """Установить текущий обрабатываемый запрос"""
+        """Установить текущий обрабатываемый запрос; также обновляет _progress"""
         self.current_query = current
+        if self.total_queries > 0:
+            self._progress = min(100.0, current / self.total_queries * 100)
     
     def set_duration(self, duration: int):
         """Устаревший метод, оставлен для совместимости"""
@@ -253,8 +260,8 @@ class TestStreamingCallback:
         )
     
     def _calculate_progress(self) -> float:
-        """Рассчитать прогресс на основе обработанных запросов"""
-        return min(100, (self.current_query / self.total_queries) * 100) if self.total_queries > 0 else 0
+        """Вернуть текущее значение прогресса"""
+        return self._progress
     
     async def on_metrics(
         self,
@@ -374,11 +381,13 @@ class TestStreamingCallback:
             self.start_time = time.perf_counter()
             self._start_time_set = True
         self.current_query = 0
+        self._progress = 0.0
         await self.on_status_change("running", "Тестирование начато")
     
     async def on_test_complete(self, summary: Dict[str, Any] = None):
         """Вызывается при завершении теста"""
         self.current_query = self.total_queries
+        self._progress = 100.0
         await self._flush_metric_samples()
         message = "Тестирование завершено"
         if summary:

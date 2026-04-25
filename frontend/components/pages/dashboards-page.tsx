@@ -21,6 +21,7 @@ import { DbmsMetricsTab } from "./dashboards/dbms-metrics-tab"
 export function DashboardsPage() {
   const { currentTest, realtimeData, testConfig, setCurrentTest, addTestToHistory, clearRealtimeData, connectionNames, setConnectionNames, connectionDbTypes, setConnectionDbTypes, setCurrentPage, setComparisonSelection } = useAppStore()
   const [statusMessage, setStatusMessage] = useState<string>("")
+  const [showProgressBar, setShowProgressBar] = useState(false)
 
   // Ref always holds the latest currentTest so the cleanup closure is never stale.
   const currentTestRef = useRef(currentTest)
@@ -233,6 +234,17 @@ export function DashboardsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTest?.id])
 
+  // Показываем прогресс-бар во время теста и ещё 2 секунды после завершения,
+  // чтобы пользователь успел увидеть финальные 100%
+  useEffect(() => {
+    if (status === "running") {
+      setShowProgressBar(true)
+    } else if (status === "completed" || status === "failed") {
+      const t = setTimeout(() => setShowProgressBar(false), 2000)
+      return () => clearTimeout(t)
+    }
+  }, [status])
+
   const getDbDisplayName = (dbId: string) => {
     return currentTest?.connection_names?.[dbId] || connectionNames[dbId] || DB_NAMES[dbId] || dbId
   }
@@ -315,9 +327,9 @@ export function DashboardsPage() {
     <div className="p-6 space-y-6">
       <PageHeader isConnected={isConnected} currentTest={currentTest} />
 
-      {currentTest?.status === "running" && (
+      {showProgressBar && (
         <TestProgressBar
-          progress={progress}
+          progress={Math.min(100, progress)}
           elapsedSeconds={elapsedSeconds}
           statusMessage={statusMessage}
           backupStatus={backupStatus}

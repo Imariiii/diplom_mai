@@ -119,6 +119,8 @@ class LoadTester:
         iterations: int,
         virtual_users: int,
         query_func: Callable,
+        progress_start: Optional[float] = None,
+        progress_end: Optional[float] = None,
     ) -> List[Dict]:
         """
         Запуск виртуальных пользователей для параллельного выполнения запросов.
@@ -133,6 +135,8 @@ class LoadTester:
             iterations: Количество итераций на каждого виртуального пользователя
             virtual_users: Количество параллельных воркеров
             query_func: Async-функция без аргументов, возвращающая Dict с результатом
+            progress_start: Начальное значение прогресса для фазы тестирования (0-100)
+            progress_end: Конечное значение прогресса для фазы тестирования (0-100)
         """
         if virtual_users <= 1:
             results = []
@@ -151,6 +155,14 @@ class LoadTester:
                 else:
                     recent_failed += 1
                 
+                # Обновляем прогресс по завершённым итерациям
+                if (progress_start is not None and progress_end is not None
+                        and self._metrics_callback and iterations > 0):
+                    frac = (i + 1) / iterations
+                    self._metrics_callback.set_progress(
+                        progress_start + frac * (progress_end - progress_start)
+                    )
+
                 current_time = time.perf_counter()
                 if self._is_streaming and (current_time - last_emit_time) >= self._streaming_interval:
                     if recent_times:
@@ -199,11 +211,14 @@ class LoadTester:
                     metrics_state['total_completed'] += 1
                 await asyncio.sleep(0.001)
         
+        total_iterations = virtual_users * iterations
+
         async def metrics_emitter():
             try:
                 while True:
                     await asyncio.sleep(self._streaming_interval)
                     snapshot = None
+                    completed_now = 0
                     async with results_lock:
                         now = time.perf_counter()
                         interval = now - metrics_state['last_emit_time']
@@ -214,10 +229,18 @@ class LoadTester:
                                 'failed': metrics_state['recent_failed'],
                                 'tps': (metrics_state['recent_successful'] + metrics_state['recent_failed']) / interval if interval > 0 else 0,
                             }
+                        completed_now = metrics_state['total_completed']
                         metrics_state['recent_times'] = []
                         metrics_state['recent_successful'] = 0
                         metrics_state['recent_failed'] = 0
                         metrics_state['last_emit_time'] = now
+                    # Обновляем прогресс по завершённым итерациям
+                    if (progress_start is not None and progress_end is not None
+                            and self._metrics_callback and total_iterations > 0):
+                        frac = min(1.0, completed_now / total_iterations)
+                        self._metrics_callback.set_progress(
+                            progress_start + frac * (progress_end - progress_start)
+                        )
                     if snapshot:
                         await self._emit_metrics(
                             db_key=db_key,
@@ -648,10 +671,6 @@ class LoadTester:
         for idx, query in enumerate(queries):
             print(f"Тестирование запроса: {query['name']} ({idx + 1}/{total_queries})")
             
-            # Обновляем прогресс
-            if self._metrics_callback:
-                self._metrics_callback.set_current_query(idx + 1)
-            
             await self._emit_status("running", f"Тестирование: {query['name']} ({idx + 1}/{total_queries})")
             
             comparison = await self.run_comparison_test(
@@ -662,6 +681,10 @@ class LoadTester:
                 scenario=scenario
             )
             all_results.append(comparison)
+            
+            # Обновляем прогресс после завершения каждого запроса
+            if self._metrics_callback:
+                self._metrics_callback.set_current_query(idx + 1)
         
         # Уведомляем о завершении
         if self._metrics_callback:
@@ -695,11 +718,17 @@ class LoadTester:
             "description": "Пользовательский SQL-запрос",
         }
 
+        total_dbs = len(db_types)
         if self._metrics_callback:
-            self._metrics_callback.set_total_queries(1)
             await self._metrics_callback.on_test_start()
 
+        def _set_prog(value: float):
+            if self._metrics_callback:
+                self._metrics_callback.set_progress(max(0.0, min(100.0, value)))
+
+        # Фаза: прогрев (0-8%)
         if warmup_time > 0:
+            _set_prog(0.0)
             print(f"Прогрев системы ({warmup_time} сек)...")
             await self._emit_status("running", f"Прогрев системы ({warmup_time} сек)...")
             for db_key in db_types:
@@ -707,25 +736,36 @@ class LoadTester:
                     await self.execute_query(db_key, custom_sql, query_id)
                     await asyncio.sleep(0.05)
             await asyncio.sleep(warmup_time)
-
-        print(f"Тестирование пользовательского SQL-запроса (1/1)")
-        if self._metrics_callback:
-            self._metrics_callback.set_current_query(1)
-        await self._emit_status("running", "Тестирование: пользовательский SQL (1/1)")
+            _set_prog(8.0)
 
         results: Dict[str, Dict] = {}
         prepare_infos: Dict[str, Dict] = {}
 
-        for db_key in db_types:
+        # Фаза: подготовка / backup всех БД (0-8% или продолжение после прогрева)
+        prepare_start = 8.0 if warmup_time > 0 else 0.0
+        prepare_end = prepare_start + 8.0
+        for prep_idx, db_key in enumerate(db_types):
             print(f"Подготовка {db_key}...")
+            _set_prog(prepare_start + (prep_idx / total_dbs) * (prepare_end - prepare_start))
             prepare_info = await self.prepare_database_for_test(
                 db_key, [custom_sql], self.auto_restore
             )
             prepare_infos[db_key] = prepare_info
+        _set_prog(prepare_end)
+
+        # Фаза: тестирование (prepare_end-92%), каждая БД получает равный срез
+        test_range_start = prepare_end
+        test_range_end = 92.0
+        test_slice = (test_range_end - test_range_start) / total_dbs if total_dbs > 0 else 0
 
         try:
-            for db_key in db_types:
-                print(f"Тестирование {db_key}...")
+            for db_idx, db_key in enumerate(db_types):
+                db_prog_start = test_range_start + db_idx * test_slice
+                db_prog_end = test_range_start + (db_idx + 1) * test_slice
+
+                print(f"Тестирование {db_key} ({db_idx + 1}/{total_dbs})...")
+                await self._emit_status("running", f"Тестирование: пользовательский SQL ({db_idx + 1}/{total_dbs})")
+                _set_prog(db_prog_start)
 
                 async def _make_query(dk=db_key):
                     return await self.execute_query(dk, custom_sql, query_id)
@@ -735,7 +775,11 @@ class LoadTester:
                     iterations=iterations,
                     virtual_users=virtual_users,
                     query_func=_make_query,
+                    progress_start=db_prog_start,
+                    progress_end=db_prog_end,
                 )
+
+                _set_prog(db_prog_end)
 
                 execution_times = [r["execution_time_ms"] for r in run_results if r["error"] is None]
                 all_execution_times = [
@@ -799,12 +843,17 @@ class LoadTester:
                 stats["self_check"] = self._build_self_check(stats)
                 stats["raw_samples"] = self.build_metric_samples(run_results, db_key, query_id=query_id)
                 results[db_key] = stats
+
         finally:
-            for db_key in db_types:
-                if prepare_infos.get(db_key, {}).get("needs_restore"):
-                    await self.restore_database_after_test(
-                        db_key, prepare_infos[db_key], self.auto_restore
-                    )
+            # Фаза: восстановление всех БД (92-100%)
+            restore_dbs = [k for k in db_types if prepare_infos.get(k, {}).get("needs_restore")]
+            n_restore = len(restore_dbs)
+            for rest_idx, db_key in enumerate(restore_dbs):
+                _set_prog(92.0 + (rest_idx / n_restore) * 8.0 if n_restore > 0 else 92.0)
+                await self.restore_database_after_test(
+                    db_key, prepare_infos[db_key], self.auto_restore
+                )
+            _set_prog(100.0)
 
         return [
             {
@@ -1084,12 +1133,20 @@ class LoadTester:
         auto_restore: bool = True,
         warmup_time: int = 0,
         use_indexes: bool = False,
+        progress_start: float = 0.0,
+        progress_end: float = 100.0,
     ) -> Dict:
         """Запуск теста на основе сценария с автовосстановлением БД"""
         import random
 
         conn_name = self.db_connection.get_connection_name(db_key)
         scenario_name = scenario.get('name', 'unknown')
+
+        # Вспомогательная функция для установки прогресса в пределах выделенного диапазона
+        _pslice = progress_end - progress_start
+        def _set_progress(pct: float):
+            if self._metrics_callback:
+                self._metrics_callback.set_progress(progress_start + _pslice * pct)
 
         queries = scenario.get('queries', [])
         scenario_indexes = scenario.get('indexes', [])
@@ -1110,10 +1167,13 @@ class LoadTester:
         )
 
         sql_queries = [q['sql_template'] for q in queries]
-        
+
+        # Фаза: подготовка / backup (0-8% диапазона)
+        _set_progress(0.0)
         prepare_info = await self.prepare_database_for_test(
             db_key, sql_queries, auto_restore
         )
+        _set_progress(0.08)
 
         weighted_queries = []
         for query in queries:
@@ -1187,6 +1247,7 @@ class LoadTester:
 
             await self._prime_random_value_cache(db_key, queries)
 
+            # Фаза: прогрев (8-15% диапазона, если включён)
             if warmup_time > 0:
                 warmup_iterations = max(1, min(5, max(1, iterations // 10)))
                 print(f"[SCENARIO] Прогрев {conn_name}: {warmup_iterations} итер. + {warmup_time}s пауза...")
@@ -1205,7 +1266,11 @@ class LoadTester:
                     await asyncio.sleep(0.1)
                 await asyncio.sleep(warmup_time)
                 print(f"[SCENARIO] Прогрев {conn_name} завершён")
+                _set_progress(0.15)
 
+            # Фаза: нагрузочное тестирование (15-88% с прогревом, 8-88% без)
+            testing_start_pct = 0.15 if warmup_time > 0 else 0.08
+            _set_progress(testing_start_pct)
             print(f"[SCENARIO] Запуск нагрузки {conn_name}: {iterations} итераций x {virtual_users} VU...")
             start_time = time.perf_counter()
 
@@ -1223,11 +1288,14 @@ class LoadTester:
                 iterations=iterations,
                 virtual_users=virtual_users,
                 query_func=_make_scenario_query,
+                progress_start=progress_start + _pslice * testing_start_pct,
+                progress_end=progress_start + _pslice * 0.88,
             )
 
             end_time = time.perf_counter()
             total_test_time = end_time - start_time
             print(f"[SCENARIO] Нагрузка {conn_name} завершена за {total_test_time:.2f}с")
+            _set_progress(0.88)
             
         finally:
             if created_indexes:
@@ -1266,9 +1334,12 @@ class LoadTester:
                         "dbms_type": self.db_connection.get_dbms_type(db_key),
                         "error": str(e),
                     })
+            # Фаза: восстановление БД (88-100% диапазона)
+            _set_progress(0.88)
             restore_info = await self.restore_database_after_test(
                 db_key, prepare_info, auto_restore
             )
+            _set_progress(1.0)
 
         # Статистика
         execution_times = [r['execution_time_ms'] for r in results if r['error'] is None]
@@ -1351,27 +1422,27 @@ class LoadTester:
             f"итераций: {iterations} | VU: {virtual_users} | запросов в сценарии: {queries_count}"
         )
 
-        # Устанавливаем количество БД для прогресса
         if self._metrics_callback:
-            self._metrics_callback.set_total_queries(len(db_types))
             await self._metrics_callback.on_test_start()
 
-        # Запуск тестов для каждой БД
+        n_dbs = len(db_types)
+
+        # Запуск тестов для каждой БД с фазовым прогрессом
         for idx, db_key in enumerate(db_types):
             conn_name = self.db_connection.get_connection_name(db_key)
-            print(f"Тестирование {db_key} ({conn_name}) со сценарием {scenario['name']}... ({idx + 1}/{len(db_types)})")
+            print(f"Тестирование {db_key} ({conn_name}) со сценарием {scenario['name']}... ({idx + 1}/{n_dbs})")
             queries_in_scenario = scenario.get('queries', [])
             for q in queries_in_scenario:
                 q_type = q.get('query_type', '—')
                 q_sql = q.get('sql_template', '').strip().replace('\n', ' ')
                 print(f"  [SQL] {q_type}: {q_sql}")
 
-            if self._metrics_callback:
-                self._metrics_callback.set_current_query(idx + 1)
+            p_start = idx / n_dbs * 100
+            p_end = (idx + 1) / n_dbs * 100
 
             await self._emit_status(
                 "running",
-                f"Тестирование {self.db_connection.get_connection_name(db_key)}: {scenario['name']} ({idx + 1}/{len(db_types)})"
+                f"Тестирование {self.db_connection.get_connection_name(db_key)}: {scenario['name']} ({idx + 1}/{n_dbs})"
             )
 
             stats = await self.run_scenario_test(
@@ -1382,6 +1453,8 @@ class LoadTester:
                 auto_restore=self.auto_restore,
                 warmup_time=warmup_time,
                 use_indexes=use_indexes,
+                progress_start=p_start,
+                progress_end=p_end,
             )
 
             successful = stats.get('successful', 0)
