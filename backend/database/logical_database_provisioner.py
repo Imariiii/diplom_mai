@@ -6,12 +6,13 @@ import re
 from typing import Any, Dict, List, Optional
 
 from backend.database.logical_scenarios import LOGICAL_SCENARIO_TEMPLATE_IDS
+from backend.database.logical_database_validator import LogicalDatabaseValidator
 from backend.database.repository.connection_repository import ConnectionRepository
 from backend.database.repository.logical_database_repository import LogicalDatabaseRepository
 from backend.database.repository.profile_repository import ProfileRepository
 from backend.database.repository.scenario_bundle_repository import ScenarioBundleRepository
 from backend.database.schema_profile_resolver import SchemaProfileResolver
-from backend.database.scenario_generator import ScenarioGenerator
+from backend.database.scenario_generator import SCENARIO_GENERATOR_VERSION, ScenarioGenerator
 
 
 class LogicalDatabaseProvisioner:
@@ -36,6 +37,7 @@ class LogicalDatabaseProvisioner:
             connection_repo=connection_repository,
             bundle_repository=bundle_repository,
         )
+        self.validator = LogicalDatabaseValidator(connection_repository)
 
     async def ensure_logical_database_ready(
         self,
@@ -73,6 +75,29 @@ class LogicalDatabaseProvisioner:
                 str(logical_database.schema_profile_id)
             )
 
+        if profile and profile.reference_connection_id:
+            inherited_reference = next(
+                (
+                    connection for connection in active_connections
+                    if str(connection.id) == str(profile.reference_connection_id)
+                ),
+                None,
+            )
+            if inherited_reference:
+                reference_connection = inherited_reference
+
+        compatibility = None
+        if len(active_connections) > 1:
+            compatibility = await self.validator.validate_connections(
+                [str(connection.id) for connection in active_connections],
+                reference_connection_id=str(reference_connection.id),
+            )
+            if not compatibility.get("valid"):
+                raise ValueError(
+                    "Подключения logical database несовместимы: "
+                    + "; ".join(compatibility.get("errors", []))
+                )
+
         if not profile:
             profile, profile_was_created = await self._resolve_or_create_profile(
                 logical_database=logical_database,
@@ -85,17 +110,17 @@ class LogicalDatabaseProvisioner:
                 profile_source='auto',
             )
 
-        if profile and (
-            not profile.reference_connection_id
-            or str(profile.reference_connection_id) != str(reference_connection.id)
-        ):
+        if profile and not profile.reference_connection_id:
             profile = await self.profile_repository.update_profile(
                 profile_id=str(profile.id),
                 description=profile.description,
                 reference_connection_id=str(reference_connection.id),
             )
 
-        should_generate = profile_was_created or await self._bundles_missing_for_profile(str(profile.id))
+        should_generate = profile_was_created or await self._bundles_missing_for_profile(
+            str(profile.id),
+            str(reference_connection.id),
+        )
         generated_bundles: List[Dict[str, Any]] = []
         if should_generate:
             generated_bundles = await self.generator.generate_bundles_for_profile(
@@ -110,6 +135,7 @@ class LogicalDatabaseProvisioner:
             "bundles": generated_bundles,
             "generated_count": len(generated_bundles),
             "used_connection_id": str(reference_connection.id),
+            "compatibility": compatibility if len(active_connections) > 1 else None,
         }
 
     async def _resolve_or_create_profile(self, logical_database, reference_connection):
@@ -136,13 +162,20 @@ class LogicalDatabaseProvisioner:
         )
         return profile, True
 
-    async def _bundles_missing_for_profile(self, schema_profile_id: str) -> bool:
+    async def _bundles_missing_for_profile(
+        self,
+        schema_profile_id: str,
+        reference_connection_id: str,
+    ) -> bool:
         """Проверить, что для профиля уже созданы канонические bundle'ы по всем builtin templates."""
         bundles = await self.bundle_repository.list_bundles(schema_profile_id=schema_profile_id)
         generated_templates = {
             bundle.scenario_template_id
             for bundle in bundles
-            if bundle.is_builtin == 't' and bundle.queries
+            if bundle.is_builtin == 't'
+            and bundle.queries
+            and str(bundle.generated_from_connection_id) == reference_connection_id
+            and bundle.generation_source == SCENARIO_GENERATOR_VERSION
         }
         return any(template_id not in generated_templates for template_id in LOGICAL_SCENARIO_TEMPLATE_IDS)
 

@@ -3,6 +3,7 @@
 """
 from typing import Any, Dict, List, Optional
 
+from backend.database.logical_database_validator import LogicalDatabaseValidator
 from backend.database.repository.connection_repository import ConnectionRepository
 from backend.database.repository.scenario_bundle_repository import ScenarioBundleRepository
 
@@ -85,6 +86,16 @@ class ScenarioBundleResolver:
 
             schema_profile_id = next(iter(profile_ids))
 
+        compatibility = None
+        if len(connections) > 1:
+            validator = LogicalDatabaseValidator(self.connection_repository)
+            compatibility = await validator.validate_connections(connection_ids)
+            if not compatibility.get("valid"):
+                raise ValueError(
+                    "Подключения logical database несовместимы: "
+                    + "; ".join(compatibility.get("errors", []))
+                )
+
         bundle = None
         if bundle_id:
             bundle = await self.bundle_repository.get_bundle(bundle_id)
@@ -110,6 +121,7 @@ class ScenarioBundleResolver:
             "schema_profile_name": bundle.schema_profile.name if bundle.schema_profile else None,
             "scenario_template_id": bundle.scenario_template_id,
             "bundle": self.bundle_to_execution_dict(bundle.to_dict()),
+            "compatibility": compatibility,
         }
 
     def bundle_to_execution_dict(self, bundle: Dict[str, Any]) -> Dict[str, Any]:

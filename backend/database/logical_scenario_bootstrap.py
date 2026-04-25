@@ -8,7 +8,7 @@ from backend.database.repository.connection_repository import ConnectionReposito
 from backend.database.repository.logical_database_repository import LogicalDatabaseRepository
 from backend.database.repository.profile_repository import ProfileRepository
 from backend.database.repository.scenario_bundle_repository import ScenarioBundleRepository
-from backend.database.scenario_generator import ScenarioGenerator
+from backend.database.scenario_generator import SCENARIO_GENERATOR_VERSION, ScenarioGenerator
 
 
 REFERENCE_CONNECTION_PRIORITY = {
@@ -159,7 +159,12 @@ class LogicalScenarioBootstrap:
                 or any(
                     bundle.scenario_template_id == template.id
                     and bundle.is_builtin == 't'
-                    and (not bundle.queries or not bundle.indexes)
+                    and (
+                        not bundle.queries
+                        or not bundle.indexes
+                        or str(bundle.generated_from_connection_id) != str(profile.reference_connection_id)
+                        or bundle.generation_source != SCENARIO_GENERATOR_VERSION
+                    )
                     for bundle in existing_bundles
                 )
             ]

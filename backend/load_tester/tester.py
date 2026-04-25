@@ -5,6 +5,7 @@ import time
 import asyncio
 import statistics
 import psutil
+import re
 from typing import Dict, List, Optional, Callable, Any
 from datetime import datetime, timezone
 from sqlalchemy import text
@@ -256,9 +257,9 @@ class LoadTester:
 
     def _build_self_check(self, stats: Dict[str, Any]) -> Dict[str, Any]:
         """Сформировать блок самопроверки для рассчитанных метрик."""
-        avg_time_ms = stats.get('avg_time_ms') or 0
+        avg_time_ms = stats.get('avg_time_all_ms') or stats.get('avg_time_ms') or 0
         virtual_users = stats.get('virtual_users') or 0
-        throughput = stats.get('throughput') or 0
+        throughput = stats.get('completed_tps') or stats.get('throughput') or 0
         littles_law = verify_littles_law(
             virtual_users=int(virtual_users),
             avg_latency_sec=float(avg_time_ms) / 1000.0,
@@ -443,6 +444,11 @@ class LoadTester:
         
         # Статистика
         execution_times = [r['execution_time_ms'] for r in results if r['error'] is None]
+        all_execution_times = [
+            r['execution_time_ms']
+            for r in results
+            if r.get('execution_time_ms') is not None
+        ]
         
         db_type = self.db_connection.get_dbms_type(db_key)
 
@@ -469,6 +475,8 @@ class LoadTester:
                 'p99_time_ms': self.calculate_percentile(execution_times, 99),
                 'total_time_ms': sum(execution_times),
                 'std_dev_ms': statistics.stdev(execution_times) if len(execution_times) > 1 else 0,
+                'avg_time_all_ms': statistics.mean(all_execution_times) if all_execution_times else 0,
+                'completed_tps': len(results) / total_test_time if total_test_time > 0 else 0,
                 
                 # TPS (Транзакций в секунду)
                 'tps': successful_count / total_test_time if total_test_time > 0 else 0,
@@ -506,6 +514,8 @@ class LoadTester:
                 'error': 'Все запросы завершились с ошибкой',
                 'tps': 0,
                 'throughput': 0,
+                'avg_time_all_ms': statistics.mean(all_execution_times) if all_execution_times else 0,
+                'completed_tps': len(results) / total_test_time if total_test_time > 0 else 0,
                 'active_connections': virtual_users,
                 'error_count': len(results),
                 'error_rate': 100,
@@ -713,8 +723,12 @@ class LoadTester:
                     query_func=_make_query,
                 )
 
-                start_time = time.perf_counter()
                 execution_times = [r["execution_time_ms"] for r in run_results if r["error"] is None]
+                all_execution_times = [
+                    r["execution_time_ms"]
+                    for r in run_results
+                    if r.get("execution_time_ms") is not None
+                ]
                 total_test_time = sum(r["execution_time_ms"] for r in run_results) / 1000.0 if run_results else 0
                 db_type = self.db_connection.get_dbms_type(db_key)
 
@@ -738,6 +752,8 @@ class LoadTester:
                         "p99_time_ms": self.calculate_percentile(execution_times, 99),
                         "total_time_ms": sum(execution_times),
                         "std_dev_ms": statistics.stdev(execution_times) if len(execution_times) > 1 else 0,
+                        "avg_time_all_ms": statistics.mean(all_execution_times) if all_execution_times else 0,
+                        "completed_tps": len(run_results) / total_test_time if total_test_time > 0 else 0,
                         "tps": successful / total_test_time if total_test_time > 0 else 0,
                         "throughput": successful / total_test_time if total_test_time > 0 else 0,
                         "active_connections": virtual_users,
@@ -758,6 +774,8 @@ class LoadTester:
                         "error": "Все запросы завершились с ошибкой",
                         "tps": 0,
                         "throughput": 0,
+                        "avg_time_all_ms": statistics.mean(all_execution_times) if all_execution_times else 0,
+                        "completed_tps": len(run_results) / total_test_time if total_test_time > 0 else 0,
                         "active_connections": virtual_users,
                         "error_count": len(run_results),
                         "error_rate": 100,
@@ -850,24 +868,32 @@ class LoadTester:
 
         # Подстановка параметров
         param_values = {}
-        for param_config in params_config:
-            param_name = param_config['param_name']
-            param_type = param_config['param_type']
-            param_values[param_name] = await self._generate_param_value(
-                db_key, param_type, param_config
-            )
-
-        # Формируем финальный SQL
         try:
-            final_sql = sql_template.format(**param_values)
-        except KeyError as e:
-            error = f"Missing parameter: {e}"
-            final_sql = sql_template
+            for param_config in params_config:
+                param_name = param_config['param_name']
+                param_type = param_config['param_type']
+                param_values[param_name] = await self._generate_param_value(
+                    db_key, param_type, param_config
+                )
+        except Exception as e:
+            error = str(e)
+
+        final_sql = sql_template
+        if error is None:
+            try:
+                executable_sql = self._build_executable_sql(sql_template, param_values)
+            except KeyError as e:
+                error = f"Missing parameter: {e}"
+                executable_sql = text(sql_template)
+        else:
+            executable_sql = text(sql_template)
 
         try:
+            if error is not None:
+                raise RuntimeError(error)
             engine = await self.db_connection.get_engine_async(db_key)
             async with engine.connect() as conn:
-                result = await conn.execute(text(final_sql))
+                result = await conn.execute(executable_sql, param_values)
                 rows_count = len(result.fetchall()) if result.returns_rows else 0
                 await conn.commit()
         except Exception as e:
@@ -929,7 +955,7 @@ class LoadTester:
             return (base_date + timedelta(days=days)).strftime('%Y-%m-%d')
 
         else:
-            return 1  # Default fallback
+            raise ValueError(f"Неизвестный тип параметра: {param_type}")
 
     async def _get_random_value_from_table(
         self,
@@ -952,18 +978,34 @@ class LoadTester:
                 if cached_values:
                     return random.choice(cached_values)
 
+                db_type = self.db_connection.get_dbms_type(db_key)
+                dialect = get_dialect(db_type)
                 engine = await self.db_connection.get_engine_async(db_key)
                 async with engine.connect() as conn:
-                    result = await conn.execute(text(f"SELECT {column} FROM {table}"))
+                    result = await conn.execute(
+                        text(dialect.get_sample_column_values_sql(table, column)),
+                        {"limit": 1000},
+                    )
                     values = [row[0] for row in result.fetchall() if row[0] is not None]
 
                 self._random_value_cache[cache_key] = values
                 if values:
                     return random.choice(values)
-                return 1
+                raise ValueError(f"Нет значений для параметра {table}.{column}")
         except Exception as e:
             print(f"Error getting random value: {e}")
-            return 1
+            raise
+
+    def _build_executable_sql(self, sql_template: str, param_values: Dict[str, Any]):
+        """Преобразовать template-плейсхолдеры в bind parameters SQLAlchemy."""
+        executable_sql = sql_template
+        for param_name in sorted(param_values.keys(), key=len, reverse=True):
+            executable_sql = executable_sql.replace("'{" + param_name + "}'", f":{param_name}")
+            executable_sql = executable_sql.replace("{" + param_name + "}", f":{param_name}")
+        missing = re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", executable_sql)
+        if missing:
+            raise KeyError(", ".join(sorted(set(missing))))
+        return text(executable_sql)
 
     async def _prime_random_value_cache(self, db_key: str, queries: List[Dict[str, Any]]):
         """Предзагрузить значения для random_from_table до запуска воркеров"""
@@ -1184,6 +1226,11 @@ class LoadTester:
 
         # Статистика
         execution_times = [r['execution_time_ms'] for r in results if r['error'] is None]
+        all_execution_times = [
+            r['execution_time_ms']
+            for r in results
+            if r.get('execution_time_ms') is not None
+        ]
         successful_count = len(execution_times)
         failed_count = len(results) - len(execution_times)
 
@@ -1206,6 +1253,8 @@ class LoadTester:
             'p99_time_ms': self.calculate_percentile(execution_times, 99) if execution_times else 0,
             'total_time_ms': sum(execution_times) if execution_times else 0,
             'std_dev_ms': statistics.stdev(execution_times) if len(execution_times) > 1 else 0,
+            'avg_time_all_ms': statistics.mean(all_execution_times) if all_execution_times else 0,
+            'completed_tps': len(results) / total_test_time if total_test_time > 0 else 0,
             'tps': successful_count / total_test_time if total_test_time > 0 else 0,
             'throughput': successful_count / total_test_time if total_test_time > 0 else 0,
             'error_rate': (failed_count / len(results)) * 100 if len(results) > 0 else 0,

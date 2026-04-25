@@ -58,6 +58,8 @@ class ColumnInfo:
     is_nullable: bool
     is_primary_key: bool = False
     is_unique: bool = False
+    is_partition_key: bool = False
+    is_auto_generated: bool = False
     column_default: Optional[str] = None
     category: str = "other"
 
@@ -68,6 +70,8 @@ class ColumnInfo:
             "is_nullable": self.is_nullable,
             "is_primary_key": self.is_primary_key,
             "is_unique": self.is_unique,
+            "is_partition_key": self.is_partition_key,
+            "is_auto_generated": self.is_auto_generated,
             "column_default": self.column_default,
             "category": self.category,
         }
@@ -191,6 +195,7 @@ class SchemaAnalyzer:
                         data_type=data_type,
                         is_nullable=str(is_nullable).upper() == "YES",
                         column_default=column_default,
+                        is_auto_generated=self._is_auto_generated(column_default),
                         category=self._categorize_data_type(data_type),
                     )
                 )
@@ -216,6 +221,21 @@ class SchemaAnalyzer:
                 column = table.get_column(column_name)
                 if column:
                     column.is_unique = True
+
+            partition_sql = dialect.get_partition_columns_sql()
+            if partition_sql:
+                try:
+                    partition_columns_result = await conn.execute(text(partition_sql))
+                    for row in partition_columns_result.fetchall():
+                        table_name, column_name = row
+                        table = tables.get(table_name)
+                        if not table:
+                            continue
+                        column = table.get_column(column_name)
+                        if column:
+                            column.is_partition_key = True
+                except Exception as exc:
+                    print(f"[SCHEMA_ANALYZER] Не удалось получить partition columns: {exc}")
 
             foreign_keys_result = await conn.execute(text(dialect.get_foreign_keys_detailed_sql()))
             for row in foreign_keys_result.fetchall():
@@ -254,6 +274,16 @@ class SchemaAnalyzer:
         normalized = (data_type or "").strip().lower()
         return TYPE_CATEGORY_MAPPING.get(normalized, "other")
 
+    def _is_auto_generated(self, column_default: Optional[str]) -> bool:
+        """Определить, генерируется ли значение колонки СУБД автоматически."""
+        default = (column_default or "").lower()
+        return (
+            "nextval(" in default
+            or "auto_increment" in default
+            or "generated" in default
+            or "identity" in default
+        )
+
     def _classify_table(self, table: TableInfo) -> List[str]:
         """Определить прикладные роли таблицы для шаблонов запросов."""
         capabilities: List[str] = []
@@ -262,7 +292,10 @@ class SchemaAnalyzer:
         foreign_key_columns = set(fk.from_column for fk in table.foreign_keys_out)
         mutable_columns = [
             column for column in non_pk_columns
-            if column.name not in foreign_key_columns and column.category in {"string", "numeric", "date", "boolean"}
+            if column.name not in foreign_key_columns
+            and not column.is_unique
+            and not column.is_partition_key
+            and column.category in {"string", "numeric", "date", "boolean"}
         ]
 
         if primary_key_column and table.row_count >= 10:

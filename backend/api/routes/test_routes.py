@@ -8,6 +8,7 @@ import asyncio
 
 from backend.api.schemas import AsyncTestRequest
 from backend.database.scenario_bundle_resolver import ScenarioBundleResolver
+from backend.database.scenario_bundle_validator import ScenarioBundleValidator
 from backend.load_tester.tester import LoadTester
 from backend.websocket_manager import manager, TestStreamingCallback
 
@@ -250,6 +251,19 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                     await test_repository.update_test_run_config(test_id, resolved_config)
                 except Exception as exc:
                     print(f"[HISTORY_DB] ⚠ Не удалось обновить config теста {test_id}: {exc}")
+
+            bundle_validator = ScenarioBundleValidator(connection_repository)
+            preflight = await bundle_validator.validate_bundle_for_connections(
+                bundle=resolved_bundle,
+                connection_ids=connection_ids,
+            )
+            if not preflight.get("valid"):
+                raise ValueError(
+                    "Preflight-проверка scenario bundle не пройдена: "
+                    + "; ".join(preflight.get("errors", []))
+                )
+            if preflight.get("warnings"):
+                print(f"[TEST] Предупреждения preflight: {preflight['warnings']}")
 
             results = await test_tester.run_resolved_scenario_test_suite(
                 scenario=resolved_bundle,

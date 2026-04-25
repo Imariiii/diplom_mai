@@ -42,12 +42,19 @@ class MySQLDialect(DbmsDialect):
                 column_name,
                 data_type,
                 is_nullable,
-                column_default,
+                CONCAT_WS(' ', column_default, extra) AS column_default,
                 ordinal_position
             FROM information_schema.columns
             WHERE table_schema = DATABASE()
             ORDER BY table_name, ordinal_position
         """
+
+    def get_sample_column_values_sql(self, table: str, column: str) -> str:
+        quoted_column = self.quote_identifier(column)
+        return (
+            f"SELECT {quoted_column} FROM {self.quote_identifier(table)} "
+            f"WHERE {quoted_column} IS NOT NULL ORDER BY RAND() LIMIT :limit"
+        )
 
     def get_primary_keys_sql(self) -> str:
         return """

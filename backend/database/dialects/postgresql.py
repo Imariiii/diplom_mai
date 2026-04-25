@@ -42,12 +42,38 @@ class PostgreSQLDialect(DbmsDialect):
                 column_name,
                 data_type,
                 is_nullable,
-                column_default,
+                CASE
+                    WHEN is_identity = 'YES' THEN 'identity'
+                    ELSE column_default
+                END AS column_default,
                 ordinal_position
             FROM information_schema.columns
             WHERE table_schema = current_schema()
             ORDER BY table_name, ordinal_position
         """
+
+    def get_partition_columns_sql(self) -> str:
+        return """
+            SELECT
+                parent.relname AS table_name,
+                attr.attname AS column_name
+            FROM pg_partitioned_table pt
+            JOIN pg_class parent ON parent.oid = pt.partrelid
+            JOIN LATERAL unnest(pt.partattrs) AS part_attr(attnum) ON true
+            JOIN pg_attribute attr
+                ON attr.attrelid = parent.oid
+               AND attr.attnum = part_attr.attnum
+            JOIN pg_namespace ns ON ns.oid = parent.relnamespace
+            WHERE ns.nspname = current_schema()
+            ORDER BY parent.relname, attr.attnum
+        """
+
+    def get_sample_column_values_sql(self, table: str, column: str) -> str:
+        quoted_column = self.quote_identifier(column)
+        return (
+            f"SELECT {quoted_column} FROM {self.quote_identifier(table)} "
+            f"WHERE {quoted_column} IS NOT NULL ORDER BY random() LIMIT :limit"
+        )
 
     def get_primary_keys_sql(self) -> str:
         return """

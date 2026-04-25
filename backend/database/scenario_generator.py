@@ -18,6 +18,8 @@ DEFAULT_SCENARIO_TYPES: List[str] = [
     "olap",
 ]
 
+SCENARIO_GENERATOR_VERSION = "logical-scenario-generator-v2"
+
 SCENARIO_QUERY_LIMITS: Dict[str, int] = {
     "read_only": 6,
     "write_only": 4,
@@ -181,7 +183,7 @@ class ScenarioGenerator:
         schema_profile_id: str,
         reference_connection_id: str,
         scenario_types: Optional[List[str]] = None,
-        generation_source: str = "generated_from_reference",
+        generation_source: str = SCENARIO_GENERATOR_VERSION,
     ) -> List[Dict[str, Any]]:
         """Сгенерировать и сохранить канонические bundles профиля."""
         if self.bundle_repository is None:
@@ -645,13 +647,15 @@ class ScenarioGenerator:
         template: QueryTemplateDefinition,
     ) -> Optional[Dict[str, Any]]:
         pk_column = table.primary_key_column()
-        target_column = self._pick_timestamp_column(table)
+        target_column = self._pick_mutable_column(table, {"date"})
         if not pk_column or not target_column:
             return None
         placeholder_name = f"{table.name}_{pk_column.name}"
+        target_placeholder_name = f"{table.name}_{target_column.name}"
         sql_template = (
             f"UPDATE {self._identifier(table.name)} "
-            f"SET {self._identifier(target_column.name)} = CURRENT_TIMESTAMP "
+            f"SET {self._identifier(target_column.name)} = "
+            f"{self._placeholder(target_placeholder_name, target_column.category)} "
             f"WHERE {self._identifier(pk_column.name)} = "
             f"{self._placeholder(placeholder_name, pk_column.category)}"
         )
@@ -659,7 +663,10 @@ class ScenarioGenerator:
             template=template,
             sql_template=sql_template,
             description=f"{template.description} Таблица: {table.name}",
-            params=[self._random_from_table_param(placeholder_name, table.name, pk_column.name)],
+            params=[
+                self._random_from_table_param(placeholder_name, table.name, pk_column.name),
+                self._random_from_table_param(target_placeholder_name, table.name, target_column.name),
+            ],
             index_hints=[
                 self._build_index_hint(
                     table_name=table.name,
@@ -679,7 +686,7 @@ class ScenarioGenerator:
         template: QueryTemplateDefinition,
     ) -> Optional[Dict[str, Any]]:
         pk_column = table.primary_key_column()
-        target_column = self._pick_metric_column(table)
+        target_column = self._pick_mutable_column(table, {"numeric", "integer"})
         if not pk_column or not target_column:
             return None
         placeholder_name = f"{table.name}_{pk_column.name}"
@@ -720,9 +727,13 @@ class ScenarioGenerator:
         }
 
         for column in table.columns:
-            if column.is_primary_key and column.column_default:
+            if column.is_primary_key and (column.column_default or column.is_auto_generated):
                 continue
-            part = self._build_insert_part(column, foreign_key_mapping.get(column.name))
+            if column.is_partition_key:
+                if not column.is_nullable and not column.column_default:
+                    return None
+                continue
+            part = self._build_insert_part(table.name, column, foreign_key_mapping.get(column.name))
             if part is None:
                 if not column.is_nullable and not column.column_default:
                     return None
@@ -777,6 +788,7 @@ class ScenarioGenerator:
 
     def _build_insert_part(
         self,
+        table_name: str,
         column: ColumnInfo,
         foreign_key,
     ) -> Optional[Tuple[str, Optional[Dict[str, Any]]]]:
@@ -789,7 +801,7 @@ class ScenarioGenerator:
             )
 
         if column.category == "string":
-            if column.name.endswith("_id"):
+            if column.name.endswith("_id") or column.is_unique:
                 return (
                     self._placeholder(placeholder_name, column.category),
                     {"param_name": placeholder_name, "param_type": "uuid"},
@@ -804,6 +816,8 @@ class ScenarioGenerator:
             )
 
         if column.category in {"integer", "numeric"}:
+            if column.is_unique:
+                return None
             return (
                 self._placeholder(placeholder_name, column.category),
                 {
@@ -817,7 +831,7 @@ class ScenarioGenerator:
         if column.category == "date":
             return (
                 self._placeholder(placeholder_name, column.category),
-                {"param_name": placeholder_name, "param_type": "random_date"},
+                self._random_from_table_param(placeholder_name, table_name, column.name),
             )
 
         if column.category == "boolean":
@@ -957,10 +971,49 @@ class ScenarioGenerator:
             return integer_columns[0]
         return None
 
+    def _pick_mutable_column(self, table: TableInfo, categories: Set[str]) -> Optional[ColumnInfo]:
+        """Выбрать колонку, которую безопасно менять в write-сценариях."""
+        foreign_key_columns = {fk.from_column for fk in table.foreign_keys_out}
+        preferred_name_tokens = (
+            "last_update",
+            "updated_at",
+            "update",
+            "modified",
+            "status",
+            "amount",
+            "price",
+            "rate",
+        )
+        candidates = [
+            column for column in table.columns
+            if column.category in categories
+            and not column.is_primary_key
+            and not column.is_unique
+            and not column.is_partition_key
+            and not column.is_auto_generated
+            and column.name not in foreign_key_columns
+        ]
+        for token in preferred_name_tokens:
+            for column in candidates:
+                if token in column.name.lower():
+                    return column
+        if categories == {"date"}:
+            return None
+        return candidates[0] if candidates else None
+
     def _pick_timestamp_column(self, table: TableInfo) -> Optional[ColumnInfo]:
         """Выбрать наиболее подходящую колонку даты/времени для UPDATE/scan."""
         date_columns = table.get_columns_by_category("date")
-        preferred_names = ("updated", "modified", "created", "timestamp", "date", "time")
+        preferred_names = (
+            "last_update",
+            "updated_at",
+            "update",
+            "modified",
+            "created",
+            "timestamp",
+            "date",
+            "time",
+        )
         for column in date_columns:
             lowered_name = column.name.lower()
             if any(token in lowered_name for token in preferred_names):

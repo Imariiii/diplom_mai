@@ -51,6 +51,8 @@ def tester():
     lt._backup_callback = None
     lt._is_streaming = False
     lt._streaming_interval = 1.0
+    lt._random_value_cache = {}
+    lt._random_value_cache_locks = {}
     lt.get_system_metrics = AsyncMock(return_value={
         "cpu_usage": 10.0,
         "memory_usage_percent": 20.0,
@@ -66,6 +68,29 @@ def tester():
         "deadlocks": 0,
     })
     return lt
+
+
+class TestScenarioSqlBinding:
+    def test_build_executable_sql_replaces_quoted_and_unquoted_placeholders(self, tester):
+        statement = tester._build_executable_sql(
+            "UPDATE payment SET last_update = '{payment_last_update}' WHERE payment_id = {payment_payment_id}",
+            {
+                "payment_last_update": "2020-01-01",
+                "payment_payment_id": 1,
+            },
+        )
+
+        assert str(statement) == (
+            "UPDATE payment SET last_update = :payment_last_update "
+            "WHERE payment_id = :payment_payment_id"
+        )
+
+    def test_build_executable_sql_reports_missing_placeholder(self, tester):
+        with pytest.raises(KeyError):
+            tester._build_executable_sql(
+                "SELECT * FROM payment WHERE payment_id = {payment_payment_id}",
+                {},
+            )
 
 
 class TestBuildMetricSamples:
@@ -255,6 +280,24 @@ class TestEmitMetrics:
 
 
 class TestSelfCheckIntegration:
+    def test_littles_law_uses_completed_requests_when_errors_exist(self, tester):
+        stats = {
+            "virtual_users": 30,
+            "successful": 3625,
+            "failed": 905,
+            "avg_time_ms": 51.53,
+            "throughput": 383.8,
+            "avg_time_all_ms": 52.36,
+            "completed_tps": 480.6,
+            "iterations": 151,
+            "error_rate": 19.98,
+        }
+
+        self_check = tester._build_self_check(stats)
+
+        assert self_check["littles_law"]["valid"] is True
+        assert not any("Закон Литтла нарушен" in warning for warning in self_check["warnings"])
+
     @pytest.mark.asyncio
     async def test_run_single_test_attaches_self_check(self, tester):
         tester.query_manager = MagicMock()

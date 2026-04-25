@@ -152,7 +152,7 @@ QUERY_TEMPLATES: List[QueryTemplateDefinition] = [
         id="update_timestamp_by_pk",
         name="UPDATE timestamp-поля",
         description="Обновление временной метки записи по primary key.",
-        pattern="UPDATE {table} SET {target_column} = {current_timestamp} WHERE {pk_column} = {pk_value}",
+        pattern="UPDATE {table} SET {target_column} = {sampled_timestamp} WHERE {pk_column} = {pk_value}",
         query_type="update",
         scenario_types=["write_only", "mixed_light", "mixed_heavy", "oltp"],
         complexity="simple",

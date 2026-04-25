@@ -14,7 +14,7 @@ if [ -f venv/bin/activate ]; then
 fi
 
 echo "=== Backend Tests ==="
-python -m pytest backend/tests/ \
+python3 -m pytest backend/tests/ \
     -v \
     --tb=short \
     --cov=backend \

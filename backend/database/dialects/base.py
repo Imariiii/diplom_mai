@@ -76,6 +76,18 @@ class DbmsDialect(ABC):
         """SQL для подсчёта строк в таблице."""
         return f"SELECT COUNT(*) FROM {self.quote_identifier(table)}"
 
+    def get_partition_columns_sql(self) -> Optional[str]:
+        """SQL для чтения колонок партиционирования, если СУБД это поддерживает."""
+        return None
+
+    def get_sample_column_values_sql(self, table: str, column: str) -> str:
+        """SQL для ограниченной выборки значений колонки."""
+        quoted_column = self.quote_identifier(column)
+        return (
+            f"SELECT {quoted_column} FROM {self.quote_identifier(table)} "
+            f"WHERE {quoted_column} IS NOT NULL LIMIT :limit"
+        )
+
     @abstractmethod
     def get_table_size_sql(self, table: str) -> str:
         """SQL для получения размера таблицы в байтах."""

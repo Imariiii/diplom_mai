@@ -1,6 +1,8 @@
 """
 API маршруты для управления логическими базами данных
 """
+from typing import Any, Dict
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import inspect
 
@@ -20,6 +22,7 @@ from backend.api.schemas.profile_schemas import (
     ScenarioBundleSummaryResponse,
 )
 from backend.database.repository.logical_database_repository import LogicalDatabaseRepository
+from backend.database.logical_database_validator import LogicalDatabaseValidator
 from backend.database.scenario_generator import ScenarioGenerator
 
 router = APIRouter(prefix="/api/logical-databases", tags=["logical-databases"])
@@ -326,6 +329,32 @@ async def generate_logical_database_bundles(
     except Exception as e:
         print(f"[LOGICAL_DB] Ошибка генерации bundle'ов logical database: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка генерации bundle'ов logical database: {e}")
+
+
+@router.get("/{logical_db_id}/validate")
+async def validate_logical_database(
+    logical_db_id: str,
+    repo: LogicalDatabaseRepository = Depends(get_logical_db_repo),
+) -> Dict[str, Any]:
+    """Проверить совместимость active-подключений logical database."""
+    try:
+        db = await repo.get_by_id(logical_db_id)
+        if not db:
+            raise HTTPException(status_code=404, detail="Логическая БД не найдена")
+
+        active_connections = [connection for connection in db.connections if connection.is_active == 't']
+        if not active_connections:
+            raise HTTPException(status_code=400, detail="Для logical database нет активных подключений")
+
+        validator = LogicalDatabaseValidator(get_connection_repo())
+        return await validator.validate_connections(
+            [str(connection.id) for connection in active_connections]
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[LOGICAL_DB] Ошибка проверки logical database: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка проверки logical database: {e}")
 
 
 @router.delete("/{logical_db_id}")
