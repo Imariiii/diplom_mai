@@ -9,6 +9,7 @@ default_strategy="native".
 """
 import asyncio
 import os
+import re
 import shutil
 import uuid
 from typing import Dict, Set, Optional, Tuple
@@ -68,6 +69,33 @@ class NativeDumpStrategy(BackupStrategy):
         приводит к Certificate verification failure при локальных/тестовых подключениях.
         """
         return ["--skip-ssl"]
+
+    @staticmethod
+    def _sanitize_mysql_dump_definers(sql_content: bytes) -> Tuple[bytes, int]:
+        """
+        Удалить DEFINER из MySQL/MariaDB дампа перед восстановлением.
+
+        Дампы триггеров могут содержать DEFINER исходного сервера, например
+        root@localhost. При восстановлении обычным пользователем MariaDB требует
+        SET USER и прерывает импорт, хотя данные до этой строки уже применены.
+        """
+        versioned_definer_pattern = re.compile(
+            rb"/\*![0-9]{5}\s+DEFINER=`[^`]+`@`[^`]+`\s*\*/\s*"
+        )
+        plain_definer_pattern = re.compile(
+            rb"\bDEFINER\s*=\s*(?:"
+            rb"`[^`]+`@`[^`]+`|"
+            rb"'[^']+'@'[^']+'|"
+            rb'"[^"]+"@"[^"]+"|'
+            rb"[^\s@]+@[^\s]+|"
+            rb"CURRENT_USER(?:\(\))?"
+            rb")\s+",
+            re.IGNORECASE,
+        )
+
+        sanitized, versioned_count = versioned_definer_pattern.subn(b"", sql_content)
+        sanitized, plain_count = plain_definer_pattern.subn(b"", sanitized)
+        return sanitized, versioned_count + plain_count
 
     def _get_connection_params(self, engine: AsyncEngine) -> Dict:
         """Извлечь параметры подключения из SQLAlchemy async engine"""
@@ -241,7 +269,9 @@ class NativeDumpStrategy(BackupStrategy):
 
         t0 = _time.time()
         if dialect.native_dump_family == "postgresql":
-            await self._restore_postgres_backup(conn_params, backup_info.file_path)
+            await self._restore_postgres_backup(
+                engine, conn_params, backup_info.file_path, backup_info.tables
+            )
         elif dialect.native_dump_family == "mysql":
             await self._restore_mysql_backup(
                 conn_params, backup_info.file_path, dbms_type
@@ -253,16 +283,48 @@ class NativeDumpStrategy(BackupStrategy):
             f"время={restore_ms:.0f}мс"
         )
     
-    async def _restore_postgres_backup(self, conn_params: Dict, file_path: str) -> None:
+    async def _truncate_postgres_tables(
+        self,
+        engine: AsyncEngine,
+        tables: Set[str],
+    ) -> None:
+        """Очистить таблицы перед data-only восстановлением PostgreSQL."""
+        if not tables:
+            return
+
+        dialect = get_dialect("postgresql")
+        quoted_tables = ", ".join(
+            dialect.quote_identifier(table) for table in sorted(tables)
+        )
+        sql = f"TRUNCATE TABLE {quoted_tables} RESTART IDENTITY CASCADE"
+
+        async with engine.connect() as conn:
+            await conn.execute(text(sql))
+            await conn.commit()
+
+        print(
+            f"[RESTORE:Native] [postgresql] Таблицы очищены перед импортом: "
+            f"{len(tables)}"
+        )
+
+    async def _restore_postgres_backup(
+        self,
+        engine: AsyncEngine,
+        conn_params: Dict,
+        file_path: str,
+        tables: Set[str],
+    ) -> None:
         """Восстановление PostgreSQL через pg_restore"""
+        await self._truncate_postgres_tables(engine, tables)
+
         cmd = [
             "pg_restore",
             "-h", conn_params["host"],
             "-p", str(conn_params["port"]),
             "-U", conn_params["user"],
             "-d", conn_params["database"],
-            "--clean",
-            "--if-exists",
+            "--data-only",
+            "--disable-triggers",
             "--no-owner",
             file_path
         ]
@@ -280,7 +342,7 @@ class NativeDumpStrategy(BackupStrategy):
         )
         stdout, stderr = await proc.communicate()
         
-        if proc.returncode not in [0, 1]:
+        if proc.returncode != 0:
             print(f"[RESTORE:Native] [postgresql] ОШИБКА pg_restore (код {proc.returncode}): {stderr.decode()}")
             raise RuntimeError(f"pg_restore failed: {stderr.decode()}")
         if stderr:
@@ -312,6 +374,13 @@ class NativeDumpStrategy(BackupStrategy):
         print(f"[RESTORE:Native] [{dbms_type}] Запуск {restore_cmd} ← {file_path}")
         with open(file_path, 'rb') as f:
             sql_content = f.read()
+
+        sql_content, removed_definers = self._sanitize_mysql_dump_definers(sql_content)
+        if removed_definers:
+            print(
+                f"[RESTORE:Native] [{dbms_type}] "
+                f"Удалены DEFINER из дампа: {removed_definers}"
+            )
         
         proc = await asyncio.create_subprocess_exec(
             *cmd,

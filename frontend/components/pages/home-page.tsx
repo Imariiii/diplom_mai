@@ -1,6 +1,6 @@
 "use client"
 
-import { Database, Cpu, BarChart3, Zap, ArrowRight } from "lucide-react"
+import { Database, Cpu, BarChart3, Zap, ArrowRight, Plug } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/lib/store"
@@ -9,7 +9,7 @@ const features = [
   {
     icon: Database,
     title: "Несколько СУБД",
-    description: "Поддержка PostgreSQL, MySQL и MariaDB с примерами баз данных Sakila и Pagila",
+    description: "Поддержка PostgreSQL, MySQL и MariaDB",
   },
   {
     icon: Cpu,
@@ -32,7 +32,7 @@ const steps = [
   {
     step: 1,
     title: "Добавьте подключения",
-    description: "В разделе «Подключения к СУБД» создайте логическую базу данных и добавьте подключения к нужным СУБД",
+    description: "В разделе «Подключения к СУБД» создайте базу данных и добавьте подключения к нужным СУБД",
   },
   {
     step: 2,
@@ -70,10 +70,16 @@ export function HomePage() {
           данных
         </p>
 
-        <Button size="lg" className="mt-4" onClick={() => setCurrentPage("config")}>
-          Начать тестирование
-          <ArrowRight className="ml-2 h-4 w-4" />
-        </Button>
+        <div className="flex flex-wrap items-center justify-center gap-3 mt-4">
+          <Button size="lg" onClick={() => setCurrentPage("connections")}>
+            Добавить подключение
+            <Plug className="ml-2 h-4 w-4" />
+          </Button>
+          <Button size="lg" onClick={() => setCurrentPage("config")}>
+            Начать тестирование
+            <ArrowRight className="ml-2 h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

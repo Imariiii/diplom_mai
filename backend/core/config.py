@@ -36,7 +36,7 @@ class RestoreSettings(BaseSettings):
     )
 
     # Стратегия по умолчанию: "sql" или "native"
-    default_strategy: str = Field(default="sql")
+    default_strategy: str = Field(default="native")
     
     # Автоматически восстанавливать БД после write-тестов
     auto_restore: bool = Field(default=True)
