@@ -342,13 +342,40 @@ async def generate_logical_database_bundles(
             raise HTTPException(status_code=404, detail="Логическая БД не найдена")
         if not db.schema_profile_id:
             raise HTTPException(status_code=400, detail="Для logical database сначала назначьте schema_profile")
+        if db.profile_status in {"draft", "needs_review", "incompatible"}:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Перед генерацией bundle'ов подтвердите профиль logical database "
+                    f"(profile_status={db.profile_status})"
+                ),
+            )
+        if db.compatibility_status == "invalid":
+            raise HTTPException(
+                status_code=400,
+                detail="Перед генерацией bundle'ов исправьте несовместимость logical database",
+            )
 
         active_connections = [connection for connection in db.connections if connection.is_active == 't']
         if not active_connections:
             raise HTTPException(status_code=400, detail="Для logical database нет активных подключений")
+        pending_review_connections = [
+            connection.name
+            for connection in active_connections
+            if connection.profile_source == "pending_review"
+        ]
+        if pending_review_connections:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Перед генерацией bundle'ов подтвердите schema_profile подключений: "
+                    + ", ".join(pending_review_connections)
+                ),
+            )
 
         reference_connection_id = (
             data.reference_connection_id
+            or (str(db.reference_connection_id) if db.reference_connection_id else None)
             or next((str(connection.id) for connection in active_connections), None)
         )
         if not reference_connection_id:

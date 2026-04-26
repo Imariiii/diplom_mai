@@ -652,6 +652,27 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
     }
   }
 
+  const confirmConnectionProfile = async (conn: DatabaseConnection) => {
+    if (!conn.logical_database_id) return
+    try {
+      const updated = await apiClient.confirmLogicalDatabaseConnectionProfile(
+        conn.logical_database_id,
+        conn.id
+      )
+      await loadAll()
+      if (updated.compatibility_status !== "invalid") {
+        toast.success("Schema profile подключения подтверждён")
+      } else {
+        toast.error(
+          updated.compatibility_report?.errors?.[0] ||
+          "Подключение несовместимо с logical database"
+        )
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось подтвердить schema profile")
+    }
+  }
+
   const getDbmsColor = (dbmsType: string) =>
     DBMS_STYLES[dbmsType as SupportedDbmsType]?.color || DBMS_STYLES.mysql.color
   const getDbmsIcon = (dbmsType: string) =>
@@ -718,6 +739,16 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
             title="Профиль схемы и сценарии"
           >
             <Database className="h-4 w-4" />
+          </Button>
+        )}
+        {conn.logical_database_id && conn.profile_source === "pending_review" && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => { void confirmConnectionProfile(conn) }}
+            title="Подтвердить schema profile"
+          >
+            <CheckCircle className="h-4 w-4" />
           </Button>
         )}
         <Button

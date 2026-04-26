@@ -4,6 +4,7 @@
 """
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -52,6 +53,44 @@ class TestHealthEndpoint:
         data = resp.json()
         assert data["status"] == "ok"
         assert "history_db" in data
+
+
+class TestAsyncRunLogicalDatabaseGates:
+    @pytest.mark.asyncio
+    async def test_async_run_blocks_unconfirmed_logical_database(self, client):
+        logical_db = SimpleNamespace(
+            id="logical-1",
+            name="Logical",
+            schema_profile_id="profile-1",
+            reference_connection_id="conn-1",
+            profile_status="needs_review",
+            compatibility_status="unknown",
+        )
+        connection = SimpleNamespace(
+            id="conn-1",
+            name="PostgreSQL",
+            logical_database_id="logical-1",
+            logical_database=logical_db,
+            schema_profile_id="profile-1",
+            profile_source="inherited",
+        )
+        connection_repo = AsyncMock()
+        connection_repo.bulk_get_connections = AsyncMock(return_value=[connection])
+        logical_repo = AsyncMock()
+        logical_repo.get_by_id = AsyncMock(return_value=logical_db)
+
+        with (
+            patch("backend.initialize.connection_repository", connection_repo),
+            patch("backend.initialize.logical_database_repository", logical_repo),
+        ):
+            resp = await client.post("/test/async", json={
+                "connection_ids": ["conn-1"],
+                "logical_database_id": "logical-1",
+                "scenario": "mixed_light",
+            })
+
+        assert resp.status_code == 400
+        assert "требует проверки профиля" in resp.json()["detail"]
 
 
 # ---------------------------------------------------------------------------

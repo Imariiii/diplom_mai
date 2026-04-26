@@ -640,6 +640,18 @@ export function HistoryPage() {
                     <p className="font-mono">{selectedTest.config?.scenario || "-"}</p>
                   </div>
                   <div>
+                    <p className="text-muted-foreground">Профиль</p>
+                    <p className="font-mono break-words">
+                      {selectedTest.config?.resolved_profile_name || selectedTest.config?.resolved_profile_id || "-"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Bundle</p>
+                    <p className="font-mono break-words">
+                      {selectedTest.config?.resolved_bundle_name || selectedTest.config?.resolved_bundle_id || "-"}
+                    </p>
+                  </div>
+                  <div>
                     <p className="text-muted-foreground">Итерации</p>
                     <p className="font-mono">{selectedTest.config?.iterations || "-"}</p>
                   </div>

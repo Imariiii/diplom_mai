@@ -63,6 +63,7 @@ async def lifespan(app: FastAPI):
             print(f"[STARTUP] ⚠ Миграции завершились с ошибкой: {e}")
             import traceback
             traceback.print_exc()
+            raise
     else:
         print("[STARTUP] HISTORY_DATABASE_URL не задан, миграции пропущены")
     yield

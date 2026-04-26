@@ -55,10 +55,25 @@ class ScenarioBundleResolver:
                 )
 
             schema_profile_id = str(logical_database.schema_profile_id)
+            profile_status = getattr(logical_database, "profile_status", "confirmed")
+            compatibility_status = getattr(logical_database, "compatibility_status", "unknown")
+            if profile_status in {"draft", "needs_review", "incompatible"}:
+                raise ValueError(
+                    f"Logical database '{logical_database.name}' требует проверки профиля "
+                    f"(profile_status={profile_status})"
+                )
+            if compatibility_status == "invalid":
+                raise ValueError(
+                    f"Logical database '{logical_database.name}' помечена как несовместимая"
+                )
             inconsistent_connections = [
                 connection.name
                 for connection in connections
-                if not connection.schema_profile_id or str(connection.schema_profile_id) != schema_profile_id
+                if (
+                    not connection.schema_profile_id
+                    or str(connection.schema_profile_id) != schema_profile_id
+                    or getattr(connection, "profile_source", None) == "pending_review"
+                )
             ]
             if inconsistent_connections:
                 raise ValueError(
@@ -72,6 +87,16 @@ class ScenarioBundleResolver:
                 raise ValueError(
                     "Для части подключений не назначен schema_profile: "
                     + ", ".join(missing_profile_connections)
+                )
+            pending_review_connections = [
+                connection.name
+                for connection in connections
+                if getattr(connection, "profile_source", None) == "pending_review"
+            ]
+            if pending_review_connections:
+                raise ValueError(
+                    "Для части подключений schema_profile ещё требует подтверждения: "
+                    + ", ".join(pending_review_connections)
                 )
 
             if len(profile_ids) != 1:

@@ -10,6 +10,18 @@ export interface TestRequest {
   db_types?: string[]
   connection_ids?: string[]
   bundle_id?: string
+  resolved_bundle_id?: string
+  resolved_bundle_name?: string
+  resolved_profile_id?: string
+  resolved_profile_name?: string
+  resolved_bundle_snapshot?: {
+    id?: string
+    name?: string
+    scenario_template_id?: string
+    schema_profile_id?: string
+    queries?: Array<{ sql_template?: string; query_type?: string; weight?: number }>
+    indexes?: Array<Record<string, unknown>>
+  }
   iterations?: number
   virtual_users?: number
   scenario?: string

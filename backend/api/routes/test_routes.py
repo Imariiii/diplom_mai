@@ -15,6 +15,9 @@ from backend.websocket_manager import manager, TestStreamingCallback
 router = APIRouter(prefix="/test", tags=["test"])
 
 
+BLOCKING_LOGICAL_PROFILE_STATUSES = {"draft", "needs_review", "incompatible"}
+
+
 def _extract_raw_samples(stats: Dict) -> List[Dict]:
     """Извлечь raw sample-метрики из статистики теста"""
     raw_samples = stats.get("raw_samples", []) or []
@@ -46,6 +49,113 @@ def _build_bundle_config_snapshot(bundle: Dict) -> Dict:
     }
 
 
+async def _validate_logical_database_run_request(request: AsyncTestRequest, scenario: str) -> None:
+    """Серверная проверка logical DB state до постановки теста в фон."""
+    if scenario == "custom" or not request.connection_ids:
+        return
+
+    from backend.initialize import connection_repository, logical_database_repository
+    from backend.database.logical_database_validator import LogicalDatabaseValidator
+
+    if not connection_repository:
+        return
+
+    connections = await connection_repository.bulk_get_connections(request.connection_ids)
+    if len(connections) != len(request.connection_ids):
+        raise HTTPException(status_code=400, detail="Не удалось загрузить все выбранные подключения")
+
+    logical_database_ids = {
+        str(connection.logical_database_id)
+        for connection in connections
+        if connection.logical_database_id
+    }
+    if not logical_database_ids:
+        return
+    if len(logical_database_ids) != 1 or any(not connection.logical_database_id for connection in connections):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Нельзя запускать scenario test сразу для нескольких logical database "
+                "или смешивать их с подключениями без logical database"
+            ),
+        )
+
+    logical_database_id = next(iter(logical_database_ids))
+    if request.logical_database_id and request.logical_database_id != logical_database_id:
+        raise HTTPException(
+            status_code=400,
+            detail="logical_database_id запроса не соответствует выбранным подключениям",
+        )
+
+    logical_database = connections[0].logical_database
+    if logical_database_repository:
+        logical_database = await logical_database_repository.get_by_id(logical_database_id)
+    if not logical_database:
+        raise HTTPException(status_code=400, detail="Логическая БД не найдена")
+
+    profile_status = getattr(logical_database, "profile_status", "confirmed")
+    compatibility_status = getattr(logical_database, "compatibility_status", "unknown")
+    if profile_status in BLOCKING_LOGICAL_PROFILE_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Logical database '{logical_database.name}' требует проверки профиля "
+                f"(profile_status={profile_status})"
+            ),
+        )
+    if compatibility_status == "invalid":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Logical database '{logical_database.name}' помечена как несовместимая",
+        )
+
+    pending_review_connections = [
+        connection.name
+        for connection in connections
+        if getattr(connection, "profile_source", None) == "pending_review"
+    ]
+    if pending_review_connections:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Для части подключений schema_profile ещё требует подтверждения: "
+                + ", ".join(pending_review_connections)
+            ),
+        )
+
+    validator = LogicalDatabaseValidator(connection_repository)
+    reference_connection_id = (
+        str(logical_database.reference_connection_id)
+        if getattr(logical_database, "reference_connection_id", None)
+        else None
+    )
+    compatibility = await validator.validate_connections(
+        request.connection_ids,
+        reference_connection_id=reference_connection_id,
+        mode="strict",
+    )
+    if logical_database_repository:
+        await logical_database_repository.update_profile_state(
+            logical_db_id=logical_database_id,
+            profile_status="confirmed" if compatibility.get("valid") else "incompatible",
+            compatibility_status=(
+                "invalid"
+                if not compatibility.get("valid")
+                else ("valid_with_warnings" if compatibility.get("warnings") else "valid")
+            ),
+            compatibility_report=compatibility,
+            reference_connection_id=compatibility.get("reference_connection_id"),
+        )
+    if not compatibility.get("valid"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Подключения logical database несовместимы: "
+                + "; ".join(compatibility.get("errors", []))
+            ),
+        )
+
+
 @router.post("/async")
 async def run_async_test(request: AsyncTestRequest, background_tasks: BackgroundTasks):
     """
@@ -67,6 +177,8 @@ async def run_async_test(request: AsyncTestRequest, background_tasks: Background
                 status_code=422,
                 detail="Невалидный SQL-запрос: " + "; ".join(validation_errors),
             )
+
+    await _validate_logical_database_run_request(request, scenario)
 
     from backend.initialize import HISTORY_ENABLED, test_repository
     

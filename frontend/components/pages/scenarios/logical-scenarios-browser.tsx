@@ -126,6 +126,13 @@ export function LogicalScenariosBrowser() {
   }, [selectedProfileDetail, selectedTemplateId])
 
   const activeVariant = useMemo(() => variants.find((b) => b.is_active) || null, [variants])
+  const selectedLogicalDbBlocksBundles = Boolean(
+    selectedLogicalDatabase &&
+    (
+      ["draft", "needs_review", "incompatible"].includes(selectedLogicalDatabase.profile_status || "") ||
+      selectedLogicalDatabase.compatibility_status === "invalid"
+    )
+  )
 
   const selectedBundle: ScenarioBundleSummary | null = useMemo(() => {
     if (!variants.length || selectedBundleId === "new") return null
@@ -436,10 +443,24 @@ export function LogicalScenariosBrowser() {
 
   const handleGenerateCanonical = async () => {
     if (!selectedProfileId || !selectedTemplateId || !selectedTemplate?.is_builtin) return
+    if (selectedLogicalDbBlocksBundles) {
+      toast.error("Сначала подтвердите совместимость logical database")
+      return
+    }
     try {
-      await apiClient.generateProfileBundles(selectedProfileId, { scenario_template_ids: [selectedTemplateId] })
+      if (selectedLogicalDatabase) {
+        await apiClient.generateLogicalDatabaseBundles(selectedLogicalDatabase.id, {
+          scenario_template_ids: [selectedTemplateId],
+        })
+      } else {
+        await apiClient.generateProfileBundles(selectedProfileId, { scenario_template_ids: [selectedTemplateId] })
+      }
       toast.success("Канонический bundle обновлён")
-      await loadProfile(selectedProfileId, selectedTemplateId)
+      if (selectedLogicalDatabase) {
+        await reloadAll(selectedTemplateId, selectedProfileId, undefined, selectedLogicalDatabase.id)
+      } else {
+        await loadProfile(selectedProfileId, selectedTemplateId)
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Не удалось сгенерировать bundle")
     }
@@ -480,6 +501,10 @@ export function LogicalScenariosBrowser() {
 
   const handleActivateBundle = async () => {
     if (!selectedBundle || !selectedProfileId || selectedBundle.is_active) return
+    if (selectedLogicalDbBlocksBundles) {
+      toast.error("Сначала подтвердите совместимость logical database")
+      return
+    }
     try {
       await apiClient.activateBundleVariant(selectedProfileId, selectedBundle.id)
       toast.success("Вариант активирован")
@@ -641,9 +666,14 @@ export function LogicalScenariosBrowser() {
                       </SelectContent>
                     </Select>
                     {selectedLogicalDatabase && (
-                      <p className="text-xs text-muted-foreground">
-                        Профиль: {selectedLogicalDatabase.schema_profile_name || "не назначен"}
-                      </p>
+                      <div className="space-y-1 text-xs text-muted-foreground">
+                        <p>Профиль: {selectedLogicalDatabase.schema_profile_name || "не назначен"}</p>
+                        <p>Reference: {selectedLogicalDatabase.reference_connection_name || "не выбран"}</p>
+                        <p>
+                          Статус: {selectedLogicalDatabase.profile_status || "unknown"} ·{" "}
+                          {selectedLogicalDatabase.compatibility_status || "unknown"}
+                        </p>
+                      </div>
                     )}
                   </div>
 
@@ -675,6 +705,15 @@ export function LogicalScenariosBrowser() {
                 </div>
 
                 {/* Bundle варианты */}
+                {selectedLogicalDbBlocksBundles && (
+                  <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>
+                      Генерация и активация bundle заблокированы: logical database требует подтверждения профиля или несовместима.
+                    </AlertDescription>
+                  </Alert>
+                )}
+
                 {loadingProfile ? (
                   <div className="flex items-center justify-center py-12 text-muted-foreground">
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -699,7 +738,12 @@ export function LogicalScenariosBrowser() {
                         Создать вариант вручную
                       </Button>
                       {selectedTemplate.is_builtin && (
-                        <Button variant="outline" size="sm" onClick={handleGenerateCanonical}>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleGenerateCanonical}
+                          disabled={selectedLogicalDbBlocksBundles}
+                        >
                           <WandSparkles className="mr-2 h-4 w-4" />
                           Сгенерировать canonical
                         </Button>
@@ -744,14 +788,19 @@ export function LogicalScenariosBrowser() {
                           <Button
                             variant="outline"
                             size="sm"
-                            disabled={!selectedBundle || selectedBundle.is_active}
+                            disabled={!selectedBundle || selectedBundle.is_active || selectedLogicalDbBlocksBundles}
                             onClick={handleActivateBundle}
                           >
                             <Check className="mr-1.5 h-3.5 w-3.5" />
                             Активировать
                           </Button>
                           {selectedTemplate.is_builtin && (
-                            <Button variant="outline" size="sm" onClick={handleGenerateCanonical}>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleGenerateCanonical}
+                              disabled={selectedLogicalDbBlocksBundles}
+                            >
                               <WandSparkles className="mr-1.5 h-3.5 w-3.5" />
                               Canonical
                             </Button>

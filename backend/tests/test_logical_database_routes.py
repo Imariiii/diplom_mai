@@ -56,6 +56,13 @@ def _logical_db(connections=None):
     )
 
 
+def _logical_db_with_status(profile_status="confirmed", compatibility_status="valid"):
+    db = _logical_db()
+    db.profile_status = profile_status
+    db.compatibility_status = compatibility_status
+    return db
+
+
 class TestLogicalDatabaseRoutes:
     @pytest.mark.asyncio
     async def test_validate_uses_reference_and_updates_compatibility_state(self, client):
@@ -107,3 +114,17 @@ class TestLogicalDatabaseRoutes:
 
         assert response.status_code == 400
         assert "reference_connection_id должен принадлежать" in response.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_generate_bundles_rejects_needs_review_state(self, client):
+        repo = AsyncMock()
+        repo.get_by_id = AsyncMock(return_value=_logical_db_with_status(profile_status="needs_review"))
+
+        app.dependency_overrides[get_logical_db_repo] = lambda: repo
+        response = await client.post(
+            "/api/logical-databases/logical-1/bundles/generate",
+            json={"scenario_template_ids": ["mixed_light"]},
+        )
+
+        assert response.status_code == 400
+        assert "подтвердите профиль" in response.json()["detail"]

@@ -98,7 +98,7 @@ def upgrade() -> None:
     conn.execute(sa.text("""
         UPDATE logical_databases
         SET profile_status = CASE
-                WHEN schema_profile_id IS NOT NULL THEN 'confirmed'
+                WHEN schema_profile_id IS NOT NULL THEN 'needs_review'
                 ELSE 'draft'
             END,
             compatibility_status = CASE

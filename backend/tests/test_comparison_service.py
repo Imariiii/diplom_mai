@@ -198,6 +198,31 @@ class TestValidation:
         with pytest.raises(ValueError, match="не завершён"):
             svc._validate_tests_for_comparison(tests)
 
+    def test_comparability_uses_resolved_bundle_snapshot(self):
+        svc = ComparisonService(repository=AsyncMock())
+        id1, id2 = uuid.uuid4(), uuid.uuid4()
+        tests = [
+            _make_test_data(id1, "A", logical_database_id="ldb1"),
+            _make_test_data(id2, "B", logical_database_id="ldb1"),
+        ]
+        tests[0]["config"].update({
+            "resolved_bundle_id": "bundle-a",
+            "resolved_bundle_snapshot": {
+                "queries": [{"query_type": "select", "sql_template": "SELECT * FROM rental"}],
+            },
+        })
+        tests[1]["config"].update({
+            "resolved_bundle_id": "bundle-a",
+            "resolved_bundle_snapshot": {
+                "queries": [{"query_type": "select", "sql_template": "SELECT * FROM payment"}],
+            },
+        })
+
+        report = svc._build_comparability_report(tests)
+
+        assert report.same_query_ids is False
+        assert report.is_valid_for_series is False
+
 
 # ---------------------------------------------------------------------------
 # Per-test analyze

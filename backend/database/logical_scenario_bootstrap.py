@@ -63,6 +63,11 @@ class LogicalScenarioBootstrap:
 
         logical_databases = await self.logical_database_repository.get_all_with_connections()
         for logical_database in logical_databases:
+            if any(
+                connection.is_active == 't' and connection.profile_source == "pending_review"
+                for connection in logical_database.connections
+            ):
+                continue
             active_connections = [
                 connection
                 for connection in logical_database.connections
@@ -91,7 +96,11 @@ class LogicalScenarioBootstrap:
             active_connections = [
                 connection
                 for connection in logical_database.connections
-                if connection.is_active == 't' and connection.schema_profile_id
+                if (
+                    connection.is_active == 't'
+                    and connection.schema_profile_id
+                    and connection.profile_source != "pending_review"
+                )
             ]
             profile_ids = {str(connection.schema_profile_id) for connection in active_connections}
             if len(profile_ids) != 1:
@@ -172,9 +181,18 @@ class LogicalScenarioBootstrap:
                     reference_connection_id=str(reference_connection.id),
                     mode="strict",
                 )
+                has_pending_review = any(
+                    connection.profile_source == "pending_review"
+                    for connection in active_connections
+                )
+                has_profile = bool(logical_database.schema_profile_id)
                 await self.logical_database_repository.update_profile_state(
                     logical_db_id=str(logical_database.id),
-                    profile_status="confirmed" if compatibility.get("valid") else "incompatible",
+                    profile_status=(
+                        "confirmed"
+                        if compatibility.get("valid") and has_profile and not has_pending_review
+                        else ("needs_review" if compatibility.get("valid") else "incompatible")
+                    ),
                     compatibility_status=(
                         "invalid"
                         if not compatibility.get("valid")

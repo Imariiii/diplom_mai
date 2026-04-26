@@ -181,6 +181,11 @@ export function ConfigPage() {
       toast.error("Для выбранных БД сначала подтвердите schema profile")
       return false
     }
+    const pendingReview = selectedConnections.filter((connection) => connection.profile_source === "pending_review")
+    if (pendingReview.length > 0) {
+      toast.error("Для выбранных БД есть подключения, ожидающие подтверждения schema profile")
+      return false
+    }
 
     const distinctProfiles = new Set(
       selectedConnections
@@ -192,11 +197,15 @@ export function ConfigPage() {
       return false
     }
 
-    if (
-      selectedLogicalDatabaseDetail?.profile_status === "incompatible" ||
-      selectedLogicalDatabaseDetail?.compatibility_status === "invalid"
+    if (selectedLogicalDatabaseDetail?.profile_status &&
+      ["draft", "needs_review", "incompatible"].includes(selectedLogicalDatabaseDetail.profile_status)
     ) {
-      toast.error("Logical database несовместима: проверьте профиль и reference connection")
+      toast.error("Logical database требует проверки профиля перед запуском сценария")
+      return false
+    }
+
+    if (selectedLogicalDatabaseDetail?.compatibility_status === "invalid") {
+      toast.error("Logical database несовместима: проверьте profile и reference connection")
       return false
     }
 
@@ -295,9 +304,14 @@ export function ConfigPage() {
     )
   )
   const hasMissingProfiles = selectedConnections.some((connection) => !connection.schema_profile_id)
+  const hasPendingReview = selectedConnections.some((connection) => connection.profile_source === "pending_review")
   const hasMixedProfiles = selectedProfileIds.length > 1
+  const selectedLogicalProfileStatus = selectedLogicalDatabaseDetail?.profile_status
+  const hasBlockingLogicalProfile = selectedLogicalProfileStatus
+    ? ["draft", "needs_review", "incompatible"].includes(selectedLogicalProfileStatus)
+    : false
   const hasInvalidLogicalDb =
-    selectedLogicalDatabaseDetail?.profile_status === "incompatible" ||
+    hasBlockingLogicalProfile ||
     selectedLogicalDatabaseDetail?.compatibility_status === "invalid"
   const selectedBundles = selectedLogicalDatabaseDetail?.bundles || []
   const selectedProfileName =
@@ -311,7 +325,7 @@ export function ConfigPage() {
 
   const canRunTest = () => {
     if (testConfig.databases.length === 0) return false
-    if (hasMissingProfiles || hasMixedProfiles) return false
+    if (hasMissingProfiles || hasPendingReview || hasMixedProfiles) return false
     if (hasInvalidLogicalDb || hasMissingActiveBundle) return false
     if (testConfig.testMode === "custom_query") {
       return testConfig.customSql.trim().length > 0
@@ -352,11 +366,18 @@ export function ConfigPage() {
         </div>
       )}
 
+      {testConfig.databases.length > 0 && hasPendingReview && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-700">
+          Запуск заблокирован: одно или несколько подключений ожидают подтверждения schema profile.
+        </div>
+      )}
+
       {selectedLogicalDatabaseDetail && (
         <div className="rounded-lg border border-border bg-card p-4 text-sm">
           <div className="font-medium">Состояние logical database</div>
           <div className="mt-1 text-muted-foreground">
             Профиль: {selectedLogicalDatabaseDetail.schema_profile_name || "не назначен"} ·
+            Статус профиля: {selectedLogicalDatabaseDetail.profile_status || "unknown"} ·
             Reference: {selectedLogicalDatabaseDetail.reference_connection_name || "не выбран"} ·
             Совместимость: {selectedLogicalDatabaseDetail.compatibility_status || "unknown"}
           </div>
@@ -370,7 +391,7 @@ export function ConfigPage() {
 
       {testConfig.databases.length > 0 && hasInvalidLogicalDb && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700">
-          Запуск заблокирован: logical database помечена как несовместимая. Проверьте отчёт совместимости и эталонное подключение.
+          Запуск заблокирован: logical database не подтверждена или помечена как несовместимая. Проверьте профиль, отчёт совместимости и reference connection.
         </div>
       )}
 

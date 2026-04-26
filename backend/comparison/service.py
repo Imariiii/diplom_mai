@@ -362,6 +362,14 @@ class ComparisonService:
         if not same_query_ids:
             reasons.append("Различные наборы запросов в сценариях")
 
+        bundle_ids = {s.get("bundle_id") for s in sigs if s.get("bundle_id")}
+        if len(bundle_ids) > 1:
+            reasons.append("Различные SQL bundle сценариев")
+
+        logical_db_ids = {s.get("logical_database_id") for s in sigs if s.get("logical_database_id")}
+        if len(logical_db_ids) > 1:
+            reasons.append("Различные logical database")
+
         profile_ids = set()
         for t in tests:
             config = t.get("config", {}) or {}
@@ -377,7 +385,7 @@ class ComparisonService:
         wu_set = set(s.get("warmup_time") for s in sigs)
         same_load_params = len(vu_set) <= 1 and len(it_set) <= 1 and len(wu_set) <= 1
 
-        is_valid = same_scenario and same_query_ids
+        is_valid = same_scenario and same_query_ids and len(bundle_ids) <= 1 and len(logical_db_ids) <= 1
 
         return ComparabilityReport(
             same_scenario=same_scenario,
@@ -698,13 +706,24 @@ class ComparisonService:
     def _build_workload_signature(self, test_data: Dict[str, Any]) -> Dict[str, Any]:
         config = test_data.get("config", {}) or {}
         results = test_data.get("results", []) or []
-        query_ids = sorted([r.get("query_id") or "" for r in results])
+        snapshot = config.get("resolved_bundle_snapshot") or {}
+        snapshot_queries = snapshot.get("queries") or []
+        if snapshot_queries:
+            query_ids = sorted([
+                f"{query.get('query_type') or ''}:{query.get('sql_template') or ''}"
+                for query in snapshot_queries
+            ])
+        else:
+            query_ids = sorted([r.get("query_id") or "" for r in results])
         return {
             "scenario": config.get("scenario"),
             "iterations": config.get("iterations"),
             "virtual_users": config.get("virtual_users"),
             "warmup_time": config.get("warmup_time"),
             "db_types": tuple(sorted(config.get("db_types", []) or [])),
+            "bundle_id": config.get("resolved_bundle_id") or config.get("bundle_id"),
+            "profile_id": config.get("resolved_profile_id") or config.get("schema_profile_id"),
+            "logical_database_id": test_data.get("logical_database_id") or config.get("logical_database_id"),
             "query_ids": tuple(query_ids),
         }
 

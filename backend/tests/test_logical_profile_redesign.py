@@ -17,6 +17,7 @@ def _connection(
     *,
     schema_profile_id=None,
     logical_database=None,
+    profile_source="inherited",
 ):
     return SimpleNamespace(
         id=connection_id,
@@ -24,6 +25,7 @@ def _connection(
         dbms_type="postgresql",
         schema_profile_id=schema_profile_id,
         schema_profile=SimpleNamespace(name="profile") if schema_profile_id else None,
+        profile_source=profile_source,
         logical_database_id=logical_database.id if logical_database else None,
         logical_database=logical_database,
     )
@@ -208,6 +210,49 @@ class TestScenarioBundleResolverProfileSync:
             "reference_connection_id": "conn-2",
             "mode": "strict",
         }
+
+    @pytest.mark.asyncio
+    async def test_resolver_blocks_pending_review_connection(self):
+        logical_db = SimpleNamespace(
+            id="logical-1",
+            name="Logical",
+            schema_profile_id="profile-1",
+            reference_connection_id="conn-1",
+            profile_status="confirmed",
+            compatibility_status="valid",
+        )
+        connection = _connection(
+            "conn-1",
+            "PostgreSQL",
+            schema_profile_id="profile-1",
+            logical_database=logical_db,
+            profile_source="pending_review",
+        )
+        resolver = ScenarioBundleResolver(_ConnectionRepo([connection]), _BundleRepo())
+
+        with pytest.raises(ValueError, match="не синхронизирован schema_profile"):
+            await resolver.resolve_for_connections(["conn-1"], scenario_template_id="mixed_light")
+
+    @pytest.mark.asyncio
+    async def test_resolver_blocks_unconfirmed_logical_database_state(self):
+        logical_db = SimpleNamespace(
+            id="logical-1",
+            name="Logical",
+            schema_profile_id="profile-1",
+            reference_connection_id="conn-1",
+            profile_status="needs_review",
+            compatibility_status="unknown",
+        )
+        connection = _connection(
+            "conn-1",
+            "PostgreSQL",
+            schema_profile_id="profile-1",
+            logical_database=logical_db,
+        )
+        resolver = ScenarioBundleResolver(_ConnectionRepo([connection]), _BundleRepo())
+
+        with pytest.raises(ValueError, match="требует проверки профиля"):
+            await resolver.resolve_for_connections(["conn-1"], scenario_template_id="mixed_light")
 
 
 class TestCommonCapabilityMetadata:
