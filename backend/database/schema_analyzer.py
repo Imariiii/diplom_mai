@@ -7,6 +7,10 @@ from typing import Any, Dict, List, Optional, Set
 from sqlalchemy import text
 
 from backend.database.connection import DatabaseConnection
+from backend.database.check_constraint_utils import (
+    is_redundant_not_null_check,
+    normalize_check_constraint,
+)
 from backend.database.dialects import get_dialect
 
 
@@ -281,7 +285,13 @@ class SchemaAnalyzer:
                         table_name, check_clause = row
                         table = tables.get(table_name)
                         if table and check_clause:
-                            table.check_constraints.append(str(check_clause))
+                            normalized_check = normalize_check_constraint(str(check_clause))
+                            if (
+                                normalized_check
+                                and not is_redundant_not_null_check(normalized_check)
+                                and normalized_check not in table.check_constraints
+                            ):
+                                table.check_constraints.append(normalized_check)
                 except Exception as exc:
                     print(f"[SCHEMA_ANALYZER] Не удалось получить check constraints: {exc}")
 
@@ -361,10 +371,15 @@ class SchemaAnalyzer:
         """Привести результат dialect.get_columns_sql к расширенному формату."""
         values = tuple(row)
         table_name, column_name, data_type, is_nullable, column_default, ordinal_position = values[:6]
+        column_default = SchemaAnalyzer._normalize_column_default(column_default)
         identity_generation = values[6] if len(values) > 6 else None
         default_kind = values[7] if len(values) > 7 else None
         has_server_default_raw = values[8] if len(values) > 8 else column_default is not None
         has_server_default = str(has_server_default_raw).lower() in {"true", "t", "1", "yes"}
+        if column_default is None and default_kind == "default":
+            default_kind = None
+        if column_default is None and not identity_generation and default_kind is None:
+            has_server_default = False
         return (
             table_name,
             column_name,
@@ -376,6 +391,16 @@ class SchemaAnalyzer:
             default_kind,
             has_server_default,
         )
+
+    @staticmethod
+    def _normalize_column_default(column_default: Optional[str]) -> Optional[str]:
+        """Убрать диалектный шум вроде DEFAULT NULL."""
+        if column_default is None:
+            return None
+        normalized = str(column_default).strip()
+        if not normalized or normalized.lower() == "null":
+            return None
+        return normalized
 
     def _is_auto_generated(
         self,

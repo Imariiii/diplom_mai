@@ -219,11 +219,21 @@ export function DashboardsPage() {
             apiClient.getAsyncTestResults(currentTest.id)
               .then((response) => {
                 const errorMessage = formatFailureMessage(response.error || response.message || data.message)
+                const nextConnectionNames = {
+                  ...(currentTest.connection_names || {}),
+                  ...(response.connection_names || {}),
+                }
+                const nextConnectionDbTypes = {
+                  ...(currentTest.connection_db_types || {}),
+                  ...(response.connection_db_types || {}),
+                }
+                setConnectionNames(nextConnectionNames)
+                setConnectionDbTypes(nextConnectionDbTypes)
                 setCurrentTest({
                   ...updatedTest,
                   error: errorMessage,
-                  connection_names: response.connection_names,
-                  connection_db_types: response.connection_db_types,
+                  connection_names: nextConnectionNames,
+                  connection_db_types: nextConnectionDbTypes,
                 })
               })
               .catch(() => {

@@ -282,6 +282,8 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
             test_tester.db_connection._connection_configs = connections_info
             test_tester.db_connection._connections_loaded = True
             db_keys = resolved_db_keys
+            active_tests[test_id]["connection_names"] = connection_names
+            active_tests[test_id]["connection_db_types"] = connection_db_types
         except Exception as e:
             print(f"[TEST] Ошибка загрузки подключений: {e}")
             import traceback

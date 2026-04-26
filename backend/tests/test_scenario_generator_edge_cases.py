@@ -386,6 +386,15 @@ class TestScenarioGeneratorEdgeCases:
         assert normalized[4] == "CURRENT_TIMESTAMP"
         assert normalized[8] is True
 
+    def test_normalize_column_row_treats_default_null_as_no_default(self):
+        row = ("orders", "comment", "text", "YES", "NULL", 5, None, "default", True)
+
+        normalized = SchemaAnalyzer._normalize_column_row(row)
+
+        assert normalized[4] is None
+        assert normalized[7] is None
+        assert normalized[8] is False
+
     def test_auto_generated_detection_distinguishes_mysql_on_update_from_generated_column(self):
         analyzer = SchemaAnalyzer.__new__(SchemaAnalyzer)
 

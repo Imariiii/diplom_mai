@@ -8,6 +8,11 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from backend.database.query_templates import QUERY_TEMPLATES, QueryTemplateDefinition, TemplateRequirements
 from backend.database.repository.scenario_bundle_repository import ScenarioBundleRepository
 from backend.database.scenario_bundle_validator import ScenarioBundleValidator
+from backend.database.check_constraint_utils import (
+    is_redundant_not_null_check,
+    normalize_check_constraint,
+)
+from backend.database.identifier_utils import shorten_identifier
 from backend.database.schema_analyzer import ColumnInfo, ForeignKeyInfo, SchemaAnalyzer, SchemaMetadata, TableInfo
 
 
@@ -328,7 +333,15 @@ class ScenarioGenerator:
         ]
 
     def _common_check_constraints(self, peer_tables: List[TableInfo]) -> List[str]:
-        peer_checks = [set(peer_table.check_constraints) for peer_table in peer_tables]
+        peer_checks = [
+            {
+                normalized
+                for check in peer_table.check_constraints
+                for normalized in [normalize_check_constraint(check)]
+                if normalized and not is_redundant_not_null_check(normalized)
+            }
+            for peer_table in peer_tables
+        ]
         return sorted(set.intersection(*peer_checks)) if peer_checks else []
 
     def _get_available_scenario_types(self, metadata: SchemaMetadata) -> List[str]:
@@ -1071,7 +1084,7 @@ class ScenarioGenerator:
 
     def _build_index_name(self, scenario_type: str, table_name: str, normalized_columns: str) -> str:
         suffix = normalized_columns.replace(",", "_")
-        return f"idx_bundle_{scenario_type}_{table_name}_{suffix}"[:255]
+        return shorten_identifier(f"idx_bundle_{scenario_type}_{table_name}_{suffix}")
 
     def _build_index_hint(
         self,

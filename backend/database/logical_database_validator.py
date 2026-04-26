@@ -5,6 +5,10 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from backend.database.repository.connection_repository import ConnectionRepository
 from backend.database.schema_analyzer import SchemaAnalyzer, SchemaMetadata, TableInfo
+from backend.database.check_constraint_utils import (
+    is_redundant_not_null_check,
+    normalize_check_constraint,
+)
 
 
 class LogicalDatabaseValidator:
@@ -227,15 +231,36 @@ class LogicalDatabaseValidator:
         return tuple(sorted(tuple(columns) for columns in table.unique_constraints))
 
     def _check_signature(self, table: TableInfo) -> Tuple[str, ...]:
-        return tuple(sorted(table.check_constraints))
+        return tuple(sorted({
+            normalized
+            for check in table.check_constraints
+            for normalized in [normalize_check_constraint(check)]
+            if normalized and not is_redundant_not_null_check(normalized)
+        }))
 
     def _insert_default_signature(self, column) -> Tuple[bool, bool, str, str]:
+        column_default = self._normalize_default_for_comparison(getattr(column, "column_default", None))
+        default_kind = (column.default_kind or "").lower()
+        identity_generation = (column.identity_generation or "").lower()
+        has_server_default = bool(column.has_server_default or column_default or identity_generation)
+        if not column_default and default_kind == "default" and not identity_generation:
+            default_kind = ""
+            has_server_default = False
         return (
-            bool(column.has_server_default or column.column_default or column.identity_generation),
+            has_server_default,
             bool(column.is_auto_generated),
-            (column.default_kind or "").lower(),
-            (column.identity_generation or "").lower(),
+            default_kind,
+            identity_generation,
         )
+
+    @staticmethod
+    def _normalize_default_for_comparison(column_default) -> Optional[str]:
+        if column_default is None:
+            return None
+        normalized = str(column_default).strip()
+        if not normalized or normalized.lower() == "null":
+            return None
+        return normalized
 
     def _validate_capability_intersection(
         self,

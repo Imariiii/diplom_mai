@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import text
 
 from backend.database.dialects import get_dialect
+from backend.database.identifier_utils import shorten_identifier
 
 
 @dataclass
@@ -67,13 +68,14 @@ class IndexManager:
 
     def _generate_index_name(self, table_name: str, column_names: str) -> str:
         suffix = "_".join(self._normalize_columns(column_names)) or "idx"
-        return f"idx_loadtest_{table_name}_{suffix}"[:255]
+        return shorten_identifier(f"idx_loadtest_{table_name}_{suffix}")
 
     def _resolve_index_name(self, index_def: Dict[str, Any]) -> str:
-        return index_def.get("index_name") or self._generate_index_name(
+        raw_name = index_def.get("index_name") or self._generate_index_name(
             index_def["table_name"],
             index_def["column_names"],
         )
+        return shorten_identifier(raw_name)
 
     def _build_column_sql(self, db_type: str, column_names: str) -> str:
         return get_dialect(db_type).build_columns_sql(column_names)

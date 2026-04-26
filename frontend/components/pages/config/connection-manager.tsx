@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import {
   Plus, Pencil, Trash2, Play, CheckCircle, XCircle, Loader2, Database,
-  ChevronDown, ChevronRight, MoreVertical,
+  ChevronDown, ChevronRight, MoreVertical, AlertCircle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -196,6 +196,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
   const [selectedProfileId, setSelectedProfileId] = useState<string>("")
   const [customProfileName, setCustomProfileName] = useState("")
   const [customProfileDescription, setCustomProfileDescription] = useState("")
+  const [compatibilityReportDb, setCompatibilityReportDb] = useState<LogicalDatabase | null>(null)
 
   useEffect(() => {
     loadAll()
@@ -683,6 +684,8 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
     if (status === "invalid") return "несовместима"
     return "не проверена"
   }
+  const compatibilityErrors = compatibilityReportDb?.compatibility_report?.errors || []
+  const compatibilityWarnings = compatibilityReportDb?.compatibility_report?.warnings || []
 
   // ===================== Рендер строки подключения =====================
 
@@ -894,6 +897,13 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
                             >
                               <CheckCircle className="mr-2 h-4 w-4" />
                               Проверить совместимость
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => setCompatibilityReportDb(logicalDb)}
+                              disabled={!logicalDb.compatibility_report}
+                            >
+                              <AlertCircle className="mr-2 h-4 w-4" />
+                              Отчёт совместимости
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() => {
@@ -1454,6 +1464,76 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
                 <Database className="mr-2 h-4 w-4" />
               )}
               Сгенерировать сценарии
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(compatibilityReportDb)} onOpenChange={(open) => !open && setCompatibilityReportDb(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Отчёт совместимости</DialogTitle>
+            <DialogDescription>
+              {compatibilityReportDb?.name} · {formatCompatibilityStatus(compatibilityReportDb?.compatibility_status)}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="grid gap-2 rounded-lg border bg-muted/30 p-3 text-sm sm:grid-cols-2">
+              <div>
+                <div className="text-muted-foreground">Reference connection</div>
+                <div className="font-medium">{compatibilityReportDb?.reference_connection_name || "не выбран"}</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground">Режим проверки</div>
+                <div className="font-medium">{compatibilityReportDb?.compatibility_report?.mode || "unknown"}</div>
+              </div>
+            </div>
+
+            <div className="max-h-[50vh] space-y-4 overflow-y-auto pr-1">
+              <div>
+                <div className="mb-2 font-medium text-sm">
+                  Ошибки ({compatibilityErrors.length})
+                </div>
+                {compatibilityErrors.length > 0 ? (
+                  <ul className="space-y-2 text-sm text-red-700">
+                    {compatibilityErrors.map((error) => (
+                      <li key={error} className="rounded-md border border-red-500/30 bg-red-500/10 p-2">
+                        {error}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="rounded-md border bg-muted/20 p-2 text-sm text-muted-foreground">
+                    Ошибок совместимости нет.
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div className="mb-2 font-medium text-sm">
+                  Предупреждения ({compatibilityWarnings.length})
+                </div>
+                {compatibilityWarnings.length > 0 ? (
+                  <ul className="space-y-2 text-sm text-amber-700">
+                    {compatibilityWarnings.map((warning) => (
+                      <li key={warning} className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2">
+                        {warning}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="rounded-md border bg-muted/20 p-2 text-sm text-muted-foreground">
+                    Предупреждений нет.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCompatibilityReportDb(null)}>
+              Закрыть
             </Button>
           </DialogFooter>
         </DialogContent>
