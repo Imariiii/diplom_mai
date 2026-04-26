@@ -9,6 +9,7 @@ if (typeof process.loadEnvFile === "function" && existsSync(rootEnvPath)) {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: "standalone",
   typescript: {
     ignoreBuildErrors: true,
   },
