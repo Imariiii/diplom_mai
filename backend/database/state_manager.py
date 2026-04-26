@@ -5,11 +5,11 @@
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Any
+from typing import Dict, List, Optional, Set
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy import text
 
-from backend.core.config import get_restore_config
+from backend.core.config import RestoreRuntimeConfig, settings
 from backend.database.query_analyzer import QueryAnalyzer
 from backend.database.backup_strategies import BackupInfo, BackupStrategy, SizeEstimate, SqlBackupStrategy
 from backend.database.dialects import get_dialect
@@ -51,8 +51,8 @@ class DatabaseStateManager:
     6. Очистка
     """
     
-    def __init__(self, config: Dict[str, Any] = None):
-        self.config = config or get_restore_config()
+    def __init__(self, config: Optional[RestoreRuntimeConfig] = None):
+        self.config = config or RestoreRuntimeConfig.from_settings(settings)
         self._analyzer = QueryAnalyzer()
         self._verifier = StateVerifier(self.config)
         self._strategy = self._create_strategy()
@@ -76,7 +76,7 @@ class DatabaseStateManager:
 
     def _create_strategy(self) -> BackupStrategy:
         """Создать стратегию бэкапа по текущей конфигурации."""
-        strategy_name = self.config.get("default_strategy", "sql")
+        strategy_name = self.config.default_strategy
         print(f"[BACKUP] Конфигурация: запрошена стратегия={strategy_name!r}")
         strategy = self._build_strategy(strategy_name)
         strategy_label = "Native (pg_dump / mysqldump / mariadb-dump)" if type(strategy).__name__ != "SqlBackupStrategy" else "SQL (CREATE TABLE AS SELECT)"
@@ -131,7 +131,7 @@ class DatabaseStateManager:
     
     def _refresh_config(self):
         """Перечитать конфигурацию из актуального состояния"""
-        self.config = get_restore_config()
+        self.config = RestoreRuntimeConfig.from_settings(settings)
         self._verifier = StateVerifier(self.config)
         self._strategy = self._create_strategy()
 
@@ -203,7 +203,7 @@ class DatabaseStateManager:
         warnings = []
         
         # Проверяем остаточные backup-таблицы от предыдущих падений
-        prefix = self.config.get("backup_table_prefix", "_loadtest_backup_")
+        prefix = self.config.backup_table_prefix
         existing_backups = [t for t in all_tables if t.startswith(prefix)]
         if existing_backups:
             print(f"[BACKUP] [{dbms_type}] ПРЕДУПРЕЖДЕНИЕ: найдены остатки предыдущего бэкапа: {existing_backups}")
@@ -222,7 +222,7 @@ class DatabaseStateManager:
         )
         
         # Проверяем пороги
-        if size_estimate.total_rows > self.config.get("large_table_confirm_threshold", 10_000_000):
+        if size_estimate.total_rows > self.config.large_table_confirm_threshold:
             msg = (
                 f"Very large backup: {size_estimate.total_rows:,} rows total. "
                 f"Consider using native dump strategy when excluding large tables."
@@ -315,7 +315,7 @@ class DatabaseStateManager:
                 verified = True
                 verify_result = None
                 
-                if self.config.get("verify_after_restore", True):
+                if self.config.verify_after_restore:
                     print(f"[RESTORE] [{dbms_type}] Верификация состояния...")
                     post_fingerprint = await self._verifier.capture_fingerprint(
                         engine, prepare_result.backup_info.tables
@@ -461,7 +461,7 @@ class DatabaseStateManager:
             # Верификация
             verified = True
             verify_result = None
-            if self.config.get("verify_after_restore", True):
+            if self.config.verify_after_restore:
                 print(f"[RESTORE] [{dbms_type}] Верификация состояния...")
                 post_fingerprint = await self._verifier.capture_fingerprint(
                     engine, backup_info.tables
@@ -533,7 +533,7 @@ class DatabaseStateManager:
         print(f"[BACKUP] [{dbms_type}] Очистка бэкапов | стратегия={strategy_label}")
 
         # SQL-стратегия: удаляем backup-таблицы из БД
-        prefix = self.config.get("backup_table_prefix", "_loadtest_backup_")
+        prefix = self.config.backup_table_prefix
         all_tables = await self._get_all_tables(engine, dbms_type)
         backup_tables = [t for t in all_tables if t.startswith(prefix)]
         
@@ -580,7 +580,7 @@ class DatabaseStateManager:
         Returns:
             Словарь с информацией о состоянии
         """
-        prefix = self.config.get("backup_table_prefix", "_loadtest_backup_")
+        prefix = self.config.backup_table_prefix
         dialect = get_dialect(dbms_type)
         
         async with engine.connect() as conn:

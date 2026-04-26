@@ -136,13 +136,12 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         repository=test_repository if HISTORY_ENABLED and test_repository else None,
     )
     
-    from backend.core.config import get_restore_config
-    restore_config = get_restore_config()
+    from backend.core.config import settings
     
     test_tester = LoadTester(connection_repo=connection_repository)
     test_tester.set_streaming_callback(streaming_callback)
     test_tester.set_backup_callback(streaming_callback.on_backup_status)
-    test_tester.auto_restore = restore_config.get("auto_restore", True)
+    test_tester.auto_restore = settings.restore.auto_restore
     
     # Разрешаем connection_ids в качестве уникальных ключей подключения
     connection_ids = request.connection_ids

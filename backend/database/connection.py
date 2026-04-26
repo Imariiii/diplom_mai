@@ -16,7 +16,7 @@ from backend.database.sql_utils import register_engine_dbms_type
 class DatabaseConnection:
     """Класс для управления подключениями к базам данных"""
     
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self):
         self.engines: Dict[str, AsyncEngine] = {}
         self._pool_sizes: Dict[str, int] = {}
         self._connection_configs: Dict[str, Dict[str, Any]] = {}

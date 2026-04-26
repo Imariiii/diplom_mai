@@ -35,7 +35,7 @@ from backend import initialize
 async def lifespan(app: FastAPI):
     """Запуск миграций Alembic при старте приложения."""
     from backend.core.config import settings as app_settings
-    db_url = app_settings.history_db_url
+    db_url = app_settings.database.history_db_url
     if db_url:
         print("[STARTUP] Запуск миграций Alembic...")
         try:

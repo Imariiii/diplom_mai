@@ -106,6 +106,43 @@ const CAPABILITY_LABELS: Record<string, string> = {
 
 type AddMode = "new-db" | "existing-db" | null
 
+function translateConnectionError(raw: string): string {
+  const msg = raw.toLowerCase()
+
+  if (msg.includes("connection refused") || msg.includes("errno 111") || msg.includes("could not connect to server")) {
+    return "Не удалось подключиться: сервер недоступен. Проверьте хост и порт."
+  }
+  if (msg.includes("access denied") || msg.includes("authentication failed") || msg.includes("password authentication failed")) {
+    return "Ошибка аутентификации: неверное имя пользователя или пароль."
+  }
+  if (msg.includes("unknown database") || msg.includes("does not exist")) {
+    return "База данных не найдена. Проверьте название базы данных."
+  }
+  if (msg.includes("unknown mysql server host") || msg.includes("could not translate host") || msg.includes("name or service not known") || msg.includes("nodename nor servname")) {
+    return "Хост не найден. Проверьте адрес сервера."
+  }
+  if (msg.includes("timed out") || msg.includes("timeout")) {
+    return "Превышено время ожидания подключения. Проверьте хост и порт."
+  }
+  if (msg.includes("no route to host")) {
+    return "Нет маршрута до хоста. Проверьте сетевые настройки."
+  }
+  if (msg.includes("ssl") || msg.includes("certificate")) {
+    return "Ошибка SSL-соединения. Проверьте настройки шифрования."
+  }
+  if (msg.includes("too many connections") || msg.includes("max_connections")) {
+    return "Превышено максимальное число подключений к серверу."
+  }
+
+  // Убираем технический префикс, если он есть
+  const prefixMatch = raw.match(/^Ошибка подключения:\s*([\s\S]+)$/)
+  if (prefixMatch) {
+    return `Ошибка подключения. Подробности: ${prefixMatch[1].slice(0, 120)}`
+  }
+
+  return raw
+}
+
 export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProps) {
   // --- Состояние логических БД ---
   // Только метаданные (id, name, description) — без вложенных connections
@@ -148,7 +185,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
   const [testingFormLoading, setTestingFormLoading] = useState(false)
   const [testingId, setTestingId] = useState<string | null>(null)
 
-  // --- Диалог профиля/bundle ---
+  // --- Диалог профиля/сценариев ---
   const [schemaDialogOpen, setSchemaDialogOpen] = useState(false)
   const [schemaPreviewLogicalDb, setSchemaPreviewLogicalDb] = useState<LogicalDatabase | null>(null)
   const [schemaPreviewConnection, setSchemaPreviewConnection] = useState<DatabaseConnection | null>(null)
@@ -327,16 +364,19 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
         database: formData.database,
         dbms_type: formData.dbms_type,
       })
-      setTestingForm(result)
-      if (result.success) toast.success(result.message)
-      else toast.error(result.message)
+      const displayMessage = result.success ? result.message : translateConnectionError(result.message)
+      setTestingForm({ ...result, message: displayMessage })
+      if (result.success) toast.success(displayMessage)
+      else toast.error(displayMessage)
     } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : "Ошибка проверки подключения"
+      const displayMessage = translateConnectionError(rawMessage)
       setTestingForm({
         success: false,
-        message: error instanceof Error ? error.message : "Ошибка тестирования",
+        message: displayMessage,
         response_time_ms: null,
       })
-      toast.error("Ошибка тестирования подключения")
+      toast.error(displayMessage)
     } finally {
       setTestingFormLoading(false)
     }
@@ -395,10 +435,11 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
       if (result.success) {
         toast.success(`${result.message} (${result.response_time_ms?.toFixed(0)} мс)`)
       } else {
-        toast.error(result.message)
+        toast.error(translateConnectionError(result.message))
       }
-    } catch {
-      toast.error("Ошибка тестирования подключения")
+    } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : "Ошибка проверки подключения"
+      toast.error(translateConnectionError(rawMessage))
     } finally {
       setTestingId(null)
     }
@@ -555,7 +596,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
     try {
       const updatedTarget = await assignProfile()
       const profileId = updatedTarget?.schema_profile_id
-      if (!profileId) throw new Error("Не удалось определить profile_id для генерации bundle'ов")
+      if (!profileId) throw new Error("Не удалось определить профиль для генерации сценариев")
 
       const result = schemaPreviewLogicalDb
         ? await apiClient.generateLogicalDatabaseBundles(schemaPreviewLogicalDb.id, {
@@ -567,12 +608,12 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
             scenario_template_ids: selectedScenarioTypes,
           })
 
-      toast.success(`Сгенерировано bundle'ов: ${result.generated_count}`)
+      toast.success(`Сгенерировано сценариев: ${result.generated_count}`)
       await loadAll()
       setSchemaDialogOpen(false)
     } catch (error) {
-      console.error("Ошибка генерации bundle'ов:", error)
-      toast.error(error instanceof Error ? error.message : "Не удалось сгенерировать bundle'ы")
+      console.error("Ошибка генерации сценариев:", error)
+      toast.error(error instanceof Error ? error.message : "Не удалось сгенерировать сценарии")
     } finally {
       setGeneratingScenarios(false)
     }
@@ -600,8 +641,8 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
             {conn.host}:{conn.port}/{conn.database}
           </div>
           <div className="text-xs text-muted-foreground">
-            profile: {conn.schema_profile_name || conn.detected_profile_name || "не назначен"}
-            {conn.logical_database_id ? " · inherited" : ""}
+            профиль: {conn.schema_profile_name || conn.detected_profile_name || "не назначен"}
+            {conn.logical_database_id ? " · унаследован" : ""}
           </div>
         </div>
         {conn.group && (
@@ -618,7 +659,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
           size="sm"
           onClick={() => testConnection(conn.id)}
           disabled={testingId === conn.id}
-          title="Тестировать"
+          title="Проверить подключение"
         >
           {testingId === conn.id ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -631,7 +672,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
             variant="ghost"
             size="sm"
             onClick={() => openScenarioGenerationDialog(conn)}
-            title="Профиль схемы и bundle'ы"
+            title="Профиль схемы и сценарии"
           >
             <Database className="h-4 w-4" />
           </Button>
@@ -762,7 +803,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
                               disabled={dbConnections.length === 0}
                             >
                               <Database className="mr-2 h-4 w-4" />
-                              Профиль и сценарии
+                              Профиль и сценарии тестирования
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() => {
@@ -1074,7 +1115,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
               ) : (
                 <Play className="mr-2 h-4 w-4" />
               )}
-              Тестировать
+              Проверить
             </Button>
             <Button onClick={saveConnection}>
               {editingConnection ? "Сохранить" : "Создать"}
@@ -1083,24 +1124,24 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
         </DialogContent>
       </Dialog>
 
-      {/* ===== Диалог: Профиль схемы и bundle'ы ===== */}
+      {/* ===== Диалог: Профиль схемы и сценарии ===== */}
       <Dialog open={schemaDialogOpen} onOpenChange={setSchemaDialogOpen}>
-        <DialogContent className="max-h-[90vh] w-[95vw] max-w-5xl overflow-hidden p-0">
-          <DialogHeader className="px-6 pt-6">
+        <DialogContent className="max-h-[90vh] w-[95vw] max-w-5xl flex flex-col p-0">
+          <DialogHeader className="px-6 pt-6 shrink-0">
             <DialogTitle>
               {schemaPreviewLogicalDb
-                ? `Профиль схемы и bundle'ы для ${schemaPreviewLogicalDb.name}`
-                : `Профиль схемы и bundle'ы для ${schemaPreviewConnection?.name || "подключения"}`}
+                ? `Профиль схемы и сценарии для «${schemaPreviewLogicalDb.name}»`
+                : `Профиль схемы и сценарии для «${schemaPreviewConnection?.name || "подключения"}»`}
             </DialogTitle>
             <DialogDescription>
               {schemaPreviewLogicalDb
-                ? "Подтвердите профиль для базы данных и выберите reference connection для генерации bundle'ов"
-                : "Подтвердите или переопределите schema profile, затем сгенерируйте канонические SQL bundle'ы"}
+                ? "Подтвердите профиль для базы данных и выберите эталонное подключение для генерации сценариев"
+                : "Подтвердите или переопределите профиль схемы, затем сгенерируйте сценарии тестирования"}
             </DialogDescription>
           </DialogHeader>
 
-          <ScrollArea className="h-[calc(90vh-170px)] px-6">
-            <div className="space-y-4 pb-6">
+          <div className="flex-1 overflow-y-auto min-h-0 px-6">
+            <div className="space-y-4 py-4">
               {schemaLoading ? (
                 <div className="flex items-center justify-center py-12 text-muted-foreground">
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1134,7 +1175,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
                           </div>
                         </div>
                         <div className="space-y-2">
-                          <Label>Reference connection</Label>
+                          <Label>Эталонное подключение</Label>
                           <Select
                             value={schemaPreviewConnection?.id || ""}
                             onValueChange={(value) => { void handleSchemaReferenceConnectionChange(value) }}
@@ -1194,7 +1235,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
                             <SelectValue placeholder="Выберите профиль или создайте новый" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="custom">Создать / использовать suggested</SelectItem>
+                            <SelectItem value="custom">Создать / использовать предложенный</SelectItem>
                             {availableProfiles.map((profile) => (
                               <SelectItem key={profile.id} value={profile.id}>
                                 {profile.name}
@@ -1228,7 +1269,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
                   </div>
 
                   <div className="space-y-2">
-                    <Label>Logical scenario templates для генерации bundle'ов</Label>
+                    <Label>Типы сценариев для генерации</Label>
                     <div className="grid gap-2 md:grid-cols-2">
                       {GENERATABLE_SCENARIO_TYPES.map((scenarioType) => {
                         const available = schemaPreview.available_scenario_types.includes(scenarioType.value)
@@ -1300,9 +1341,9 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
                 </div>
               )}
             </div>
-          </ScrollArea>
+          </div>
 
-          <DialogFooter className="border-t px-6 py-4">
+          <DialogFooter className="border-t px-6 py-4 shrink-0">
             <Button variant="outline" onClick={() => setSchemaDialogOpen(false)} disabled={generatingScenarios}>
               Отмена
             </Button>
@@ -1322,7 +1363,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
               ) : (
                 <Database className="mr-2 h-4 w-4" />
               )}
-              Сгенерировать bundle'ы
+              Сгенерировать сценарии
             </Button>
           </DialogFooter>
         </DialogContent>

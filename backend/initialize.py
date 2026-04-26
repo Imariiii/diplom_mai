@@ -22,9 +22,9 @@ HISTORY_ENABLED = False
 def get_history_db_url():
     """Получить URL для базы данных истории из .env"""
     print("[HISTORY_DB] Попытка настройки подключения к БД истории...")
-    if settings.history_db_url:
+    if settings.database.history_db_url:
         print("[HISTORY_DB] Используется HISTORY_DATABASE_URL из .env")
-        return settings.history_db_url
+        return settings.database.history_db_url
     print("[HISTORY_DB] HISTORY_DATABASE_URL не задан")
     return None
 

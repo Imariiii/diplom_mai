@@ -71,7 +71,22 @@ class ApiClient {
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({ detail: response.statusText }))
-        throw new Error(error.detail || `HTTP error! status: ${response.status}`)
+        let message: string
+        if (Array.isArray(error.detail)) {
+          // Pydantic validation errors (422): detail — массив объектов
+          if (response.status === 422) {
+            message = "Заполните все обязательные поля корректно"
+          } else {
+            message = (error.detail as Array<{ msg?: string }>)
+              .map((e) => e.msg ?? String(e))
+              .join('; ')
+          }
+        } else if (error.detail && typeof error.detail === 'object') {
+          message = JSON.stringify(error.detail)
+        } else {
+          message = error.detail || `Ошибка сервера: ${response.status}`
+        }
+        throw new Error(message)
       }
 
       return await response.json()

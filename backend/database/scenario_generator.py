@@ -29,123 +29,6 @@ SCENARIO_QUERY_LIMITS: Dict[str, int] = {
     "olap": 5,
 }
 
-LEGACY_SCENARIO_INDEX_HINTS: Dict[str, List[Dict[str, Any]]] = {
-    "read_only": [
-        {
-            "table_name": "film_category",
-            "column_names": "film_id",
-            "index_type": "btree",
-            "description": "Ускоряет JOIN между film и film_category",
-        },
-        {
-            "table_name": "payment",
-            "column_names": "rental_id",
-            "index_type": "btree",
-            "description": "Ускоряет JOIN между rental и payment",
-        },
-        {
-            "table_name": "rental",
-            "column_names": "customer_id",
-            "index_type": "btree",
-            "description": "Ускоряет фильтрацию rental по customer_id",
-        },
-    ],
-    "write_only": [
-        {
-            "table_name": "actor",
-            "column_names": "last_update",
-            "index_type": "btree",
-            "description": "Дополнительный индекс для сценария write_only",
-        },
-        {
-            "table_name": "film",
-            "column_names": "rental_rate",
-            "index_type": "btree",
-            "description": "Дополнительный индекс для сценария write_only",
-        },
-        {
-            "table_name": "customer",
-            "column_names": "last_update",
-            "index_type": "btree",
-            "description": "Дополнительный индекс для сценария write_only",
-        },
-    ],
-    "mixed_light": [
-        {
-            "table_name": "film_category",
-            "column_names": "film_id",
-            "index_type": "btree",
-            "description": "Ускоряет JOIN между film и film_category",
-        },
-        {
-            "table_name": "rental",
-            "column_names": "customer_id",
-            "index_type": "btree",
-            "description": "Ускоряет фильтрацию rental по customer_id",
-        },
-        {
-            "table_name": "film",
-            "column_names": "rental_rate",
-            "index_type": "btree",
-            "description": "Дополнительный индекс для смешанной нагрузки",
-        },
-    ],
-    "mixed_heavy": [
-        {
-            "table_name": "film_category",
-            "column_names": "film_id",
-            "index_type": "btree",
-            "description": "Ускоряет JOIN между film и film_category",
-        },
-        {
-            "table_name": "rental",
-            "column_names": "customer_id",
-            "index_type": "btree",
-            "description": "Ускоряет фильтрацию rental по customer_id",
-        },
-        {
-            "table_name": "film",
-            "column_names": "rental_rate",
-            "index_type": "btree",
-            "description": "Дополнительный индекс для смешанной нагрузки",
-        },
-        {
-            "table_name": "customer",
-            "column_names": "last_update",
-            "index_type": "btree",
-            "description": "Дополнительный индекс для heavy-нагрузки",
-        },
-    ],
-    "oltp": [
-        {
-            "table_name": "inventory",
-            "column_names": "film_id,store_id",
-            "index_type": "btree",
-            "description": "Композитный индекс для OLTP-сценария",
-        },
-    ],
-    "olap": [
-        {
-            "table_name": "rental",
-            "column_names": "rental_date",
-            "index_type": "btree",
-            "description": "Ускоряет фильтрацию по rental_date",
-        },
-        {
-            "table_name": "payment",
-            "column_names": "rental_id,amount",
-            "index_type": "btree",
-            "description": "Ускоряет JOIN и агрегацию по payment",
-        },
-        {
-            "table_name": "film_category",
-            "column_names": "category_id,film_id",
-            "index_type": "btree",
-            "description": "Ускоряет аналитический JOIN по категориям",
-        },
-    ],
-}
-
 
 class ScenarioGenerator:
     """Генератор сценариев тестирования на базе метаданных схемы."""
@@ -298,7 +181,7 @@ class ScenarioGenerator:
             used_templates.add(template.id)
             query_types_seen.add(template.query_type)
 
-        indexes = self._merge_index_hints(
+        indexes = self._deduplicate_index_hints(
             metadata=metadata,
             scenario_type=scenario_type,
             runtime_hints=index_hints,
@@ -875,21 +758,17 @@ class ScenarioGenerator:
             if not key.startswith("_")
         }
 
-    def _merge_index_hints(
+    def _deduplicate_index_hints(
         self,
         metadata: SchemaMetadata,
         scenario_type: str,
         runtime_hints: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        """Объединить legacy и автоматически выведенные индексные подсказки."""
-        merged_hints: List[Dict[str, Any]] = []
-        merged_hints.extend(self._legacy_index_hints_for_schema(metadata, scenario_type))
-        merged_hints.extend(runtime_hints)
-
+        """Нормализовать индексные подсказки, полученные из шаблонов запросов."""
         deduped: List[Dict[str, Any]] = []
         seen: Set[Tuple[str, str]] = set()
 
-        for index_hint in merged_hints:
+        for index_hint in runtime_hints:
             table_name = index_hint["table_name"]
             table = metadata.tables.get(table_name)
             if not table:
@@ -918,18 +797,6 @@ class ScenarioGenerator:
             seen.add(key)
 
         return deduped
-
-    def _legacy_index_hints_for_schema(
-        self,
-        metadata: SchemaMetadata,
-        scenario_type: str,
-    ) -> List[Dict[str, Any]]:
-        """Взять legacy index hints, если соответствующие таблицы присутствуют в схеме."""
-        hints: List[Dict[str, Any]] = []
-        for hint in LEGACY_SCENARIO_INDEX_HINTS.get(scenario_type, []):
-            if hint["table_name"] in metadata.tables:
-                hints.append(dict(hint))
-        return hints
 
     def _is_redundant_index(self, table: TableInfo, normalized_columns: str) -> bool:
         """Пропустить индексы, которые почти наверняка уже есть из-за PK/UNIQUE."""

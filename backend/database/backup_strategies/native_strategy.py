@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy import text
 
 from . import BackupStrategy, BackupInfo, SizeEstimate
+from backend.core.config import RestoreRuntimeConfig
 from backend.core.docker import resolve_host
 from backend.database.dialects import get_dialect
 from backend.database.sql_utils import resolve_dbms_type
@@ -28,9 +29,9 @@ class NativeDumpStrategy(BackupStrategy):
     Требует наличия соответствующих утилит в PATH.
     """
     
-    def __init__(self, config: Dict = None):
+    def __init__(self, config: Optional[RestoreRuntimeConfig] = None):
         super().__init__(config)
-        self.snapshots_dir = config.get("snapshots_dir", "./snapshots") if config else "./snapshots"
+        self.snapshots_dir = self.config.snapshots_dir
         os.makedirs(self.snapshots_dir, exist_ok=True)
     
     def is_available(self) -> bool:

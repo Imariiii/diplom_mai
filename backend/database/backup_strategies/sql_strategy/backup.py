@@ -2,12 +2,13 @@
 Логика создания backup для SQL Backup Strategy
 """
 import uuid
-from typing import Dict, Set, List
+from typing import Set
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy import text
 
 from .. import BackupInfo, SizeEstimate
 from .helpers import save_auto_values
+from backend.core.config import RestoreRuntimeConfig
 from backend.database.dialects import get_dialect
 from backend.database.sql_utils import get_row_count, get_table_size, resolve_dbms_type
 
@@ -16,7 +17,7 @@ async def create_backup_logic(
     engine: AsyncEngine,
     tables: Set[str],
     get_backup_table_name_func,
-    config: Dict
+    config: RestoreRuntimeConfig
 ) -> BackupInfo:
     """
     Логика создания бэкапа таблиц через CREATE TABLE AS SELECT
@@ -146,7 +147,7 @@ async def cleanup_backup(engine: AsyncEngine, tables: Set[str], get_backup_table
 async def estimate_size_logic(
     engine: AsyncEngine,
     tables: Set[str],
-    config: Dict
+    config: RestoreRuntimeConfig
 ) -> SizeEstimate:
     """
     Оценить размер бэкапа
@@ -164,8 +165,8 @@ async def estimate_size_logic(
     total_size = 0
     warnings = []
     
-    warning_threshold = config.get("large_table_warning_threshold", 1_000_000)
-    confirm_threshold = config.get("large_table_confirm_threshold", 10_000_000)
+    warning_threshold = config.large_table_warning_threshold
+    confirm_threshold = config.large_table_confirm_threshold
     
     for table in tables:
         # Получаем количество строк

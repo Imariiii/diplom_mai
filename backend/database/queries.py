@@ -9,7 +9,7 @@ from backend.core.config import settings
 class QueryManager:
     """Класс для управления тестовыми запросами"""
     
-    def __init__(self, config_path: str = None):
+    def __init__(self):
         self.queries = self._load_queries()
     
     def _load_queries(self) -> List[Dict[str, str]]:

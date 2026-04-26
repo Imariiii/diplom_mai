@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Set
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy import text
 
+from backend.core.config import RestoreRuntimeConfig, settings
 from backend.database.dialects import get_dialect
 from backend.database.sql_utils import get_row_count, resolve_dbms_type
 
@@ -84,10 +85,10 @@ class VerifyResult:
 class StateVerifier:
     """Верификатор состояния базы данных"""
     
-    def __init__(self, config: Optional[dict] = None):
-        self.config = config or {}
-        self.verify_checksums = self.config.get("verify_checksums", False)
-        self.checksum_max_rows = self.config.get("checksum_max_rows", 100_000)
+    def __init__(self, config: Optional[RestoreRuntimeConfig] = None):
+        self.config = config or RestoreRuntimeConfig.from_settings(settings)
+        self.verify_checksums = self.config.verify_checksums
+        self.checksum_max_rows = self.config.checksum_max_rows
     
     async def capture_fingerprint(self, engine: AsyncEngine, tables: Set[str]) -> StateFingerprint:
         """

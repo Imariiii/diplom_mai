@@ -5,7 +5,7 @@
 - Переменные окружения
 - Файл .env
 """
-import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -127,8 +127,8 @@ class Settings(BaseSettings):
     Пример использования:
         from backend.core.config import settings
         
-        print(settings.history_db_url)
-        print(settings.auto_restore)    # True
+        print(settings.database.history_db_url)
+        print(settings.restore.auto_restore)    # True
     """
 
     model_config = SettingsConfigDict(
@@ -145,43 +145,6 @@ class Settings(BaseSettings):
     api: APISettings = Field(default_factory=APISettings)
     test: TestSettings = Field(default_factory=TestSettings)
 
-    # Прокси- свойства для обратной совместимости
-    
-    @property
-    def history_db_url(self) -> Optional[str]:
-        """Получить URL для подключения к БД истории"""
-        return self.database.history_db_url
-    
-    @property
-    def auto_restore(self) -> bool:
-        """Автоматически восстанавливать БД после write-тестов"""
-        return self.restore.auto_restore
-    
-    @property
-    def verify_after_restore(self) -> bool:
-        """Верифицировать состояние после восстановления"""
-        return self.restore.verify_after_restore
-    
-    @property
-    def default_strategy(self) -> str:
-        """Стратегия по умолчанию"""
-        return self.restore.default_strategy
-    
-    @property
-    def operation_timeout(self) -> int:
-        """Таймаут на операцию backup/restore"""
-        return self.restore.operation_timeout
-    
-    @property
-    def snapshots_dir(self) -> str:
-        """Директория для snapshots"""
-        return self.paths.snapshots_dir
-    
-    @property
-    def logs_dir(self) -> str:
-        """Директория для логов"""
-        return self.paths.logs_dir
-    
     def get_snapshots_dir(self) -> Path:
         """Получить абсолютный путь к директории snapshots"""
         return Path(self.paths.snapshots_dir).resolve()
@@ -194,7 +157,7 @@ class Settings(BaseSettings):
         """Преобразовать настройки в словарь"""
         return {
             "database": {
-                "history_db_url": self.history_db_url,
+                "history_db_url": self.database.history_db_url,
             },
             "restore": {
                 "default_strategy": self.restore.default_strategy,
@@ -227,70 +190,39 @@ class Settings(BaseSettings):
         }
 
 
+@dataclass
+class RestoreRuntimeConfig:
+    """Типизированная конфигурация восстановления для runtime-компонентов."""
+
+    default_strategy: str
+    auto_restore: bool
+    verify_after_restore: bool
+    large_table_warning_threshold: int
+    large_table_confirm_threshold: int
+    max_restore_retries: int
+    operation_timeout: int
+    snapshots_dir: str
+    backup_table_prefix: str
+    verify_checksums: bool
+    checksum_max_rows: int
+
+    @classmethod
+    def from_settings(cls, app_settings: Settings) -> "RestoreRuntimeConfig":
+        """Собрать runtime-конфигурацию из централизованных настроек."""
+        return cls(
+            default_strategy=app_settings.restore.default_strategy,
+            auto_restore=app_settings.restore.auto_restore,
+            verify_after_restore=app_settings.restore.verify_after_restore,
+            large_table_warning_threshold=app_settings.restore.large_table_warning_threshold,
+            large_table_confirm_threshold=app_settings.restore.large_table_confirm_threshold,
+            max_restore_retries=app_settings.restore.max_restore_retries,
+            operation_timeout=app_settings.restore.operation_timeout,
+            snapshots_dir=app_settings.paths.snapshots_dir,
+            backup_table_prefix=app_settings.restore.backup_table_prefix,
+            verify_checksums=app_settings.restore.verify_checksums,
+            checksum_max_rows=app_settings.restore.checksum_max_rows,
+        )
+
+
 # Глобальный экземпляр настроек
 settings = Settings()
-
-
-# ============================================================
-# ОБРАТНАЯ СОВМЕСТИМОСТЬ
-# ============================================================
-
-# Сохраняем старый RESTORE_CONFIG для обратной совместимости
-RESTORE_CONFIG: Dict[str, Any] = {
-    "default_strategy": settings.restore.default_strategy,
-    "auto_restore": settings.restore.auto_restore,
-    "verify_after_restore": settings.restore.verify_after_restore,
-    "large_table_warning_threshold": settings.restore.large_table_warning_threshold,
-    "large_table_confirm_threshold": settings.restore.large_table_confirm_threshold,
-    "max_restore_retries": settings.restore.max_restore_retries,
-    "operation_timeout": settings.restore.operation_timeout,
-    "snapshots_dir": settings.paths.snapshots_dir,
-    "backup_table_prefix": settings.restore.backup_table_prefix,
-    "verify_checksums": settings.restore.verify_checksums,
-    "checksum_max_rows": settings.restore.checksum_max_rows,
-}
-
-
-def get_restore_config() -> Dict[str, Any]:
-    """Получить конфигурацию отката БД (обратная совместимость)"""
-    return RESTORE_CONFIG.copy()
-
-
-def update_restore_config(updates: Dict[str, Any]) -> Dict[str, Any]:
-    """Обновить конфигурацию отката БД (обратная совместимость)"""
-    global RESTORE_CONFIG
-    
-    # Обновляем глобальный словарь
-    RESTORE_CONFIG.update(updates)
-    
-    # Также обновляем в singleton settings
-    for key, value in updates.items():
-        if hasattr(settings.restore, key):
-            setattr(settings.restore, key, value)
-        elif key == "snapshots_dir" and hasattr(settings.paths, key):
-            setattr(settings.paths, key, value)
-    
-    return RESTORE_CONFIG.copy()
-
-
-def reload_settings() -> Settings:
-    """Перезагрузить настройки из .env файла"""
-    global settings, RESTORE_CONFIG
-    settings = Settings()
-    
-    # Обновляем RESTORE_CONFIG
-    RESTORE_CONFIG = {
-        "default_strategy": settings.restore.default_strategy,
-        "auto_restore": settings.restore.auto_restore,
-        "verify_after_restore": settings.restore.verify_after_restore,
-        "large_table_warning_threshold": settings.restore.large_table_warning_threshold,
-        "large_table_confirm_threshold": settings.restore.large_table_confirm_threshold,
-        "max_restore_retries": settings.restore.max_restore_retries,
-        "operation_timeout": settings.restore.operation_timeout,
-        "snapshots_dir": settings.paths.snapshots_dir,
-        "backup_table_prefix": settings.restore.backup_table_prefix,
-        "verify_checksums": settings.restore.verify_checksums,
-        "checksum_max_rows": settings.restore.checksum_max_rows,
-    }
-    
-    return settings

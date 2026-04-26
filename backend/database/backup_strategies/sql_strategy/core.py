@@ -1,10 +1,11 @@
 """
 Основной класс SQL Backup Strategy
 """
-from typing import Dict, Set
+from typing import Optional, Set
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from .. import BackupStrategy, BackupInfo, SizeEstimate
+from backend.core.config import RestoreRuntimeConfig
 from . import backup as backup_module
 from . import restore as restore_module
 
@@ -17,7 +18,7 @@ class SqlBackupStrategy(BackupStrategy):
     Поддерживает PostgreSQL и MySQL
     """
     
-    def __init__(self, config: Dict = None):
+    def __init__(self, config: Optional[RestoreRuntimeConfig] = None):
         super().__init__(config)
         self._locks = {}  # Блокировки для каждой БД
     

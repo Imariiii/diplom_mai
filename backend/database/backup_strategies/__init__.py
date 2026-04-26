@@ -7,6 +7,8 @@ from datetime import datetime
 from typing import Dict, Set, Optional, Any
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from backend.core.config import RestoreRuntimeConfig, settings
+
 
 @dataclass
 class BackupInfo:
@@ -47,8 +49,8 @@ class SizeEstimate:
 class BackupStrategy(ABC):
     """Абстрактный базовый класс для стратегий бэкапа"""
     
-    def __init__(self, config: Dict[str, Any] = None):
-        self.config = config or {}
+    def __init__(self, config: Optional[RestoreRuntimeConfig] = None):
+        self.config = config or RestoreRuntimeConfig.from_settings(settings)
     
     @abstractmethod
     async def create_backup(self, engine: AsyncEngine, tables: Set[str]) -> BackupInfo:
@@ -111,8 +113,7 @@ class BackupStrategy(ABC):
     
     def get_backup_table_name(self, table: str) -> str:
         """Получить имя backup-таблицы для указанной таблицы"""
-        prefix = self.config.get("backup_table_prefix", "_loadtest_backup_")
-        return f"{prefix}{table}"
+        return f"{self.config.backup_table_prefix}{table}"
 
 
 # Экспортируем конкретные стратегии
