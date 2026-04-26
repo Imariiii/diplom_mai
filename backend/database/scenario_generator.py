@@ -18,7 +18,7 @@ DEFAULT_SCENARIO_TYPES: List[str] = [
     "olap",
 ]
 
-SCENARIO_GENERATOR_VERSION = "logical-scenario-generator-v5"
+SCENARIO_GENERATOR_VERSION = "logical-scenario-generator-v6"
 
 SCENARIO_QUERY_LIMITS: Dict[str, int] = {
     "read_only": 6,
@@ -717,11 +717,7 @@ class ScenarioGenerator:
                 )
             return (
                 self._placeholder(placeholder_name, column.category),
-                {
-                    "param_name": placeholder_name,
-                    "param_type": "random_string",
-                    "string_length": 16,
-                },
+                self._random_from_table_param(placeholder_name, table_name, column.name),
             )
 
         if column.category in {"integer", "numeric"}:
@@ -729,12 +725,7 @@ class ScenarioGenerator:
                 return None
             return (
                 self._placeholder(placeholder_name, column.category),
-                {
-                    "param_name": placeholder_name,
-                    "param_type": "random_int",
-                    "min_value": 1,
-                    "max_value": 1000000,
-                },
+                self._random_from_table_param(placeholder_name, table_name, column.name),
             )
 
         if column.category == "date":

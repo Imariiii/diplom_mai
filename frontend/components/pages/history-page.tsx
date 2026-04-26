@@ -25,7 +25,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { apiClient, type HistoryTestRun, type HistoryTestResult } from "@/lib/api"
+import { apiClient, type HistoryTestRun, type HistoryTestResult, type HistoryErrorReport } from "@/lib/api"
 import { useAppStore } from "@/lib/store"
 import { DB_NAMES, getDbColor, CHART_COLORS, METRIC_COLORS } from "@/lib/chart-colors"
 import type { LogicalDatabaseWithConnections } from "@/lib/types"
@@ -118,6 +118,8 @@ export function HistoryPage() {
 
   const [tests, setTests] = useState<HistoryTestRun[]>([])
   const [selectedTest, setSelectedTest] = useState<(HistoryTestRun & { results: HistoryTestResult[] }) | null>(null)
+  const [selectedTestErrors, setSelectedTestErrors] = useState<HistoryErrorReport | null>(null)
+  const [errorsLoading, setErrorsLoading] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [historyEnabled, setHistoryEnabled] = useState(true)
@@ -169,10 +171,19 @@ export function HistoryPage() {
 
   const fetchTestDetails = async (testId: string) => {
     try {
+      setSelectedTestErrors(null)
       const details = await apiClient.getHistoryTest(testId)
       setSelectedTest(details)
+      setErrorsLoading(true)
+      try {
+        const errorReport = await apiClient.getHistoryTestErrors(testId)
+        setSelectedTestErrors(errorReport)
+      } finally {
+        setErrorsLoading(false)
+      }
     } catch (err) {
       console.error("Error fetching test details:", err)
+      setErrorsLoading(false)
     }
   }
 
@@ -184,6 +195,7 @@ export function HistoryPage() {
       setSelectedIds((current) => current.filter((id) => id !== testId))
       if (selectedTest?.id === testId) {
         setSelectedTest(null)
+        setSelectedTestErrors(null)
       }
     } catch (err) {
       console.error("Error deleting test:", err)
@@ -349,7 +361,13 @@ export function HistoryPage() {
     return (
       <div className="p-6 space-y-6">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" onClick={() => setSelectedTest(null)}>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setSelectedTest(null)
+              setSelectedTestErrors(null)
+            }}
+          >
             <ChevronLeft className="h-4 w-4 mr-2" />
             Назад к списку
           </Button>
@@ -396,6 +414,14 @@ export function HistoryPage() {
         <Tabs value={activeDetailTab} onValueChange={setActiveDetailTab} className="space-y-4">
           <TabsList>
             <TabsTrigger value="results">Результаты</TabsTrigger>
+            <TabsTrigger value="errors" className="gap-1.5">
+              Ошибки
+              {(selectedTestErrors?.total_errors ?? 0) > 0 && (
+                <Badge variant="destructive" className="h-5 px-1.5 text-[10px]">
+                  {selectedTestErrors?.total_errors}
+                </Badge>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="charts">Графики</TabsTrigger>
             <TabsTrigger value="monitoring" className="gap-1.5">
               <Activity className="h-3.5 w-3.5" />
@@ -484,6 +510,77 @@ export function HistoryPage() {
                     )}
                   </TableBody>
                 </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="errors" className="space-y-4">
+            <Card className="bg-card border-border">
+              <CardHeader>
+                <CardTitle>Ошибки запросов</CardTitle>
+                <CardDescription>
+                  Сгруппированные ошибки, сохранённые в raw-метриках теста.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {errorsLoading && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Загрузка ошибок...
+                  </div>
+                )}
+                {!errorsLoading && (selectedTestErrors?.total_errors ?? 0) === 0 && (
+                  <p className="text-sm text-muted-foreground">Ошибок запросов не найдено.</p>
+                )}
+                {!errorsLoading && selectedTestErrors && selectedTestErrors.total_errors > 0 && (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                      <div className="rounded-lg border border-border bg-muted/20 p-3">
+                        <p className="text-muted-foreground">Всего ошибок</p>
+                        <p className="font-mono text-xl text-destructive">{selectedTestErrors.total_errors}</p>
+                      </div>
+                      <div className="rounded-lg border border-border bg-muted/20 p-3">
+                        <p className="text-muted-foreground">Групп ошибок</p>
+                        <p className="font-mono text-xl">{selectedTestErrors.groups.length}</p>
+                      </div>
+                      <div className="rounded-lg border border-border bg-muted/20 p-3">
+                        <p className="text-muted-foreground">Примеров показано</p>
+                        <p className="font-mono text-xl">{selectedTestErrors.samples.length}</p>
+                      </div>
+                    </div>
+
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Ошибка</TableHead>
+                          <TableHead>Запрос</TableHead>
+                          <TableHead className="text-right">Количество</TableHead>
+                          <TableHead>Первое появление</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {selectedTestErrors.groups.map((group) => (
+                          <TableRow key={`${group.message}-${group.query_id}`}>
+                            <TableCell className="max-w-[520px]">
+                              <p className="font-mono text-xs whitespace-pre-wrap break-words">{group.message}</p>
+                              {group.example && group.example !== group.message && (
+                                <details className="mt-2 text-xs text-muted-foreground">
+                                  <summary className="cursor-pointer">Показать пример</summary>
+                                  <pre className="mt-2 max-h-48 overflow-auto rounded bg-muted p-2 whitespace-pre-wrap">
+                                    {group.example}
+                                  </pre>
+                                </details>
+                              )}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">{group.query_id || "-"}</TableCell>
+                            <TableCell className="text-right font-mono text-destructive">{group.count}</TableCell>
+                            <TableCell className="font-mono text-xs">{formatDate(group.first_seen)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

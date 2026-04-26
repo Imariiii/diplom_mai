@@ -385,6 +385,62 @@ class TestRepository(BaseRepository):
             limit=limit,
         )
 
+    async def get_test_error_report(
+        self,
+        test_run_id: str,
+        db_type: Optional[str] = None,
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        """Получить сгруппированный отчёт по ошибкам raw-запросов теста."""
+        async with self.SessionLocal() as session:
+            query = (
+                select(MetricSample)
+                .where(
+                    MetricSample.test_run_id == uuid.UUID(test_run_id),
+                    MetricSample.is_error == 't',
+                    MetricSample.sample_type == 'request_latency',
+                )
+                .order_by(MetricSample.timestamp)
+            )
+
+            if db_type:
+                query = query.where(MetricSample.db_type == db_type)
+
+            result = await session.execute(query)
+            errors = [sample.to_dict() for sample in result.scalars().all()]
+
+        groups: Dict[str, Dict[str, Any]] = {}
+        for sample in errors:
+            group_key = self._error_group_key(sample.get('error_message'))
+            group = groups.setdefault(
+                group_key,
+                {
+                    'message': group_key,
+                    'count': 0,
+                    'db_type': sample.get('db_type'),
+                    'query_id': sample.get('query_id'),
+                    'first_seen': sample.get('timestamp'),
+                    'last_seen': sample.get('timestamp'),
+                    'example': sample.get('error_message'),
+                },
+            )
+            group['count'] += 1
+            group['last_seen'] = sample.get('timestamp')
+
+        return {
+            'test_run_id': test_run_id,
+            'total_errors': len(errors),
+            'groups': sorted(groups.values(), key=lambda item: item['count'], reverse=True),
+            'samples': errors[:limit],
+        }
+
+    def _error_group_key(self, error_message: Optional[str]) -> str:
+        """Нормализовать текст ошибки для группировки похожих исключений."""
+        if not error_message:
+            return "Ошибка без сообщения"
+        first_line = error_message.splitlines()[0].strip()
+        return first_line or "Ошибка без сообщения"
+
     # ==================== Comparison ====================
 
     async def compare_test_runs(

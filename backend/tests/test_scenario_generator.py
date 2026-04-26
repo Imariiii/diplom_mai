@@ -169,3 +169,69 @@ class TestScenarioGenerator:
                 "column_ref": "payment_date",
             }
         ]
+
+    def test_insert_uses_existing_values_for_non_unique_scalars(self):
+        table = TableInfo(
+            name="olist_geolocation_dataset",
+            row_count=100,
+            columns=[
+                ColumnInfo(
+                    name="geolocation_zip_code_prefix",
+                    data_type="int",
+                    is_nullable=False,
+                    category="integer",
+                ),
+                ColumnInfo(
+                    name="geolocation_lat",
+                    data_type="double",
+                    is_nullable=False,
+                    category="numeric",
+                ),
+                ColumnInfo(
+                    name="geolocation_lng",
+                    data_type="double",
+                    is_nullable=False,
+                    category="numeric",
+                ),
+                ColumnInfo(
+                    name="geolocation_city",
+                    data_type="varchar",
+                    is_nullable=False,
+                    category="string",
+                ),
+                ColumnInfo(
+                    name="geolocation_state",
+                    data_type="varchar",
+                    is_nullable=False,
+                    category="string",
+                ),
+            ],
+        )
+
+        query = ScenarioGenerator()._template_insert_basic(
+            metadata=SchemaMetadata(
+                connection_id="test",
+                connection_name="test",
+                dbms_type="mysql",
+                tables={"olist_geolocation_dataset": table},
+            ),
+            table=table,
+            template=QUERY_TEMPLATES_BY_ID["insert_basic"],
+        )
+
+        assert query is not None
+        assert all(param["param_type"] == "random_from_table" for param in query["params"])
+        assert {
+            (param["param_name"], param["table_ref"], param["column_ref"])
+            for param in query["params"]
+        } == {
+            (
+                "insert_geolocation_zip_code_prefix",
+                "olist_geolocation_dataset",
+                "geolocation_zip_code_prefix",
+            ),
+            ("insert_geolocation_lat", "olist_geolocation_dataset", "geolocation_lat"),
+            ("insert_geolocation_lng", "olist_geolocation_dataset", "geolocation_lng"),
+            ("insert_geolocation_city", "olist_geolocation_dataset", "geolocation_city"),
+            ("insert_geolocation_state", "olist_geolocation_dataset", "geolocation_state"),
+        }

@@ -20,6 +20,9 @@ export type {
   HistoryTestRun,
   HistoryTestResult,
   HistoryComparison,
+  HistoryErrorReport,
+  HistoryErrorGroup,
+  HistoryErrorSample,
 } from "./api/test"
 
 export type {
@@ -71,6 +74,7 @@ export {
   isHistoryEnabled,
   getHistoryTests,
   getHistoryTest,
+  getHistoryTestErrors,
   compareHistoryTests,
   deleteHistoryTest,
 } from "./api/test"

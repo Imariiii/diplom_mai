@@ -145,6 +145,39 @@ export interface HistoryComparison {
   }>>
 }
 
+export interface HistoryErrorGroup {
+  message: string
+  count: number
+  db_type: string | null
+  query_id: string | null
+  first_seen: string | null
+  last_seen: string | null
+  example: string | null
+}
+
+export interface HistoryErrorSample {
+  id: number
+  test_run_id: string
+  db_type: string
+  connection_key: string | null
+  query_id: string | null
+  sample_type: string
+  timestamp: string | null
+  latency_ms: number | null
+  throughput: number | null
+  tps: number | null
+  is_error: boolean
+  error_message: string | null
+  created_at: string | null
+}
+
+export interface HistoryErrorReport {
+  test_run_id: string
+  total_errors: number
+  groups: HistoryErrorGroup[]
+  samples: HistoryErrorSample[]
+}
+
 // ==================== Тестовые функции ====================
 
 export async function runAsyncTest(request: TestRequest & { test_name?: string }): Promise<AsyncTestResponse> {
@@ -178,6 +211,10 @@ export async function getHistoryTests(params?: {
 
 export async function getHistoryTest(testId: string): Promise<HistoryTestRun & { results: HistoryTestResult[] }> {
   return apiClient.getHistoryTest(testId)
+}
+
+export async function getHistoryTestErrors(testId: string): Promise<HistoryErrorReport> {
+  return apiClient.getHistoryTestErrors(testId)
 }
 
 export async function compareHistoryTests(testId1: string, testId2: string): Promise<HistoryComparison> {

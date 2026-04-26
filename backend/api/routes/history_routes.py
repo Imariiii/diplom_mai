@@ -79,6 +79,20 @@ async def get_history_test_time_series(
     return {"test_id": test_id, "points": points, "count": len(points)}
 
 
+@router.get("/tests/{test_id}/errors")
+async def get_history_test_errors(
+    test_id: str,
+    db_type: Optional[str] = Query(None, description="Фильтр по типу СУБД"),
+    limit: int = Query(100, le=1000, description="Максимальное количество примеров ошибок"),
+):
+    """Получить сгруппированные ошибки запросов для теста."""
+    repo = get_test_repository()
+    test = await repo.get_test_run(test_id)
+    if not test:
+        raise HTTPException(status_code=404, detail=f"Тест {test_id} не найден")
+    return await repo.get_test_error_report(test_id, db_type=db_type, limit=limit)
+
+
 @router.delete("/tests/{test_id}")
 async def delete_history_test(test_id: str):
     """Удалить тест из истории"""

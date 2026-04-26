@@ -145,6 +145,17 @@ class ApiClient {
     return this.request(`/history/tests/${testId}`)
   }
 
+  async getHistoryTestErrors(
+    testId: string,
+    params?: { db_type?: string; limit?: number },
+  ): Promise<any> {
+    const queryParams = new URLSearchParams()
+    if (params?.db_type) queryParams.set('db_type', params.db_type)
+    if (params?.limit) queryParams.set('limit', params.limit.toString())
+    const qs = queryParams.toString()
+    return this.request(`/history/tests/${testId}/errors${qs ? `?${qs}` : ''}`)
+  }
+
   async compareHistoryTests(testId1: string, testId2: string): Promise<any> {
     return this.request(`/history/compare/${testId1}/${testId2}`)
   }
