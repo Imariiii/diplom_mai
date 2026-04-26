@@ -169,6 +169,7 @@ export interface ScenarioParam {
   param_type: 'random_int' | 'random_from_table' | 'sequential_int' | 'uuid' | 'fixed' | 'random_string' | 'random_date' | string
   min_value: number | null
   max_value: number | null
+  fixed_value?: string | null
   string_pattern?: string | null
   table_ref: string | null
   column_ref: string | null

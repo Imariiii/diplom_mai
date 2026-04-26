@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import {
   AlertTriangle,
   ChevronDown,
+  Copy,
   Database,
   FileCode2,
   Layers,
@@ -34,6 +35,14 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -56,6 +65,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -67,6 +77,7 @@ function cloneParams(params: ScenarioParam[] = []): ScenarioParam[] {
     param_type: param.param_type,
     min_value: param.min_value ?? null,
     max_value: param.max_value ?? null,
+    fixed_value: param.fixed_value ?? null,
     string_pattern: param.string_pattern ?? null,
     table_ref: param.table_ref ?? null,
     column_ref: param.column_ref ?? null,
@@ -146,6 +157,25 @@ function statusTone(value: string | null | undefined) {
   return "border-border bg-muted text-muted-foreground"
 }
 
+function Hint({ text }: { text: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          className="ml-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground transition-colors hover:bg-primary/15 hover:text-primary"
+          tabIndex={-1}
+        >
+          ?
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-64 text-xs leading-relaxed">
+        {text}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 // ==================== Component ====================
 
 export function LogicalScenariosBrowser() {
@@ -163,6 +193,14 @@ export function LogicalScenariosBrowser() {
   const [saving, setSaving] = useState(false)
   const [expandedQueries, setExpandedQueries] = useState<Set<number>>(new Set())
   const [templateSearch, setTemplateSearch] = useState("")
+  const [creatingBundle, setCreatingBundle] = useState(false)
+  const [templateDialog, setTemplateDialog] = useState<{
+    open: boolean
+    mode: "create" | "copy" | "edit"
+    name: string
+    description: string
+    submitting: boolean
+  }>({ open: false, mode: "create", name: "", description: "", submitting: false })
 
   const selectedTemplate = useMemo(
     () => templates.find((t) => t.id === selectedTemplateId) || null,
@@ -370,7 +408,7 @@ export function LogicalScenariosBrowser() {
               ...q,
               params: [
                 ...(q.params || []),
-                { param_name: "", param_type: "random_int", min_value: 1, max_value: 1000, table_ref: null, column_ref: null, string_length: 16, current_value: 0, step: 1 },
+                { param_name: "", param_type: "random_int", min_value: 1, max_value: 1000, fixed_value: null, table_ref: null, column_ref: null, string_length: null, current_value: 0, step: 1 },
               ],
             }
           : q
@@ -431,30 +469,76 @@ export function LogicalScenariosBrowser() {
     })
   }
 
-  const handleCreateTemplate = async () => {
-    const name = window.prompt("Название нового шаблона сценария")
-    if (!name?.trim()) return
-    const description = window.prompt("Описание шаблона", "") || ""
-    try {
-      const template = await apiClient.createScenarioTemplate({ name: name.trim(), description }) as ScenarioTemplate
-      toast.success("Шаблон создан")
-      await reloadAll(template.id, selectedProfileId)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Не удалось создать шаблон")
-    }
+  const openTemplateDialog = (mode: "create" | "copy" | "edit") => {
+    setTemplateDialog({
+      open: true,
+      mode,
+      name:
+        mode === "create" ? "" :
+        mode === "copy" ? `Копия: ${selectedTemplate?.name ?? ""}` :
+        selectedTemplate?.name ?? "",
+      description:
+        mode === "create" ? "" :
+        selectedTemplate?.description ?? "",
+      submitting: false,
+    })
   }
 
-  const handleUpdateTemplate = async () => {
-    if (!selectedTemplate || selectedTemplate.is_builtin) return
-    const name = window.prompt("Новое название шаблона", selectedTemplate.name)
-    if (!name?.trim()) return
-    const description = window.prompt("Описание шаблона", selectedTemplate.description || "") || ""
+  const closeTemplateDialog = () =>
+    setTemplateDialog((s) => ({ ...s, open: false, submitting: false }))
+
+  const handleSubmitTemplateDialog = async () => {
+    const { mode, name, description } = templateDialog
+    if (!name.trim()) return
+    setTemplateDialog((s) => ({ ...s, submitting: true }))
     try {
-      await apiClient.updateScenarioTemplate(selectedTemplate.id, { name: name.trim(), description })
-      toast.success("Шаблон обновлён")
-      await reloadAll(selectedTemplate.id, selectedProfileId, selectedBundleId === "new" ? undefined : selectedBundleId)
+      if (mode === "create") {
+        const template = await apiClient.createScenarioTemplate({
+          name: name.trim(),
+          description: description.trim(),
+        }) as ScenarioTemplate
+        toast.success("Шаблон создан")
+        closeTemplateDialog()
+        await reloadAll(template.id, selectedProfileId)
+      } else if (mode === "copy") {
+        const template = await apiClient.createScenarioTemplate({
+          name: name.trim(),
+          description: description.trim(),
+        }) as ScenarioTemplate
+
+        // Если в текущем профиле есть активный bundle — копируем его содержимое
+        if (selectedBundle && selectedProfileId) {
+          const bundleData = bundleToDraft(selectedBundle)
+          await apiClient.createBundleVariant(selectedProfileId, {
+            ...bundleData,
+            scenario_template_id: template.id,
+            name: bundleData.name,
+            is_active: true,
+          })
+          toast.success("Шаблон и bundle скопированы")
+        } else {
+          toast.success("Шаблон скопирован")
+        }
+
+        closeTemplateDialog()
+        await reloadAll(template.id, selectedProfileId)
+      } else {
+        if (!selectedTemplate) return
+        await apiClient.updateScenarioTemplate(selectedTemplate.id, {
+          name: name.trim(),
+          description: description.trim(),
+        })
+        toast.success("Шаблон обновлён")
+        closeTemplateDialog()
+        await reloadAll(
+          selectedTemplate.id,
+          selectedProfileId,
+          selectedBundleId === "new" ? undefined : selectedBundleId
+        )
+      }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Не удалось обновить шаблон")
+      toast.error(error instanceof Error ? error.message : "Не удалось сохранить шаблон")
+      setTemplateDialog((s) => ({ ...s, submitting: false }))
     }
   }
 
@@ -485,6 +569,28 @@ export function LogicalScenariosBrowser() {
       toast.error(error instanceof Error ? error.message : "Не удалось сохранить bundle")
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleCreateBundle = async () => {
+    if (!selectedProfileId || !selectedTemplateId) return
+    setCreatingBundle(true)
+    try {
+      const created = await apiClient.createBundleVariant(selectedProfileId, {
+        scenario_template_id: selectedTemplateId,
+        name: "Bundle 1",
+        description: "",
+        generation_source: "manual_variant",
+        is_active: true,
+        queries: [],
+        indexes: [],
+      })
+      toast.success("Bundle создан — добавьте SQL-запросы и сохраните")
+      await loadProfile(selectedProfileId, selectedTemplateId, created.id)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось создать bundle")
+    } finally {
+      setCreatingBundle(false)
     }
   }
 
@@ -535,7 +641,7 @@ export function LogicalScenariosBrowser() {
           </div>
 
           <div className="flex items-center gap-2">
-            {selectedTemplate && !selectedTemplate.is_builtin && (
+            {selectedTemplate && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="sm">
@@ -545,15 +651,23 @@ export function LogicalScenariosBrowser() {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuLabel>Управление шаблоном</DropdownMenuLabel>
-                  <DropdownMenuItem onSelect={handleUpdateTemplate}>
-                    <Pencil className="h-4 w-4" />
-                    Переименовать
+                  <DropdownMenuItem onSelect={() => openTemplateDialog("copy")}>
+                    <Copy className="h-4 w-4" />
+                    Скопировать шаблон
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem variant="destructive" onSelect={handleDeleteTemplate}>
-                    <Trash2 className="h-4 w-4" />
-                    Удалить
-                  </DropdownMenuItem>
+                  {!selectedTemplate.is_builtin && (
+                    <>
+                      <DropdownMenuItem onSelect={() => openTemplateDialog("edit")}>
+                        <Pencil className="h-4 w-4" />
+                        Переименовать
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem variant="destructive" onSelect={handleDeleteTemplate}>
+                        <Trash2 className="h-4 w-4" />
+                        Удалить
+                      </DropdownMenuItem>
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
@@ -565,7 +679,7 @@ export function LogicalScenariosBrowser() {
               </Button>
             )}
 
-            <Button size="sm" onClick={handleCreateTemplate}>
+            <Button size="sm" onClick={() => openTemplateDialog("create")}>
               <Plus className="mr-2 h-3.5 w-3.5" />
               Новый шаблон
             </Button>
@@ -763,17 +877,26 @@ export function LogicalScenariosBrowser() {
                   </EmptyHeader>
                 </Empty>
               ) : !draftBundle ? (
-                <Empty className="rounded-xl border">
-                  <EmptyHeader>
-                    <EmptyMedia variant="icon">
-                      <AlertCircle className="h-5 w-5" />
-                    </EmptyMedia>
-                    <EmptyTitle>Вариантов пока нет</EmptyTitle>
-                    <EmptyDescription>
-                      Для выбранной пары профиль/шаблон ещё не создан bundle.
-                    </EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
+                <div className="rounded-xl border bg-card p-8 text-center space-y-4">
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-muted">
+                    <FileCode2 className="h-6 w-6 text-muted-foreground" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Bundle не создан</p>
+                    <p className="text-sm text-muted-foreground max-w-xs mx-auto">
+                      Для шаблона <span className="font-medium text-foreground">{selectedTemplate.name}</span> в этом профиле ещё нет bundle с SQL-запросами и индексами.
+                    </p>
+                  </div>
+                  <Button
+                    onClick={handleCreateBundle}
+                    disabled={creatingBundle || !selectedProfileId}
+                  >
+                    {creatingBundle
+                      ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      : <Plus className="mr-2 h-4 w-4" />}
+                    Создать bundle
+                  </Button>
+                </div>
               ) : (
                 <Tabs defaultValue="queries" className="space-y-4">
                   <TabsList className="h-auto w-full justify-start overflow-x-auto rounded-lg border border-border bg-card p-1">
@@ -847,103 +970,163 @@ export function LogicalScenariosBrowser() {
 
                             {isExpanded && (
                               <div className="border-t bg-muted/5 p-4 space-y-4">
-                                <div className="grid gap-3 md:grid-cols-3">
-                                  <div className="space-y-1.5">
-                                    <Label className="text-xs">Тип</Label>
-                                    <Input value={query.query_type} onChange={(e) => updateQuery(qi, { query_type: e.target.value })} />
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    <Label className="text-xs">Вес</Label>
-                                    <Input type="number" min={1} value={query.weight} onChange={(e) => updateQuery(qi, { weight: Number(e.target.value) || 1 })} />
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    <Label className="text-xs">Порядок</Label>
-                                    <Input type="number" min={0} value={query.order_index} onChange={(e) => updateQuery(qi, { order_index: Number(e.target.value) || 0 })} />
-                                  </div>
-                                </div>
-
                                 <div className="space-y-1.5">
-                                  <Label className="text-xs">Описание</Label>
-                                  <Input value={query.description || ""} onChange={(e) => updateQuery(qi, { description: e.target.value })} />
-                                </div>
-
-                                <div className="space-y-1.5">
-                                  <Label className="text-xs">SQL-шаблон</Label>
+                                  <Label className="text-xs flex items-center">
+                                    SQL-шаблон
+                                    <Hint text="SQL-запрос, исполняемый при тестировании. Параметры задаются через {param_name} и подставляются автоматически." />
+                                  </Label>
                                   <Textarea
                                     className="min-h-[120px] font-mono text-xs leading-relaxed"
+                                    placeholder="SELECT * FROM orders WHERE id = {order_id}"
                                     value={query.sql_template}
                                     onChange={(e) => updateQuery(qi, { sql_template: e.target.value })}
                                   />
                                 </div>
 
-                                {(query.params || []).length > 0 && (
-                                  <>
-                                    <Separator />
-                                    <div className="space-y-3">
-                                      <div className="flex items-center justify-between">
-                                        <span className="text-xs font-medium text-muted-foreground">Параметры ({(query.params || []).length})</span>
-                                        <Button variant="outline" size="sm" onClick={() => addParam(qi)}>
-                                          <Plus className="h-3 w-3" />
-                                          Параметр
-                                        </Button>
-                                      </div>
-                                      {(query.params || []).map((param, pi) => (
-                                        <div key={`p-${qi}-${pi}`} className="rounded-lg border bg-background p-3 space-y-3">
-                                          <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-4">
-                                            <div className="space-y-1">
-                                              <Label className="text-[11px]">Имя</Label>
-                                              <Input className="h-8 text-xs" value={param.param_name} onChange={(e) => updateParam(qi, pi, { param_name: e.target.value })} />
-                                            </div>
-                                            <div className="space-y-1">
-                                              <Label className="text-[11px]">Тип</Label>
-                                              <Input className="h-8 text-xs" value={param.param_type} onChange={(e) => updateParam(qi, pi, { param_type: e.target.value })} />
-                                            </div>
-                                            <div className="space-y-1">
-                                              <Label className="text-[11px]">Min</Label>
-                                              <Input className="h-8 text-xs" type="number" value={param.min_value ?? ""} onChange={(e) => updateParam(qi, pi, { min_value: e.target.value === "" ? null : Number(e.target.value) })} />
-                                            </div>
-                                            <div className="space-y-1">
-                                              <Label className="text-[11px]">Max</Label>
-                                              <Input className="h-8 text-xs" type="number" value={param.max_value ?? ""} onChange={(e) => updateParam(qi, pi, { max_value: e.target.value === "" ? null : Number(e.target.value) })} />
-                                            </div>
-                                            <div className="space-y-1">
-                                              <Label className="text-[11px]">Таблица</Label>
-                                              <Input className="h-8 text-xs" value={param.table_ref ?? ""} onChange={(e) => updateParam(qi, pi, { table_ref: e.target.value || null })} />
-                                            </div>
-                                            <div className="space-y-1">
-                                              <Label className="text-[11px]">Колонка</Label>
-                                              <Input className="h-8 text-xs" value={param.column_ref ?? ""} onChange={(e) => updateParam(qi, pi, { column_ref: e.target.value || null })} />
-                                            </div>
-                                            <div className="space-y-1">
-                                              <Label className="text-[11px]">Паттерн</Label>
-                                              <Input className="h-8 text-xs" value={param.string_pattern ?? ""} onChange={(e) => updateParam(qi, pi, { string_pattern: e.target.value || null })} />
-                                            </div>
-                                            <div className="space-y-1">
-                                              <Label className="text-[11px]">Длина</Label>
-                                              <Input className="h-8 text-xs" type="number" value={param.string_length ?? ""} onChange={(e) => updateParam(qi, pi, { string_length: e.target.value === "" ? null : Number(e.target.value) })} />
-                                            </div>
-                                          </div>
-                                          <div className="flex justify-end">
-                                            <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground" onClick={() => removeParam(qi, pi)}>
-                                              <Trash2 className="mr-1 h-3 w-3" />
-                                              Удалить
-                                            </Button>
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </>
-                                )}
+                                <div className="grid gap-3 sm:grid-cols-3">
+                                  <div className="space-y-1.5">
+                                    <Label className="text-xs flex items-center">
+                                      Тип
+                                      <Hint text="Категория запроса: select, insert, update, delete. Используется валидатором для проверки write-запросов и в отчётах." />
+                                    </Label>
+                                    <Input value={query.query_type} onChange={(e) => updateQuery(qi, { query_type: e.target.value })} />
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    <Label className="text-xs flex items-center">
+                                      Вес
+                                      <Hint text="Чем больше вес, тем чаще запрос попадает в нагрузочный микс. Вес 3 = запрос выпадает в 3 раза чаще, чем с весом 1." />
+                                    </Label>
+                                    <Input type="number" min={1} value={query.weight} onChange={(e) => updateQuery(qi, { weight: Number(e.target.value) || 1 })} />
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    <Label className="text-xs flex items-center">
+                                      Порядок
+                                      <Hint text="Порядок отображения запроса в списке. На выполнение не влияет — при тестировании запросы выбираются случайно по весу." />
+                                    </Label>
+                                    <Input type="number" min={0} value={query.order_index} onChange={(e) => updateQuery(qi, { order_index: Number(e.target.value) || 0 })} />
+                                  </div>
+                                </div>
 
-                                {(query.params || []).length === 0 && (
-                                  <div className="flex items-center justify-between pt-1">
-                                    <span className="text-xs text-muted-foreground">Параметров нет</span>
+                                <div className="space-y-1.5">
+                                  <Label className="text-xs flex items-center">
+                                    Описание
+                                    <Hint text="Пояснение к запросу для удобства чтения. Отображается в списке и в отчётах сравнения." />
+                                  </Label>
+                                  <Input placeholder="Выборка заказов по дате с агрегацией..." value={query.description || ""} onChange={(e) => updateQuery(qi, { description: e.target.value })} />
+                                </div>
+
+                                <Separator />
+
+                                <div className="space-y-3">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-xs font-medium text-muted-foreground flex items-center">
+                                      Параметры ({(query.params || []).length})
+                                      <Hint text="Параметры подставляются в {плейсхолдеры} SQL-шаблона. Каждый параметр генерируется автоматически по заданному типу." />
+                                    </span>
                                     <Button variant="outline" size="sm" onClick={() => addParam(qi)}>
                                       <Plus className="h-3 w-3" />
                                       Параметр
                                     </Button>
                                   </div>
-                                )}
+                                  {(query.params || []).map((param, pi) => (
+                                        <div key={`p-${qi}-${pi}`} className="flex items-start gap-3 rounded-lg border bg-background px-3 py-2.5">
+                                          {/* Порядковый номер */}
+                                          <span className="mt-1.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
+                                            {pi + 1}
+                                          </span>
+
+                                          {/* Основная часть */}
+                                          <div className="min-w-0 flex-1 space-y-2">
+                                            {/* Строка 1: Имя (flex-1) + Тип (фикс 9rem) */}
+                                            <div className="grid grid-cols-[1fr_9rem] gap-2">
+                                              <div className="space-y-1">
+                                                <Label className="text-[11px] flex items-center text-muted-foreground leading-none">
+                                                  Имя <Hint text="Совпадает с {плейсхолдером} в SQL. Например WHERE id = {order_id} → имя: order_id." />
+                                                </Label>
+                                                <Input
+                                                  className="h-7 text-xs font-mono"
+                                                  placeholder="param_name"
+                                                  value={param.param_name}
+                                                  onChange={(e) => updateParam(qi, pi, { param_name: e.target.value })}
+                                                />
+                                              </div>
+                                              <div className="space-y-1">
+                                                <Label className="text-[11px] flex items-center text-muted-foreground leading-none">
+                                                  Тип <Hint text="Способ генерации значения при каждом запросе." />
+                                                </Label>
+                                                <Select value={param.param_type} onValueChange={(v) => updateParam(qi, pi, { param_type: v })}>
+                                                  <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                                                  <SelectContent>
+                                                    <SelectItem value="random_int">random_int</SelectItem>
+                                                    <SelectItem value="random_string">random_string</SelectItem>
+                                                    <SelectItem value="random_from_table">random_from_table</SelectItem>
+                                                    <SelectItem value="random_date">random_date</SelectItem>
+                                                    <SelectItem value="sequential_int">sequential_int</SelectItem>
+                                                    <SelectItem value="uuid">uuid</SelectItem>
+                                                    <SelectItem value="fixed">fixed</SelectItem>
+                                                  </SelectContent>
+                                                </Select>
+                                              </div>
+                                            </div>
+
+                                            {/* Строка 2: доп. поля для выбранного типа */}
+                                            {param.param_type === "random_int" && (
+                                              <div className="grid grid-cols-2 gap-2">
+                                                <div className="space-y-1">
+                                                  <Label className="text-[11px] flex items-center text-muted-foreground leading-none">Min <Hint text="Нижняя граница случайного числа. По умолчанию 1." /></Label>
+                                                  <Input className="h-7 text-xs" type="number" placeholder="1" value={param.min_value ?? ""} onChange={(e) => updateParam(qi, pi, { min_value: e.target.value === "" ? null : Number(e.target.value) })} />
+                                                </div>
+                                                <div className="space-y-1">
+                                                  <Label className="text-[11px] flex items-center text-muted-foreground leading-none">Max <Hint text="Верхняя граница случайного числа. По умолчанию 1000." /></Label>
+                                                  <Input className="h-7 text-xs" type="number" placeholder="1000" value={param.max_value ?? ""} onChange={(e) => updateParam(qi, pi, { max_value: e.target.value === "" ? null : Number(e.target.value) })} />
+                                                </div>
+                                              </div>
+                                            )}
+                                            {param.param_type === "random_string" && (
+                                              <div className="w-32 space-y-1">
+                                                <Label className="text-[11px] flex items-center text-muted-foreground leading-none">Длина <Hint text="Кол-во символов (латиница + цифры). По умолчанию 10." /></Label>
+                                                <Input className="h-7 text-xs" type="number" placeholder="10" value={param.string_length ?? ""} onChange={(e) => updateParam(qi, pi, { string_length: e.target.value === "" ? null : Number(e.target.value) })} />
+                                              </div>
+                                            )}
+                                            {param.param_type === "random_from_table" && (
+                                              <div className="grid grid-cols-2 gap-2">
+                                                <div className="space-y-1">
+                                                  <Label className="text-[11px] flex items-center text-muted-foreground leading-none">Таблица <Hint text="Значения кэшируются перед тестом: SELECT column FROM table LIMIT N." /></Label>
+                                                  <Input className="h-7 text-xs font-mono" placeholder="orders" value={param.table_ref ?? ""} onChange={(e) => updateParam(qi, pi, { table_ref: e.target.value || null })} />
+                                                </div>
+                                                <div className="space-y-1">
+                                                  <Label className="text-[11px] flex items-center text-muted-foreground leading-none">Колонка <Hint text="Случайное значение из этой колонки при каждом запросе." /></Label>
+                                                  <Input className="h-7 text-xs font-mono" placeholder="id" value={param.column_ref ?? ""} onChange={(e) => updateParam(qi, pi, { column_ref: e.target.value || null })} />
+                                                </div>
+                                              </div>
+                                            )}
+                                            {param.param_type === "fixed" && (
+                                              <div className="space-y-1">
+                                                <Label className="text-[11px] flex items-center text-muted-foreground leading-none">Значение <Hint text="Постоянное значение, подставляется в каждый запрос без изменений." /></Label>
+                                                <Input className="h-7 text-xs" placeholder="42" value={param.fixed_value ?? ""} onChange={(e) => updateParam(qi, pi, { fixed_value: e.target.value || null })} />
+                                              </div>
+                                            )}
+                                            {["sequential_int", "uuid", "random_date"].includes(param.param_type) && (
+                                              <p className="text-[11px] italic text-muted-foreground/70">
+                                                {param.param_type === "sequential_int" && "Автогенерация: timestamp % 100000, дополнительные поля не нужны."}
+                                                {param.param_type === "uuid" && "Автогенерация: UUID v4 при каждом запросе."}
+                                                {param.param_type === "random_date" && "Автогенерация: случайная дата 2000–2030 в формате YYYY-MM-DD."}
+                                              </p>
+                                            )}
+                                          </div>
+
+                                          {/* Кнопка удаления */}
+                                          <Button variant="ghost" size="icon-sm" className="shrink-0 self-center text-muted-foreground hover:text-destructive" onClick={() => removeParam(qi, pi)}>
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                          </Button>
+                                        </div>
+                                      ))}
+                                  {(query.params || []).length === 0 && (
+                                    <p className="text-xs text-muted-foreground py-2">
+                                      Параметров нет. Если SQL содержит плейсхолдеры вида &#123;name&#125;, добавьте соответствующие параметры.
+                                    </p>
+                                  )}
+                                </div>
 
                                 <div className="flex justify-end border-t pt-3">
                                   <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive" onClick={() => removeQuery(qi)}>
@@ -994,27 +1177,45 @@ export function LogicalScenariosBrowser() {
                           </div>
                           <div className="grid gap-2 sm:grid-cols-2">
                             <div className="space-y-1">
-                              <Label className="text-[11px]">Таблица</Label>
-                              <Input className="h-8 text-xs" value={index.table_name} onChange={(e) => updateIndex(ip, { table_name: e.target.value })} />
+                              <Label className="text-[11px] flex items-center">
+                                Таблица
+                                <Hint text="Имя таблицы, на которой создаётся индекс. Обязательное поле." />
+                              </Label>
+                              <Input className="h-8 text-xs" placeholder="orders" value={index.table_name} onChange={(e) => updateIndex(ip, { table_name: e.target.value })} />
                             </div>
                             <div className="space-y-1">
-                              <Label className="text-[11px]">Колонки</Label>
-                              <Input className="h-8 text-xs" value={index.column_names} onChange={(e) => updateIndex(ip, { column_names: e.target.value })} />
+                              <Label className="text-[11px] flex items-center">
+                                Колонки
+                                <Hint text="Колонки индекса через запятую. Порядок важен для составных индексов." />
+                              </Label>
+                              <Input className="h-8 text-xs" placeholder="customer_id, order_date" value={index.column_names} onChange={(e) => updateIndex(ip, { column_names: e.target.value })} />
                             </div>
                             <div className="space-y-1">
-                              <Label className="text-[11px]">Тип</Label>
-                              <Input className="h-8 text-xs" value={index.index_type} onChange={(e) => updateIndex(ip, { index_type: e.target.value })} />
+                              <Label className="text-[11px] flex items-center">
+                                Тип
+                                <Hint text="Тип индекса: btree (по умолчанию), hash, gin, gist. Поддержка зависит от СУБД." />
+                              </Label>
+                              <Input className="h-8 text-xs" placeholder="btree" value={index.index_type} onChange={(e) => updateIndex(ip, { index_type: e.target.value })} />
                             </div>
                             <div className="space-y-1">
-                              <Label className="text-[11px]">Имя</Label>
-                              <Input className="h-8 text-xs" value={index.index_name ?? ""} onChange={(e) => updateIndex(ip, { index_name: e.target.value || null })} />
+                              <Label className="text-[11px] flex items-center">
+                                Имя индекса
+                                <Hint text="Произвольное имя. Если пусто — генерируется автоматически: idx_loadtest_{таблица}_{колонки}." />
+                              </Label>
+                              <Input className="h-8 text-xs" placeholder="авто" value={index.index_name ?? ""} onChange={(e) => updateIndex(ip, { index_name: e.target.value || null })} />
                             </div>
                             <div className="space-y-1">
-                              <Label className="text-[11px]">Условие</Label>
-                              <Input className="h-8 text-xs" value={index.condition ?? ""} onChange={(e) => updateIndex(ip, { condition: e.target.value || null })} />
+                              <Label className="text-[11px] flex items-center">
+                                Условие
+                                <Hint text="WHERE-выражение для частичного индекса. Работает только в PostgreSQL, MySQL игнорирует." />
+                              </Label>
+                              <Input className="h-8 text-xs" placeholder="status = 'active'" value={index.condition ?? ""} onChange={(e) => updateIndex(ip, { condition: e.target.value || null })} />
                             </div>
                             <div className="space-y-1">
-                              <Label className="text-[11px]">Уникальный</Label>
+                              <Label className="text-[11px] flex items-center">
+                                Уникальный
+                                <Hint text="Добавляет UNIQUE при создании индекса. Гарантирует уникальность значений в указанных колонках." />
+                              </Label>
                               <Select value={index.is_unique ? "true" : "false"} onValueChange={(v) => updateIndex(ip, { is_unique: v === "true" })}>
                                 <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                                 <SelectContent>
@@ -1024,12 +1225,6 @@ export function LogicalScenariosBrowser() {
                               </Select>
                             </div>
                           </div>
-                          {index.description && (
-                            <div className="space-y-1">
-                              <Label className="text-[11px]">Описание</Label>
-                              <Input className="h-8 text-xs" value={index.description ?? ""} onChange={(e) => updateIndex(ip, { description: e.target.value || null })} />
-                            </div>
-                          )}
                         </div>
                       ))}
                     </div>
@@ -1078,6 +1273,73 @@ export function LogicalScenariosBrowser() {
           )}
         </div>
       </div>
+
+      {/* ===== Template create / copy / edit dialog ===== */}
+      <Dialog
+        open={templateDialog.open}
+        onOpenChange={(open) => { if (!open) closeTemplateDialog() }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {templateDialog.mode === "create" && "Новый шаблон сценария"}
+              {templateDialog.mode === "copy" && "Скопировать шаблон"}
+              {templateDialog.mode === "edit" && "Переименовать шаблон"}
+            </DialogTitle>
+            <DialogDescription>
+              {templateDialog.mode === "create" && "Задайте название и описание. SQL-запросы и индексы добавляются через bundle."}
+              {templateDialog.mode === "copy" && "Будет создан новый шаблон с теми же метаданными. Bundles копируются отдельно через профиль данных."}
+              {templateDialog.mode === "edit" && "Изменение названия и описания не затрагивает bundles и SQL-запросы."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="tpl-name">
+                Название <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="tpl-name"
+                placeholder="Например: OLAP нагрузка с агрегациями"
+                value={templateDialog.name}
+                onChange={(e) => setTemplateDialog((s) => ({ ...s, name: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) void handleSubmitTemplateDialog() }}
+                autoFocus
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="tpl-desc">Описание</Label>
+              <Textarea
+                id="tpl-desc"
+                placeholder="Кратко опишите назначение сценария..."
+                rows={3}
+                className="resize-none"
+                value={templateDialog.description}
+                onChange={(e) => setTemplateDialog((s) => ({ ...s, description: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={closeTemplateDialog}
+              disabled={templateDialog.submitting}
+            >
+              Отмена
+            </Button>
+            <Button
+              onClick={handleSubmitTemplateDialog}
+              disabled={!templateDialog.name.trim() || templateDialog.submitting}
+            >
+              {templateDialog.submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {templateDialog.mode === "create" && "Создать"}
+              {templateDialog.mode === "copy" && "Скопировать"}
+              {templateDialog.mode === "edit" && "Сохранить"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
