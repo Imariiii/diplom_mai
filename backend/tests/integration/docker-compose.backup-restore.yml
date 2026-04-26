@@ -1,0 +1,71 @@
+services:
+  backup-restore-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: restore_user
+      POSTGRES_PASSWORD: restore_pass
+      POSTGRES_DB: restore_test
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U restore_user -d restore_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backup-restore-mysql:
+    image: mysql:8.0
+    command:
+      - "--default-authentication-plugin=mysql_native_password"
+      - "--log-bin-trust-function-creators=1"
+    environment:
+      MYSQL_ROOT_PASSWORD: root_pass
+      MYSQL_DATABASE: restore_test
+      MYSQL_USER: restore_user
+      MYSQL_PASSWORD: restore_pass
+    ports:
+      - "53306:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -proot_pass"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  backup-restore-mariadb:
+    image: mariadb:10.11
+    environment:
+      MARIADB_ROOT_PASSWORD: root_pass
+      MARIADB_DATABASE: restore_test
+      MARIADB_USER: restore_user
+      MARIADB_PASSWORD: restore_pass
+    ports:
+      - "53307:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -uroot -proot_pass"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  native-test-runner:
+    build:
+      context: ../../..
+      dockerfile: backend/Dockerfile
+    environment:
+      BACKUP_RESTORE_NATIVE_RUNNER: "1"
+      BACKUP_RESTORE_USE_DOCKER: "1"
+      BACKUP_RESTORE_POSTGRES_URL: postgresql+asyncpg://restore_user:restore_pass@backup-restore-postgres:5432/restore_test
+      BACKUP_RESTORE_MYSQL_URL: mysql+aiomysql://restore_user:restore_pass@backup-restore-mysql:3306/restore_test
+      BACKUP_RESTORE_MARIADB_URL: mysql+aiomysql://restore_user:restore_pass@backup-restore-mariadb:3306/restore_test
+      BACKUP_RESTORE_MYSQL_ROOT_URL: mysql+aiomysql://root:root_pass@backup-restore-mysql:3306/restore_test
+      BACKUP_RESTORE_MARIADB_ROOT_URL: mysql+aiomysql://root:root_pass@backup-restore-mariadb:3306/restore_test
+    depends_on:
+      backup-restore-postgres:
+        condition: service_healthy
+      backup-restore-mysql:
+        condition: service_healthy
+      backup-restore-mariadb:
+        condition: service_healthy
+    command: >
+      python -m pytest backend/tests/integration -m integration -v
+    profiles:
+      - test

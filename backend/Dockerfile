@@ -14,6 +14,7 @@ COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY alembic.ini /app/alembic.ini
+COPY pytest.ini /app/pytest.ini
 COPY backend /app/backend
 
 EXPOSE 8000
