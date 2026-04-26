@@ -284,7 +284,12 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
             active_tests[test_id]["error"] = error_msg
             await streaming_callback.on_test_error(error_msg)
             return
-        
+
+        await streaming_callback.on_status_change(
+            "running",
+            "Финализация результатов: сбор метрик и сохранение…",
+        )
+
         end_time = time.perf_counter()
         actual_duration = end_time - start_time
         finish_ts = start_ts + timedelta(seconds=actual_duration)

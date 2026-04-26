@@ -666,8 +666,20 @@ class LoadTester:
                     for _ in range(min(5, iterations)):
                         await self.execute_query(db_type, warmup_query['sql'], warmup_query['id'])
                         await asyncio.sleep(0.1)
-            await asyncio.sleep(warmup_time)
-        
+            remaining = warmup_time
+            while remaining > 0:
+                await self._emit_status(
+                    "running",
+                    f"Прогрев системы, осталось {remaining} с…",
+                )
+                step = min(1, remaining)
+                await asyncio.sleep(step)
+                remaining -= step
+            await self._emit_status(
+                "running",
+                "Запуск нагрузочного теста по набору запросов…",
+            )
+
         for idx, query in enumerate(queries):
             print(f"Тестирование запроса: {query['name']} ({idx + 1}/{total_queries})")
             
@@ -685,20 +697,7 @@ class LoadTester:
             # Обновляем прогресс после завершения каждого запроса
             if self._metrics_callback:
                 self._metrics_callback.set_current_query(idx + 1)
-        
-        # Уведомляем о завершении
-        if self._metrics_callback:
-            total_transactions = sum(
-                stats.get('successful', 0) + stats.get('failed', 0)
-                for result in all_results
-                for stats in result.get('comparison', {}).values()
-            )
-            summary = {
-                'total_transactions': total_transactions,
-                'overall_tps': total_transactions / total_queries if total_queries > 0 else 0,
-            }
-            await self._metrics_callback.on_test_complete(summary)
-        
+
         return all_results
     
     async def run_custom_sql_test(
@@ -735,8 +734,21 @@ class LoadTester:
                 for _ in range(min(3, iterations)):
                     await self.execute_query(db_key, custom_sql, query_id)
                     await asyncio.sleep(0.05)
-            await asyncio.sleep(warmup_time)
+            remaining = warmup_time
+            while remaining > 0:
+                await self._emit_status(
+                    "running",
+                    f"Прогрев системы, осталось {remaining} с…",
+                )
+                step = min(1, remaining)
+                await asyncio.sleep(step)
+                remaining -= step
             _set_prog(8.0)
+
+        await self._emit_status(
+            "running",
+            "Подготовка баз данных к нагрузочному тесту…",
+        )
 
         results: Dict[str, Dict] = {}
         prepare_infos: Dict[str, Dict] = {}
@@ -1264,7 +1276,15 @@ class LoadTester:
                         scenario_name
                     )
                     await asyncio.sleep(0.1)
-                await asyncio.sleep(warmup_time)
+                remaining = warmup_time
+                while remaining > 0:
+                    await self._emit_status(
+                        "running",
+                        f"Прогрев сценария «{scenario_name}», осталось {remaining} с…",
+                    )
+                    step = min(1, remaining)
+                    await asyncio.sleep(step)
+                    remaining -= step
                 print(f"[SCENARIO] Прогрев {conn_name} завершён")
                 _set_progress(0.15)
 
@@ -1272,6 +1292,11 @@ class LoadTester:
             testing_start_pct = 0.15 if warmup_time > 0 else 0.08
             _set_progress(testing_start_pct)
             print(f"[SCENARIO] Запуск нагрузки {conn_name}: {iterations} итераций x {virtual_users} VU...")
+            await self._emit_status(
+                "running",
+                f"Нагрузка: «{scenario_name}» — выполнение запросов "
+                f"({iterations} ит. × {virtual_users} VU)…",
+            )
             start_time = time.perf_counter()
 
             async def _make_scenario_query():
@@ -1474,19 +1499,11 @@ class LoadTester:
                 'stats': stats
             })
 
-        # Уведомляем о завершении
         total_transactions = sum(
             result.get('stats', {}).get('successful', 0)
             for result in all_results
         )
         print(f"[TEST] Все БД протестированы. Итого успешных транзакций: {total_transactions}")
-
-        if self._metrics_callback:
-            summary = {
-                'total_transactions': total_transactions,
-                'overall_tps': total_transactions / len(db_types) if db_types else 0,
-            }
-            await self._metrics_callback.on_test_complete(summary)
 
         return all_results
 

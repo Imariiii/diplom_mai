@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Database, Cpu, BarChart3, Lock, AlertTriangle, CheckCircle2, History, SlidersHorizontal } from "lucide-react"
+import { Database, Cpu, BarChart3, Lock, AlertTriangle, CheckCircle2, History, SlidersHorizontal, Loader2 } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -314,6 +314,13 @@ export function DashboardsPage() {
       ) || [])
 
   const isTestFinished = currentTest?.status === "completed" || currentTest?.status === "failed"
+  const hasCompletedResults =
+    currentTest?.status === "completed" &&
+    Array.isArray(currentTest.results) &&
+    currentTest.results.length > 0
+  const showFinalizingBanner =
+    (currentTest?.status === "completed" && !hasCompletedResults) ||
+    (currentTest?.status === "running" && statusMessage.includes("Финализация"))
   const selfCheckResults = useMemo(
     () => currentTest?.results?.filter((result) => (result.selfCheckWarnings?.length || 0) > 0) || [],
     [currentTest?.results]
@@ -344,7 +351,17 @@ export function DashboardsPage() {
         />
       )}
 
-      {isTestFinished && currentTest?.status === "completed" && (
+      {showFinalizingBanner && (
+        <Alert className="border-border bg-muted/40">
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          <AlertTitle>Финализация результатов</AlertTitle>
+          <AlertDescription className="text-sm text-muted-foreground">
+            Сбор метрик, сохранение в историю и подготовка сводки… Это обычно занимает несколько секунд.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {hasCompletedResults && (
         <div className="rounded-xl border border-success/30 bg-success/5 p-5">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3">

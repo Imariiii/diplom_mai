@@ -2,13 +2,21 @@
 
 import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
-import { TrendingUp, Timer, Database } from "lucide-react"
+import { TrendingUp, Timer } from "lucide-react"
 
+/** Сообщения операций с БД (бэкап, восстановление, индексы) — в одной строке со статусом фазы теста */
 const BACKUP_STATUS_LABELS: Record<string, string> = {
-  backup_started: "Создание бэкапа БД...",
+  backup_started: "Создание бэкапа БД…",
   backup_completed: "Бэкап создан",
-  restore_started: "Восстановление БД...",
+  backup_failed: "Ошибка создания бэкапа",
+  restore_started: "Восстановление БД…",
   restore_completed: "БД восстановлена",
+  restore_failed: "Ошибка восстановления БД",
+  index_creation_started: "Создание индексов сценария…",
+  index_creation_completed: "Индексы сценария созданы",
+  index_drop_started: "Удаление индексов сценария…",
+  index_drop_completed: "Индексы сценария удалены",
+  index_drop_failed: "Ошибка удаления индексов",
 }
 
 interface TestProgressBarProps {
@@ -20,7 +28,11 @@ interface TestProgressBarProps {
 }
 
 export function TestProgressBar({ progress, elapsedSeconds, statusMessage, backupStatus, formatTime }: TestProgressBarProps) {
-  const backupLabel = backupStatus ? BACKUP_STATUS_LABELS[backupStatus] : null
+  const backupLabel =
+    backupStatus && BACKUP_STATUS_LABELS[backupStatus]
+      ? BACKUP_STATUS_LABELS[backupStatus]
+      : backupStatus || null
+  const phaseMessage = backupLabel || statusMessage || ""
 
   return (
     <Card className="bg-card border-border">
@@ -36,22 +48,14 @@ export function TestProgressBar({ progress, elapsedSeconds, statusMessage, backu
 
           <Progress value={progress} className="h-2" />
 
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <div className="flex items-center gap-4">
-              <span className="flex items-center gap-1">
-                <Timer className="h-3 w-3" />
-                Прошло: {formatTime(elapsedSeconds)}
-              </span>
-              {backupLabel && (
-                <span className="flex items-center gap-1 text-amber-600">
-                  <Database className="h-3 w-3 animate-pulse" />
-                  {backupLabel}
-                </span>
-              )}
-            </div>
-            {statusMessage && (
-              <span className="text-primary">{statusMessage}</span>
-            )}
+          <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+            <span className="flex shrink-0 items-center gap-1">
+              <Timer className="h-3 w-3" />
+              Прошло: {formatTime(elapsedSeconds)}
+            </span>
+            {phaseMessage ? (
+              <span className="min-w-0 text-right text-primary">{phaseMessage}</span>
+            ) : null}
           </div>
         </div>
       </CardContent>

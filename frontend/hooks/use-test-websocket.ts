@@ -183,7 +183,12 @@ export function useTestWebSocket({
           setStatus(statusData.status)
           setProgress(statusData.progress)
 
+          // Новая фаза по status.message — не оставлять старый backup_status поверх текста нагрузки
+          if (statusData.status === "running" && statusData.message) {
+            setBackupStatus("")
+          }
           if (statusData.status === "completed" || statusData.status === "failed") {
+            setBackupStatus("")
             stopTimer()
           }
           
@@ -308,6 +313,7 @@ export function useTestWebSocket({
   useEffect(() => {
     // Подключаемся только если есть валидный testId
     if (testId && testId.trim() !== "") {
+      setBackupStatus("")
       connect()
     }
     
