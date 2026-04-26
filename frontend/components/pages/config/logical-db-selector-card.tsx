@@ -51,7 +51,7 @@ export function LogicalDbSelectorCard({ databases, selectedId, onSelect }: Logic
           Выбор базы данных
         </CardTitle>
         <CardDescription>
-          Выберите логическую базу данных для нагрузочного тестирования
+          Выберите базу данных для нагрузочного тестирования
         </CardDescription>
       </CardHeader>
       <CardContent>

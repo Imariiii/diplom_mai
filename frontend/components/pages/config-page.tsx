@@ -1,8 +1,16 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { Play, Users, Clock, Gauge } from "lucide-react"
+import { useState, useEffect, useMemo } from "react"
+import { Play, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { useAppStore } from "@/lib/store"
 import { apiClient } from "@/lib/api"
 import { toast } from "sonner"
@@ -14,12 +22,11 @@ import type {
   LogicalDatabaseDetail,
 } from "@/lib/types"
 import { LogicalDbSelectorCard } from "./config/logical-db-selector-card"
-import { ConnectionStatusCard } from "./config/connection-status-card"
-import { DatabaseSelectionCard } from "./config/database-selection-card"
+import { DatabaseSelectionCard, type ConnectionCheckResult } from "./config/database-selection-card"
 import { TestModeSelectorCard } from "./config/test-mode-selector-card"
 import { ScenarioSelectorCard } from "./config/scenario-selector-card"
 import { QuerySelectorCard } from "./config/query-selector-card"
-import { SliderConfigCard } from "./config/slider-config-card"
+import { LoadParamsCard } from "./config/load-params-card"
 import { ConfigSummaryCard } from "./config/config-summary-card"
 
 export function ConfigPage() {
@@ -30,17 +37,19 @@ export function ConfigPage() {
     setCurrentPage,
   } = useAppStore()
   const [isRunning, setIsRunning] = useState(false)
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false)
   const [scenarios, setScenarios] = useState<ScenarioTemplate[]>([])
   const [scenariosLoading, setScenariosLoading] = useState(true)
   const [logicalDatabases, setLogicalDatabases] = useState<LogicalDatabaseWithConnections[]>([])
   const [selectedLogicalDbId, setSelectedLogicalDbId] = useState<string | null>(null)
   const [selectedLogicalDatabaseDetail, setSelectedLogicalDatabaseDetail] = useState<LogicalDatabaseDetail | null>(null)
-  const [healthStatus, setHealthStatus] = useState<Record<string, boolean>>({})
+  const [connectionChecks, setConnectionChecks] = useState<Record<string, ConnectionCheckResult>>({})
+  const [checksPending, setChecksPending] = useState(false)
 
-  // Подключения выбранной логической БД
-  const connections: DatabaseConnection[] = selectedLogicalDbId
-    ? (logicalDatabases.find((db) => db.id === selectedLogicalDbId)?.connections ?? [])
-    : []
+  const connections: DatabaseConnection[] = useMemo(() => {
+    if (!selectedLogicalDbId) return []
+    return logicalDatabases.find((db) => db.id === selectedLogicalDbId)?.connections ?? []
+  }, [selectedLogicalDbId, logicalDatabases])
 
   useEffect(() => {
     apiClient
@@ -69,11 +78,6 @@ export function ConfigPage() {
         const dbs = response.databases
         setLogicalDatabases(dbs)
 
-        // Инициализируем статус всех подключений
-        const status: Record<string, boolean> = {}
-        dbs.forEach((db) => db.connections.forEach((conn) => { status[conn.id] = true }))
-        setHealthStatus(status)
-
         // Автовыбор первой БД, если она одна
         if (dbs.length === 1 && !selectedLogicalDbId) {
           setSelectedLogicalDbId(dbs[0].id)
@@ -96,6 +100,49 @@ export function ConfigPage() {
       .then((detail) => setSelectedLogicalDatabaseDetail(detail))
       .catch(() => setSelectedLogicalDatabaseDetail(null))
   }, [selectedLogicalDbId])
+
+  /** Проверка сохранённых подключений выбранной БД (результат — в карточке выбора СУБД) */
+  useEffect(() => {
+    if (connections.length === 0) {
+      setConnectionChecks({})
+      setChecksPending(false)
+      return
+    }
+
+    let cancelled = false
+    setChecksPending(true)
+    setConnectionChecks({})
+
+    void (async () => {
+      const results = await Promise.all(
+        connections.map(async (c) => {
+          try {
+            const r = await apiClient.testSavedConnection(c.id)
+            const ok = Boolean(r.success)
+            const message = ok
+              ? (r.message?.trim() ? r.message : "Подключение успешно")
+              : (r.message?.trim() || "Подключение недоступно")
+            return [c.id, { ok, message }] as const
+          } catch (err) {
+            return [
+              c.id,
+              {
+                ok: false,
+                message: err instanceof Error ? err.message : "Ошибка проверки подключения",
+              },
+            ] as const
+          }
+        })
+      )
+      if (cancelled) return
+      setConnectionChecks(Object.fromEntries(results) as Record<string, ConnectionCheckResult>)
+      setChecksPending(false)
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [connections])
 
   const handleLogicalDbSelect = (id: string) => {
     if (id === selectedLogicalDbId) return
@@ -155,6 +202,11 @@ export function ConfigPage() {
     return true
   }
 
+  const openConfirmDialog = () => {
+    if (!validateConfig()) return
+    setConfirmDialogOpen(true)
+  }
+
   const runTest = async () => {
     if (!validateConfig()) return
 
@@ -206,6 +258,7 @@ export function ConfigPage() {
       }
 
       setCurrentTest(testRun)
+      setConfirmDialogOpen(false)
       setCurrentPage("dashboards")
 
       toast.success(`Тест запущен! ID: ${asyncResponse.test_id}`)
@@ -261,12 +314,11 @@ export function ConfigPage() {
         onSelect={handleLogicalDbSelect}
       />
 
-      <ConnectionStatusCard connections={connections} healthStatus={healthStatus} />
-
       <DatabaseSelectionCard
         connections={connections}
         selectedDatabases={testConfig.databases}
-        healthStatus={healthStatus}
+        connectionChecks={connectionChecks}
+        checksPending={checksPending}
         onToggle={handleDatabaseToggle}
       />
 
@@ -292,9 +344,7 @@ export function ConfigPage() {
           scenarios={scenarios}
           selectedScenarioId={testConfig.scenario}
           useIndexes={testConfig.useIndexes}
-          selectedProfileName={selectedProfileName}
-          selectedBundleName={selectedBundle?.name || null}
-          indexesCount={selectedBundle?.indexes?.length ?? 0}
+          activeBundle={selectedBundle ?? null}
           onScenarioChange={(id) => {
             setTestConfig({
               scenario: id,
@@ -319,65 +369,90 @@ export function ConfigPage() {
         />
       )}
 
-      <SliderConfigCard
-        title="Виртуальные пользователи"
-        icon={Users}
-        value={testConfig.virtualUsers}
-        min={1}
-        max={200}
-        step={1}
-        unit=""
-        description="Количество параллельных соединений"
-        presets={[10, 50, 100, 200]}
-        onValueChange={(v) => setTestConfig({ virtualUsers: v })}
-      />
-
-      <SliderConfigCard
-        title="Количество итераций"
-        icon={Gauge}
-        value={testConfig.iterations}
-        min={1}
-        max={1000}
-        step={10}
-        unit=""
-        description="Количество повторений запроса на пользователя"
-        onValueChange={(v) => setTestConfig({ iterations: v })}
-      />
-
-      <SliderConfigCard
-        title="Время прогрева"
-        icon={Clock}
-        value={testConfig.warmupTime}
-        min={0}
-        max={30}
-        step={1}
-        unit=" сек"
-        description="Период прогрева перед началом сбора метрик"
-        onValueChange={(v) => setTestConfig({ warmupTime: v })}
-      />
-
-      <ConfigSummaryCard
-        selectedDatabases={testConfig.databases}
-        testMode={testConfig.testMode}
-        selectedScenario={selectedScenario}
-        useIndexes={testConfig.useIndexes}
+      <LoadParamsCard
         virtualUsers={testConfig.virtualUsers}
         iterations={testConfig.iterations}
         warmupTime={testConfig.warmupTime}
-        connections={connections}
-        selectedProfileName={hasMixedProfiles ? null : selectedProfileName}
-        selectedBundleName={selectedBundle?.name || null}
+        onVirtualUsersChange={(v) => setTestConfig({ virtualUsers: v })}
+        onIterationsChange={(v) => setTestConfig({ iterations: v })}
+        onWarmupTimeChange={(v) => setTestConfig({ warmupTime: v })}
       />
 
-      <Button
-        size="lg"
-        className="w-full"
-        onClick={runTest}
-        disabled={!canRunTest() || isRunning}
+      <div className="space-y-2">
+        <Button
+          size="lg"
+          className="w-full"
+          type="button"
+          onClick={openConfirmDialog}
+          disabled={!canRunTest() || isRunning || checksPending || scenariosLoading}
+        >
+          Подтвердить
+        </Button>
+        <p className="text-center text-xs text-muted-foreground">
+          Откроется окно со сводкой параметров и кнопкой запуска нагрузочного теста
+        </p>
+      </div>
+
+      <Dialog
+        open={confirmDialogOpen}
+        onOpenChange={(open) => {
+          if (!open && isRunning) return
+          setConfirmDialogOpen(open)
+        }}
       >
-        <Play className="mr-2 h-5 w-5" />
-        {isRunning ? "Тест выполняется..." : "Запустить тестирование"}
-      </Button>
+        <DialogContent className="top-[3vh] flex w-[min(98vw,56rem)] max-w-none translate-y-0 flex-col gap-0 overflow-visible p-0 sm:max-w-none">
+          <DialogHeader className="min-w-0 shrink-0 space-y-2 border-b border-border px-6 py-4 pr-14 text-left">
+            <DialogTitle className="text-pretty pr-1">Сводка конфигурации</DialogTitle>
+            <DialogDescription className="text-pretty break-words">
+              Проверьте параметры. Запуск теста перенаправит на страницу «Дашборды».
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-w-0 px-6 py-4">
+            <ConfigSummaryCard
+              embedded
+              selectedDatabases={testConfig.databases}
+              testMode={testConfig.testMode}
+              selectedScenario={selectedScenario}
+              useIndexes={testConfig.useIndexes}
+              virtualUsers={testConfig.virtualUsers}
+              iterations={testConfig.iterations}
+              warmupTime={testConfig.warmupTime}
+              connections={connections}
+              selectedProfileName={hasMixedProfiles ? null : selectedProfileName}
+              selectedBundleName={selectedBundle?.name || null}
+            />
+          </div>
+          <DialogFooter className="min-w-0 shrink-0 flex-col gap-2 border-t border-border px-6 py-4 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full sm:w-auto"
+              disabled={isRunning}
+              onClick={() => setConfirmDialogOpen(false)}
+            >
+              Назад к настройкам
+            </Button>
+            <Button
+              type="button"
+              className="w-full sm:w-auto"
+              onClick={() => void runTest()}
+              disabled={!canRunTest() || isRunning}
+            >
+              {isRunning ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Запуск…
+                </>
+              ) : (
+                <>
+                  <Play className="mr-2 h-4 w-4" />
+                  Запустить тестирование
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

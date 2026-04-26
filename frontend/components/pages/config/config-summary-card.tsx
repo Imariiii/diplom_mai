@@ -1,5 +1,6 @@
 "use client"
 
+import type { ReactNode } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import type { DatabaseConnection, ScenarioTemplate } from "@/lib/types"
 
@@ -14,6 +15,8 @@ interface ConfigSummaryCardProps {
   connections: DatabaseConnection[]
   selectedProfileName: string | null
   selectedBundleName: string | null
+  /** Только сетка полей — для встраивания в диалог (заголовок задаётся снаружи) */
+  embedded?: boolean
 }
 
 export function ConfigSummaryCard({
@@ -27,67 +30,50 @@ export function ConfigSummaryCard({
   connections,
   selectedProfileName,
   selectedBundleName,
+  embedded = false,
 }: ConfigSummaryCardProps) {
+  const row = (label: string, value: ReactNode) => (
+    <div className="min-w-0 space-y-0.5">
+      <div className="text-muted-foreground">{label}</div>
+      <div className="break-words font-medium text-foreground">{value}</div>
+    </div>
+  )
+
+  const grid = (
+    <div className="grid grid-cols-1 gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
+      {row(
+        "СУБД",
+        selectedDatabases.length > 0
+          ? selectedDatabases.map((id) => connections.find((connection) => connection.id === id)?.name || id).join(", ")
+          : "Не выбрано",
+      )}
+      {row("Режим", testMode === "scenario" ? "По сценарию" : "Конкретный запрос")}
+      {testMode === "scenario" ? (
+        <>
+          {row("Сценарий", selectedScenario?.name || "Не выбрано")}
+          {row("Индексы", useIndexes ? "Включены" : "Выключены")}
+          {row("Профиль", selectedProfileName || "Не определён")}
+          {row("Bundle", selectedBundleName || "Не разрешён")}
+        </>
+      ) : (
+        row("Запрос", "Пользовательский SQL")
+      )}
+      {row("Виртуальных пользователей", virtualUsers)}
+      {row("Итераций", iterations)}
+      {row("Время прогрева", `${warmupTime} сек`)}
+    </div>
+  )
+
+  if (embedded) {
+    return <div className="min-w-0 rounded-lg border border-border bg-muted/20 p-4">{grid}</div>
+  }
+
   return (
     <Card className="bg-card border-border">
       <CardHeader>
         <CardTitle>Сводка конфигурации</CardTitle>
       </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <span className="text-muted-foreground">СУБД:</span>
-            <span className="ml-2 font-medium">
-              {selectedDatabases.length > 0
-                ? selectedDatabases.map((id) => connections.find((connection) => connection.id === id)?.name || id).join(", ")
-                : "Не выбрано"}
-            </span>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Режим:</span>
-            <span className="ml-2 font-medium">
-              {testMode === "scenario" ? "По сценарию" : "Конкретный запрос"}
-            </span>
-          </div>
-          {testMode === "scenario" ? (
-            <>
-              <div>
-                <span className="text-muted-foreground">Сценарий:</span>
-                <span className="ml-2 font-medium">{selectedScenario?.name || "Не выбрано"}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Индексы:</span>
-                <span className="ml-2 font-medium">{useIndexes ? "Включены" : "Выключены"}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Профиль:</span>
-                <span className="ml-2 font-medium">{selectedProfileName || "Не определён"}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Bundle:</span>
-                <span className="ml-2 font-medium">{selectedBundleName || "Не разрешён"}</span>
-              </div>
-            </>
-          ) : (
-            <div>
-              <span className="text-muted-foreground">Запрос:</span>
-              <span className="ml-2 font-medium">Пользовательский SQL</span>
-            </div>
-          )}
-          <div>
-            <span className="text-muted-foreground">Виртуальных пользователей:</span>
-            <span className="ml-2 font-medium">{virtualUsers}</span>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Итераций:</span>
-            <span className="ml-2 font-medium">{iterations}</span>
-          </div>
-          <div>
-            <span className="text-muted-foreground">Время прогрева:</span>
-            <span className="ml-2 font-medium">{warmupTime} сек</span>
-          </div>
-        </div>
-      </CardContent>
+      <CardContent>{grid}</CardContent>
     </Card>
   )
 }

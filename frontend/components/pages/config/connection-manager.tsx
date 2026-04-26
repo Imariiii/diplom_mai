@@ -10,7 +10,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Dialog,
   DialogContent,
@@ -1126,8 +1125,8 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
 
       {/* ===== Диалог: Профиль схемы и сценарии ===== */}
       <Dialog open={schemaDialogOpen} onOpenChange={setSchemaDialogOpen}>
-        <DialogContent className="max-h-[90vh] w-[95vw] max-w-5xl flex flex-col p-0">
-          <DialogHeader className="px-6 pt-6 shrink-0">
+        <DialogContent className="top-[3vh] flex max-h-[94vh] w-[min(98vw,92rem)] max-w-none translate-y-0 flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
+          <DialogHeader className="shrink-0 px-6 pt-6 pr-14">
             <DialogTitle>
               {schemaPreviewLogicalDb
                 ? `Профиль схемы и сценарии для «${schemaPreviewLogicalDb.name}»`
@@ -1140,7 +1139,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto min-h-0 px-6">
+          <div className="min-h-0 flex-1 overflow-y-auto px-6">
             <div className="space-y-4 py-4">
               {schemaLoading ? (
                 <div className="flex items-center justify-center py-12 text-muted-foreground">
@@ -1270,7 +1269,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
 
                   <div className="space-y-2">
                     <Label>Типы сценариев для генерации</Label>
-                    <div className="grid gap-2 md:grid-cols-2">
+                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                       {GENERATABLE_SCENARIO_TYPES.map((scenarioType) => {
                         const available = schemaPreview.available_scenario_types.includes(scenarioType.value)
                         const checked = selectedScenarioTypes.includes(scenarioType.value)
@@ -1300,10 +1299,10 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
 
                   <div className="space-y-2">
                     <Label>Таблицы и подходящие шаблоны</Label>
-                    <ScrollArea className="h-72 rounded-lg border p-3">
-                      <div className="space-y-3">
+                    <div className="rounded-lg border p-3">
+                      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
                         {schemaPreview.tables.map((table) => (
-                          <div key={table.name} className="rounded-lg border p-3">
+                          <div key={table.name} className="rounded-lg border bg-muted/20 p-3">
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div>
                                 <div className="font-medium break-all">
@@ -1332,7 +1331,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
                           </div>
                         ))}
                       </div>
-                    </ScrollArea>
+                    </div>
                   </div>
                 </div>
               ) : (

@@ -21,6 +21,14 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -30,7 +38,6 @@ import { useAppStore } from "@/lib/store"
 import { DB_NAMES, getDbColor, CHART_COLORS, METRIC_COLORS } from "@/lib/chart-colors"
 import type { LogicalDatabaseWithConnections } from "@/lib/types"
 import { HistoryTimeSeriesTab } from "./history-time-series-tab"
-import { cn } from "@/lib/utils"
 import {
   BarChart,
   Bar,
@@ -56,59 +63,6 @@ function getResultSelfCheckWarnings(result: HistoryTestResult): string[] {
     return []
   }
   return warnings.filter((warning): warning is string => typeof warning === "string" && warning.length > 0)
-}
-
-// ==================== Селектор логической БД ====================
-
-function LogicalDbFilter({
-  databases,
-  selectedId,
-  onSelect,
-}: {
-  databases: LogicalDatabaseWithConnections[]
-  selectedId: string | null
-  onSelect: (id: string | null) => void
-}) {
-  return (
-    <Card className="bg-card border-border">
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Database className="h-4 w-4 text-primary" />
-          Фильтр по базе данных
-        </CardTitle>
-        <CardDescription>Выберите логическую базу данных или просматривайте все тесты</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => onSelect(null)}
-            className={cn(
-              "px-3 py-1.5 rounded-md border text-sm transition-colors",
-              selectedId === null
-                ? "border-primary bg-primary/10 font-medium"
-                : "border-border hover:border-muted-foreground"
-            )}
-          >
-            Все базы данных
-          </button>
-          {databases.map((db) => (
-            <button
-              key={db.id}
-              onClick={() => onSelect(db.id)}
-              className={cn(
-                "px-3 py-1.5 rounded-md border text-sm transition-colors",
-                selectedId === db.id
-                  ? "border-primary bg-primary/10 font-medium"
-                  : "border-border hover:border-muted-foreground"
-              )}
-            >
-              {db.name}
-            </button>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  )
 }
 
 // ==================== Основной компонент ====================
@@ -713,12 +667,14 @@ export function HistoryPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 space-y-1">
           <h1 className="text-2xl font-bold">История тестов</h1>
-          <p className="text-muted-foreground">Просмотр результатов всех запущенных тестов</p>
+          <p className="text-muted-foreground text-pretty">
+            Просмотр результатов всех запущенных тестов
+          </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex shrink-0 flex-wrap gap-2">
           <Button onClick={goToPerTest} disabled={selectedIds.length !== 1} variant="outline">
             <Eye className="h-4 w-4 mr-2" />
             Сводка по прогону
@@ -734,12 +690,49 @@ export function HistoryPage() {
         </div>
       </div>
 
-      {/* Фильтр по логической БД */}
-      <LogicalDbFilter
-        databases={logicalDatabases}
-        selectedId={selectedLogicalDbId}
-        onSelect={handleLogicalDbChange}
-      />
+      {/* Фильтр по логической БД: одиночный выбор через выпадающий список (паттерн «фильтр категории» в панели инструментов) */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+        <div className="flex min-w-0 flex-1 flex-col gap-2 sm:max-w-md">
+          <Label htmlFor="history-logical-db-filter" className="flex items-center gap-2 text-sm font-medium">
+            <Database className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+            База данных
+          </Label>
+          <Select
+            value={selectedLogicalDbId ?? "__all__"}
+            onValueChange={(value) => {
+              handleLogicalDbChange(value === "__all__" ? null : value)
+            }}
+          >
+            <SelectTrigger
+              id="history-logical-db-filter"
+              size="sm"
+              className="h-9 w-full min-w-0 sm:max-w-md"
+              aria-label="Фильтр списка тестов по логической базе данных"
+            >
+              <SelectValue placeholder="Все базы данных" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">Все базы данных</SelectItem>
+              {logicalDatabases.map((db) => (
+                <SelectItem key={db.id} value={db.id}>
+                  {db.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {total > 0 && (
+          <p className="text-sm text-muted-foreground sm:self-end sm:pb-2">
+            Всего записей: <span className="font-mono text-foreground">{total}</span>
+            {selectedLogicalDbId ? (
+              <>
+                {" · "}
+                фильтр: <span className="font-medium text-foreground">{getLogicalDbName(selectedLogicalDbId)}</span>
+              </>
+            ) : null}
+          </p>
+        )}
+      </div>
 
       {/* Панель выбора для сравнения */}
       <Card className="bg-card border-border">
@@ -799,6 +792,7 @@ export function HistoryPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-12 text-right tabular-nums">№</TableHead>
                   <TableHead className="w-12">Выбор</TableHead>
                   <TableHead>Название</TableHead>
                   <TableHead>Статус</TableHead>
@@ -812,7 +806,8 @@ export function HistoryPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tests.map((test) => {
+                {tests.map((test, index) => {
+                  const rowNumber = page * pageSize + index + 1
                   const StatusIcon = STATUS_CONFIG[test.status].icon
                   const isCompleted = test.status === "completed"
                   const isChecked = selectedIds.includes(test.id)
@@ -820,6 +815,9 @@ export function HistoryPage() {
                   const selectionDisabled = !isCompleted || (!isChecked && selectedIds.length >= 5) || scenarioMismatch
                   return (
                     <TableRow key={test.id}>
+                      <TableCell className="text-right font-mono text-sm text-muted-foreground tabular-nums">
+                        {rowNumber}
+                      </TableCell>
                       <TableCell>
                         <div className="relative group">
                           <Checkbox

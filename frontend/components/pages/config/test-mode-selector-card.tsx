@@ -1,7 +1,7 @@
 "use client"
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Layers, Code } from "lucide-react"
+import { Layers } from "lucide-react"
 import type { TestMode } from "@/lib/types"
 
 interface TestModeSelectorCardProps {
@@ -9,21 +9,20 @@ interface TestModeSelectorCardProps {
   onModeChange: (mode: TestMode) => void
 }
 
-const testModes: { id: TestMode; name: string; description: string; icon: React.ElementType }[] = [
+const testModes: { id: TestMode; name: string; description: string }[] = [
   {
     id: "scenario",
     name: "По сценарию",
-    description: "Выбор предустановленного сценария нагрузки",
-    icon: Layers,
+    description: "Предустановленный сценарий нагрузки",
   },
   {
     id: "custom_query",
     name: "Конкретный запрос",
-    description: "Ввод произвольного SQL-запроса для тестирования",
-    icon: Code,
+    description: "Произвольный SQL для тестирования",
   },
 ]
 
+/** Взаимоисключающий выбор без видимых радиокнопок — карточки как в блоке «Выбор базы данных» (radiogroup для доступности) */
 export function TestModeSelectorCard({ testMode, onModeChange }: TestModeSelectorCardProps) {
   return (
     <Card className="bg-card border-border">
@@ -35,36 +34,29 @@ export function TestModeSelectorCard({ testMode, onModeChange }: TestModeSelecto
         <CardDescription>Выберите способ проведения нагрузочного теста</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div
+          className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+          role="radiogroup"
+          aria-label="Режим тестирования"
+        >
           {testModes.map((mode) => {
-            const Icon = mode.icon
             const isSelected = testMode === mode.id
             return (
-              <label
+              <button
                 key={mode.id}
-                className={`flex items-start gap-3 p-4 rounded-lg border cursor-pointer transition-colors ${
+                type="button"
+                role="radio"
+                aria-checked={isSelected}
+                onClick={() => onModeChange(mode.id)}
+                className={`rounded-lg border p-4 text-left transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none ${
                   isSelected
                     ? "border-primary bg-primary/10"
                     : "border-border hover:border-muted-foreground"
                 }`}
               >
-                <input
-                  type="radio"
-                  name="testMode"
-                  checked={isSelected}
-                  onChange={() => onModeChange(mode.id)}
-                  className="mt-1"
-                />
-                <div>
-                  <div className="flex items-center gap-2 font-medium">
-                    <Icon className="h-4 w-4" />
-                    {mode.name}
-                  </div>
-                  <div className="text-sm text-muted-foreground mt-1">
-                    {mode.description}
-                  </div>
-                </div>
-              </label>
+                <div className="font-medium text-sm">{mode.name}</div>
+                <div className="mt-1 text-xs text-muted-foreground">{mode.description}</div>
+              </button>
             )
           })}
         </div>

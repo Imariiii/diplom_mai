@@ -2,20 +2,28 @@
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Database } from "lucide-react"
+import { Loader2, Database } from "lucide-react"
 import type { DatabaseConnection } from "@/lib/types"
+
+export interface ConnectionCheckResult {
+  ok: boolean
+  message: string
+}
 
 interface DatabaseSelectionCardProps {
   connections: DatabaseConnection[]
   selectedDatabases: string[]
-  healthStatus: Record<string, boolean>
+  /** Результаты проверки сохранённых подключений; пусто, пока идёт загрузка */
+  connectionChecks: Record<string, ConnectionCheckResult>
+  checksPending: boolean
   onToggle: (dbId: string) => void
 }
 
 export function DatabaseSelectionCard({
   connections,
   selectedDatabases,
-  healthStatus,
+  connectionChecks,
+  checksPending,
   onToggle,
 }: DatabaseSelectionCardProps) {
   if (connections.length === 0) {
@@ -32,7 +40,6 @@ export function DatabaseSelectionCard({
     )
   }
 
-  // Группировка по логической БД
   const groups: {
     id: string | null
     name: string
@@ -55,6 +62,25 @@ export function DatabaseSelectionCard({
     groups.find((g) => g.id === gId)!.connections.push(conn)
   }
 
+  const rowStatus = (connId: string) => {
+    if (checksPending) {
+      return (
+        <span className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+          Проверка подключения…
+        </span>
+      )
+    }
+    const check = connectionChecks[connId]
+    if (!check) {
+      return <span className="mt-2 text-xs text-muted-foreground">Статус проверки неизвестен</span>
+    }
+    if (check.ok) {
+      return <span className="mt-2 text-xs text-emerald-600 dark:text-emerald-500">{check.message}</span>
+    }
+    return <span className="mt-2 text-xs text-destructive">{check.message}</span>
+  }
+
   return (
     <Card className="bg-card border-border">
       <CardHeader>
@@ -62,14 +88,14 @@ export function DatabaseSelectionCard({
           <Database className="h-5 w-5 text-primary" />
           Выбор СУБД
         </CardTitle>
-        <CardDescription>Выберите СУБД-подключения для тестирования</CardDescription>
+        <CardDescription>Выберите подключения для теста; для каждого показан результат проверки связи</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {groups.map((group) => (
           <div key={group.id ?? "__none__"}>
             {groups.length > 1 && (
               <div className="mb-2">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                   {group.name}
                 </p>
                 <p className="text-xs text-muted-foreground">
@@ -77,25 +103,28 @@ export function DatabaseSelectionCard({
                 </p>
               </div>
             )}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {group.connections.map((conn) => {
-                const isConnected = healthStatus[conn.id] !== false
+                const check = connectionChecks[conn.id]
+                const canSelect = !checksPending && check?.ok === true
                 return (
                   <label
                     key={conn.id}
-                    className={`flex items-center gap-3 p-4 rounded-lg border cursor-pointer transition-colors ${
+                    className={`flex cursor-pointer gap-3 rounded-lg border p-4 transition-colors ${
                       selectedDatabases.includes(conn.id)
                         ? "border-primary bg-primary/10"
                         : "border-border hover:border-muted-foreground"
-                    } ${!isConnected ? "opacity-50" : ""}`}
+                    } ${!canSelect ? "cursor-not-allowed opacity-80" : ""}`}
                   >
                     <Checkbox
                       checked={selectedDatabases.includes(conn.id)}
                       onCheckedChange={() => onToggle(conn.id)}
-                      disabled={!isConnected}
+                      disabled={!canSelect}
+                      className="mt-0.5"
+                      aria-describedby={`conn-status-${conn.id}`}
                     />
-                    <div>
-                      <span className="font-medium text-sm">{conn.name}</span>
+                    <div className="min-w-0 flex-1">
+                      <span className="text-sm font-medium">{conn.name}</span>
                       <div className="text-xs text-muted-foreground">
                         {conn.dbms_type} · {conn.host}:{conn.port}
                       </div>
@@ -104,6 +133,7 @@ export function DatabaseSelectionCard({
                           Профиль: {conn.schema_profile_name || conn.detected_profile_name || "не назначен"}
                         </div>
                       )}
+                      <div id={`conn-status-${conn.id}`}>{rowStatus(conn.id)}</div>
                     </div>
                   </label>
                 )

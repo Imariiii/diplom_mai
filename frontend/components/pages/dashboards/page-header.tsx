@@ -10,12 +10,14 @@ interface PageHeaderProps {
 
 export function PageHeader({ isConnected, currentTest }: PageHeaderProps) {
   return (
-    <div className="flex items-center justify-between">
-      <div>
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
         <h1 className="text-2xl font-bold text-foreground">Дашборды</h1>
-        <p className="text-muted-foreground">Мониторинг производительности в реальном времени</p>
+        <p className="text-muted-foreground text-pretty break-words">
+          Мониторинг производительности в реальном времени
+        </p>
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-center gap-3">
         <div className="flex items-center gap-1.5">
           {isConnected ? (
             <Wifi className="h-4 w-4 text-green-500" />
