@@ -125,7 +125,8 @@ class PostgreSQLDialect(DbmsDialect):
             SELECT
                 tc.table_name,
                 kcu.column_name,
-                tc.constraint_name
+                tc.constraint_name,
+                kcu.ordinal_position AS column_ordinal
             FROM information_schema.table_constraints tc
             JOIN information_schema.key_column_usage kcu
                 ON tc.constraint_name = kcu.constraint_name
@@ -133,7 +134,24 @@ class PostgreSQLDialect(DbmsDialect):
                AND tc.table_name = kcu.table_name
             WHERE tc.constraint_type = 'UNIQUE'
               AND tc.table_schema = current_schema()
-            ORDER BY tc.table_name, tc.constraint_name, kcu.ordinal_position
+            UNION ALL
+            SELECT
+                t.relname AS table_name,
+                a.attname AS column_name,
+                i.relname AS constraint_name,
+                indexed.ordinality AS column_ordinal
+            FROM pg_index ix
+            JOIN pg_class t ON t.oid = ix.indrelid
+            JOIN pg_class i ON i.oid = ix.indexrelid
+            JOIN pg_namespace n ON n.oid = t.relnamespace
+            JOIN unnest(ix.indkey) WITH ORDINALITY AS indexed(attnum, ordinality) ON TRUE
+            JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = indexed.attnum
+            LEFT JOIN pg_constraint c ON c.conindid = ix.indexrelid
+            WHERE ix.indisunique
+              AND NOT ix.indisprimary
+              AND c.oid IS NULL
+              AND n.nspname = current_schema()
+            ORDER BY 1, 3, 4
         """
 
     def get_check_constraints_sql(self) -> str:

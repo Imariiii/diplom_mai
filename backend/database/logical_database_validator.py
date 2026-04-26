@@ -145,7 +145,7 @@ class LogicalDatabaseValidator:
                     warnings,
                     f"{target_name}: в {reference_table.name} отсутствует колонка {column_name}",
                     mode,
-                    strict_error=True,
+                    strict_error=reference_column.category != "other",
                 )
                 continue
             if target_column.category != reference_column.category:
@@ -171,7 +171,7 @@ class LogicalDatabaseValidator:
                     warnings,
                     f"{target_name}: {reference_table.name}.{column_name} отличается server default/identity",
                     mode,
-                    strict_error=not reference_column.is_nullable or reference_column.is_primary_key,
+                    strict_error=self._default_drift_is_blocking(reference_column, target_column),
                 )
 
         if tuple(reference_table.primary_key) != tuple(target_table.primary_key):
@@ -192,7 +192,7 @@ class LogicalDatabaseValidator:
                 warnings,
                 f"{target_name}: FK-связи таблицы {reference_table.name} отличаются от эталона",
                 mode,
-                strict_error=True,
+                strict_error=False,
             )
 
         if self._unique_signature(reference_table) != self._unique_signature(target_table):
@@ -201,7 +201,7 @@ class LogicalDatabaseValidator:
                 warnings,
                 f"{target_name}: UNIQUE constraints таблицы {reference_table.name} отличаются от эталона",
                 mode,
-                strict_error=True,
+                strict_error=False,
             )
 
         if self._check_signature(reference_table) != self._check_signature(target_table):
@@ -246,12 +246,44 @@ class LogicalDatabaseValidator:
         if not column_default and default_kind == "default" and not identity_generation:
             default_kind = ""
             has_server_default = False
+        if column.is_primary_key and self._is_generated_key_default(
+            column_default=column_default,
+            default_kind=default_kind,
+            identity_generation=identity_generation,
+            is_auto_generated=bool(column.is_auto_generated),
+        ):
+            return (True, True, "generated_key", "")
         return (
             has_server_default,
             bool(column.is_auto_generated),
             default_kind,
             identity_generation,
         )
+
+    @staticmethod
+    def _is_generated_key_default(
+        column_default: Optional[str],
+        default_kind: str,
+        identity_generation: str,
+        is_auto_generated: bool,
+    ) -> bool:
+        default = (column_default or "").lower()
+        return (
+            is_auto_generated
+            or "nextval(" in default
+            or "auto_increment" in default
+            or default_kind in {"serial", "identity", "auto_increment", "generated"}
+            or bool(identity_generation)
+        )
+
+    def _default_drift_is_blocking(self, reference_column, target_column) -> bool:
+        """Определить, опасно ли различие server default для общего bundle."""
+        if reference_column.is_primary_key and target_column.is_primary_key:
+            # Если в одной СУБД PK заполняется AUTO_INCREMENT/sequence, а в другой требует явного
+            # значения, common metadata отключит автозаполнение и INSERT для такой таблицы не будет
+            # построен без явного безопасного плана. Это drift, но не несовместимость схемы.
+            return False
+        return not reference_column.is_nullable
 
     @staticmethod
     def _normalize_default_for_comparison(column_default) -> Optional[str]:

@@ -1,6 +1,7 @@
 """
 Модуль анализа схемы подключённой БД для автогенерации сценариев.
 """
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
@@ -24,6 +25,7 @@ TYPE_CATEGORY_MAPPING: Dict[str, str] = {
     "int": "integer",
     "int unsigned": "integer",
     "tinyint": "integer",
+    "tinyint(1)": "boolean",
     "tinyint unsigned": "integer",
     "mediumint": "integer",
     "mediumint unsigned": "integer",
@@ -32,6 +34,7 @@ TYPE_CATEGORY_MAPPING: Dict[str, str] = {
     "int8": "integer",
     "serial": "integer",
     "bigserial": "integer",
+    "year": "integer",
     "decimal": "numeric",
     "numeric": "numeric",
     "float": "numeric",
@@ -65,6 +68,8 @@ TYPE_CATEGORY_MAPPING: Dict[str, str] = {
     "enum": "string",
     "set": "string",
 }
+
+IGNORED_SYSTEM_TABLES = {"spatial_ref_sys"}
 
 
 @dataclass
@@ -205,7 +210,11 @@ class SchemaAnalyzer:
 
         async with engine.connect() as conn:
             tables_result = await conn.execute(text(dialect.get_list_tables_sql()))
-            table_names = [row[0] for row in tables_result.fetchall()]
+            table_names = [
+                row[0]
+                for row in tables_result.fetchall()
+                if str(row[0]).lower() not in IGNORED_SYSTEM_TABLES
+            ]
 
             tables: Dict[str, TableInfo] = {
                 table_name: TableInfo(name=table_name)
@@ -259,16 +268,22 @@ class SchemaAnalyzer:
             unique_constraints_result = await conn.execute(text(dialect.get_unique_constraints_sql()))
             unique_groups: Dict[tuple, List[tuple]] = {}
             for row in unique_constraints_result.fetchall():
-                table_name, column_name, constraint_name = row
+                row_values = tuple(row)
+                table_name, column_name, constraint_name = row_values[:3]
+                column_ordinal = (
+                    row_values[3]
+                    if len(row_values) > 3
+                    else len(unique_groups.get((table_name, constraint_name), []))
+                )
                 table = tables.get(table_name)
                 if not table:
                     continue
-                unique_groups.setdefault((table_name, constraint_name), []).append((column_name, len(unique_groups)))
+                unique_groups.setdefault((table_name, constraint_name), []).append((column_name, column_ordinal))
             for (table_name, _), column_entries in unique_groups.items():
                 table = tables.get(table_name)
                 if not table:
                     continue
-                columns = [column_name for column_name, _ in column_entries]
+                columns = [column_name for column_name, _ in sorted(column_entries, key=lambda item: item[1])]
                 table.unique_constraints.append(columns)
                 if len(columns) == 1:
                     column_name = columns[0]
@@ -364,7 +379,19 @@ class SchemaAnalyzer:
     def _categorize_data_type(self, data_type: Optional[str]) -> str:
         """Нормализовать тип данных до одной из прикладных категорий."""
         normalized = (data_type or "").strip().lower()
+        normalized = self._normalize_data_type_name(normalized)
         return TYPE_CATEGORY_MAPPING.get(normalized, "other")
+
+    @staticmethod
+    def _normalize_data_type_name(data_type: str) -> str:
+        """Убрать display width из MySQL/MariaDB типов, сохранив tinyint(1) как boolean-сигнал."""
+        if data_type.startswith("tinyint(1)"):
+            return "tinyint(1)"
+        normalized = data_type
+        normalized = normalized.replace(" unsigned", "__unsigned")
+        normalized = re.sub(r"\(\d+\)", "", normalized)
+        normalized = normalized.replace("__unsigned", " unsigned")
+        return normalized
 
     @staticmethod
     def _normalize_column_row(row) -> tuple:

@@ -40,7 +40,10 @@ class MySQLDialect(DbmsDialect):
             SELECT
                 table_name,
                 column_name,
-                data_type,
+                CASE
+                    WHEN LOWER(data_type) = 'tinyint' AND LOWER(column_type) = 'tinyint(1)' THEN 'tinyint(1)'
+                    ELSE data_type
+                END AS data_type,
                 is_nullable,
                 CONCAT_WS(' ', column_default, extra) AS column_default,
                 ordinal_position,

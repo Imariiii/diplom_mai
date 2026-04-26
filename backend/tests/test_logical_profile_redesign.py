@@ -8,7 +8,7 @@ import pytest
 from backend.database.logical_database_validator import LogicalDatabaseValidator
 from backend.database.scenario_bundle_resolver import ScenarioBundleResolver
 from backend.database.scenario_generator import ScenarioGenerator
-from backend.database.schema_analyzer import ColumnInfo, SchemaMetadata, TableInfo
+from backend.database.schema_analyzer import ColumnInfo, SchemaAnalyzer, SchemaMetadata, TableInfo
 
 
 def _connection(
@@ -126,22 +126,25 @@ class TestLogicalDatabaseValidatorStrictMode:
         reference = _metadata("ref", _table(
             "orders",
             [
+                ColumnInfo("id", "integer", False, is_primary_key=True, category="integer"),
                 ColumnInfo(
-                    "id",
-                    "integer",
+                    "created_at",
+                    "timestamp",
                     False,
-                    is_primary_key=True,
-                    is_auto_generated=True,
+                    column_default="CURRENT_TIMESTAMP",
                     has_server_default=True,
-                    default_kind="identity",
-                    category="integer",
+                    default_kind="default",
+                    category="date",
                 ),
             ],
             primary_key=["id"],
         ))
         target = _metadata("target", _table(
             "orders",
-            [ColumnInfo("id", "integer", False, is_primary_key=True, category="integer")],
+            [
+                ColumnInfo("id", "integer", False, is_primary_key=True, category="integer"),
+                ColumnInfo("created_at", "timestamp", False, category="date"),
+            ],
             primary_key=["id"],
         ))
         validator = LogicalDatabaseValidator.__new__(LogicalDatabaseValidator)
@@ -150,7 +153,137 @@ class TestLogicalDatabaseValidatorStrictMode:
 
         validator._compare_metadata(reference, target, "Target", errors, warnings, mode="strict")
 
-        assert "Target: orders.id отличается server default/identity" in errors
+        assert "Target: orders.created_at отличается server default/identity" in errors
+
+    def test_strict_mode_downgrades_primary_key_default_drift_to_warning(self):
+        reference = _metadata("pagila", _table(
+            "actor",
+            [ColumnInfo("actor_id", "integer", False, is_primary_key=True, category="integer")],
+            primary_key=["actor_id"],
+        ))
+        target = _metadata("sakila", _table(
+            "actor",
+            [
+                ColumnInfo(
+                    "actor_id",
+                    "integer",
+                    False,
+                    is_primary_key=True,
+                    is_auto_generated=True,
+                    has_server_default=True,
+                    default_kind="auto_increment",
+                    category="integer",
+                ),
+            ],
+            primary_key=["actor_id"],
+        ))
+        validator = LogicalDatabaseValidator.__new__(LogicalDatabaseValidator)
+        errors = []
+        warnings = []
+
+        validator._compare_metadata(reference, target, "Sakila", errors, warnings, mode="strict")
+
+        assert errors == []
+        assert "Sakila: actor.actor_id отличается server default/identity" in warnings
+
+    def test_strict_mode_treats_serial_and_auto_increment_as_equivalent_key_generation(self):
+        reference = _metadata("postgres", _table(
+            "actor",
+            [
+                ColumnInfo(
+                    "actor_id",
+                    "integer",
+                    False,
+                    is_primary_key=True,
+                    is_auto_generated=True,
+                    column_default="nextval('actor_actor_id_seq'::regclass)",
+                    has_server_default=True,
+                    default_kind="serial",
+                    category="integer",
+                ),
+            ],
+            primary_key=["actor_id"],
+        ))
+        target = _metadata("mysql", _table(
+            "actor",
+            [
+                ColumnInfo(
+                    "actor_id",
+                    "integer",
+                    False,
+                    is_primary_key=True,
+                    is_auto_generated=True,
+                    has_server_default=True,
+                    default_kind="auto_increment",
+                    category="integer",
+                ),
+            ],
+            primary_key=["actor_id"],
+        ))
+        validator = LogicalDatabaseValidator.__new__(LogicalDatabaseValidator)
+        errors = []
+        warnings = []
+
+        validator._compare_metadata(reference, target, "Sakila", errors, warnings, mode="strict")
+
+        assert errors == []
+        assert warnings == []
+
+    def test_strict_mode_downgrades_unsupported_missing_columns_to_warning(self):
+        reference = _metadata("postgres", _table(
+            "address",
+            [
+                ColumnInfo("address_id", "integer", False, is_primary_key=True, category="integer"),
+                ColumnInfo("location", "geometry", True, category="other"),
+            ],
+            primary_key=["address_id"],
+        ))
+        target = _metadata("mariadb", _table(
+            "address",
+            [ColumnInfo("address_id", "integer", False, is_primary_key=True, category="integer")],
+            primary_key=["address_id"],
+        ))
+        validator = LogicalDatabaseValidator.__new__(LogicalDatabaseValidator)
+        errors = []
+        warnings = []
+
+        validator._compare_metadata(reference, target, "Makila", errors, warnings, mode="strict")
+
+        assert errors == []
+        assert "Makila: в address отсутствует колонка location" in warnings
+
+    def test_strict_mode_reports_fk_and_unique_drift_as_warnings(self):
+        reference_table = _table(
+            "film_text",
+            [ColumnInfo("film_id", "integer", False, category="integer")],
+            primary_key=["film_id"],
+        )
+        reference_table.foreign_keys_out = [
+            SimpleNamespace(from_column="film_id", to_table="film", to_column="film_id")
+        ]
+        reference_table.unique_constraints = [["film_id"]]
+        reference = _metadata("postgres", reference_table)
+        target = _metadata("mysql", _table(
+            "film_text",
+            [ColumnInfo("film_id", "integer", False, category="integer")],
+            primary_key=["film_id"],
+        ))
+        validator = LogicalDatabaseValidator.__new__(LogicalDatabaseValidator)
+        errors = []
+        warnings = []
+
+        validator._compare_metadata(reference, target, "Sakila", errors, warnings, mode="strict")
+
+        assert errors == []
+        assert "Sakila: FK-связи таблицы film_text отличаются от эталона" in warnings
+        assert "Sakila: UNIQUE constraints таблицы film_text отличаются от эталона" in warnings
+
+    def test_schema_analyzer_normalizes_sakila_mysql_types(self):
+        analyzer = SchemaAnalyzer()
+
+        assert analyzer._categorize_data_type("tinyint(1)") == "boolean"
+        assert analyzer._categorize_data_type("tinyint(3) unsigned") == "integer"
+        assert analyzer._categorize_data_type("year") == "integer"
 
     def test_nullable_default_null_drift_is_ignored(self):
         reference = _metadata("mysql", _table(
