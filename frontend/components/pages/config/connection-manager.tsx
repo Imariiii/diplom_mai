@@ -216,6 +216,12 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
         description: db.description,
         schema_profile_id: db.schema_profile_id,
         schema_profile_name: db.schema_profile_name,
+        reference_connection_id: db.reference_connection_id,
+        reference_connection_name: db.reference_connection_name,
+        profile_status: db.profile_status,
+        compatibility_status: db.compatibility_status,
+        compatibility_report: db.compatibility_report,
+        validated_at: db.validated_at,
         created_at: db.created_at,
         updated_at: db.updated_at,
       }))
@@ -507,7 +513,10 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
   }
 
   const openLogicalDatabaseScenarioDialog = async (logicalDb: LogicalDatabase) => {
-    const referenceConnection = groupedConnections[logicalDb.id]?.[0]
+    const candidates = groupedConnections[logicalDb.id] || []
+    const referenceConnection =
+      candidates.find((connection) => connection.id === logicalDb.reference_connection_id) ||
+      candidates[0]
     if (!referenceConnection) {
       toast.error("Сначала добавьте хотя бы одно подключение в эту базу данных")
       return
@@ -556,6 +565,12 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
         description: updated.description,
         schema_profile_id: updated.schema_profile_id,
         schema_profile_name: updated.schema_profile_name,
+        reference_connection_id: updated.reference_connection_id,
+        reference_connection_name: updated.reference_connection_name,
+        profile_status: updated.profile_status,
+        compatibility_status: updated.compatibility_status,
+        compatibility_report: updated.compatibility_report,
+        validated_at: updated.validated_at,
         created_at: updated.created_at,
         updated_at: updated.updated_at,
       })
@@ -618,10 +633,35 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
     }
   }
 
+  const validateLogicalDatabase = async (logicalDb: LogicalDatabase) => {
+    try {
+      const report = await apiClient.validateLogicalDatabase(logicalDb.id, {
+        reference_connection_id: logicalDb.reference_connection_id || undefined,
+        mode: "strict",
+      })
+      await loadAll()
+      if (report.valid) {
+        toast.success(report.warnings.length > 0
+          ? "Совместимость подтверждена с предупреждениями"
+          : "Совместимость logical database подтверждена")
+      } else {
+        toast.error(report.errors[0] || "Logical database несовместима")
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось проверить совместимость")
+    }
+  }
+
   const getDbmsColor = (dbmsType: string) =>
     DBMS_STYLES[dbmsType as SupportedDbmsType]?.color || DBMS_STYLES.mysql.color
   const getDbmsIcon = (dbmsType: string) =>
     DBMS_STYLES[dbmsType as SupportedDbmsType]?.icon || DBMS_STYLES.mysql.icon
+  const formatCompatibilityStatus = (status?: string | null) => {
+    if (status === "valid") return "совместима"
+    if (status === "valid_with_warnings") return "совместима с предупреждениями"
+    if (status === "invalid") return "несовместима"
+    return "не проверена"
+  }
 
   // ===================== Рендер строки подключения =====================
 
@@ -641,7 +681,11 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
           </div>
           <div className="text-xs text-muted-foreground">
             профиль: {conn.schema_profile_name || conn.detected_profile_name || "не назначен"}
-            {conn.logical_database_id ? " · унаследован" : ""}
+            {conn.logical_database_id
+              ? conn.profile_source === "pending_review"
+                ? " · требует подтверждения"
+                : " · подтверждён"
+              : ""}
           </div>
         </div>
         {conn.group && (
@@ -777,6 +821,15 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
                                     {logicalDb.schema_profile_name}
                                   </Badge>
                                 )}
+                                <Badge
+                                  variant={logicalDb.compatibility_status === "invalid" ? "destructive" : "outline"}
+                                  className="text-[10px] shrink-0"
+                                >
+                                  {formatCompatibilityStatus(logicalDb.compatibility_status)}
+                                </Badge>
+                              </div>
+                              <div className="text-xs text-muted-foreground truncate hidden sm:block">
+                                Reference: {logicalDb.reference_connection_name || "не выбран"}
                               </div>
                               {logicalDb.description && (
                                 <div className="text-xs text-muted-foreground truncate hidden sm:block">
@@ -803,6 +856,13 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
                             >
                               <Database className="mr-2 h-4 w-4" />
                               Профиль и сценарии тестирования
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => { void validateLogicalDatabase(logicalDb) }}
+                              disabled={dbConnections.length === 0}
+                            >
+                              <CheckCircle className="mr-2 h-4 w-4" />
+                              Проверить совместимость
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() => {

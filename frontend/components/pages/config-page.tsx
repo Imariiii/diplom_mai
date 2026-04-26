@@ -192,6 +192,19 @@ export function ConfigPage() {
       return false
     }
 
+    if (
+      selectedLogicalDatabaseDetail?.profile_status === "incompatible" ||
+      selectedLogicalDatabaseDetail?.compatibility_status === "invalid"
+    ) {
+      toast.error("Logical database несовместима: проверьте профиль и reference connection")
+      return false
+    }
+
+    if (testConfig.testMode === "scenario" && !selectedBundle) {
+      toast.error("Для выбранного сценария нет активного SQL bundle")
+      return false
+    }
+
     if (testConfig.testMode === "custom_query") {
       if (!testConfig.customSql.trim()) {
         toast.error("Введите SQL-запрос")
@@ -283,6 +296,9 @@ export function ConfigPage() {
   )
   const hasMissingProfiles = selectedConnections.some((connection) => !connection.schema_profile_id)
   const hasMixedProfiles = selectedProfileIds.length > 1
+  const hasInvalidLogicalDb =
+    selectedLogicalDatabaseDetail?.profile_status === "incompatible" ||
+    selectedLogicalDatabaseDetail?.compatibility_status === "invalid"
   const selectedBundles = selectedLogicalDatabaseDetail?.bundles || []
   const selectedProfileName =
     selectedLogicalDatabaseDetail?.schema_profile_name ||
@@ -291,10 +307,12 @@ export function ConfigPage() {
   const selectedBundle = selectedBundles.find(
     (bundle) => bundle.scenario_template_id === testConfig.scenario && bundle.is_active
   )
+  const hasMissingActiveBundle = testConfig.testMode === "scenario" && !selectedBundle
 
   const canRunTest = () => {
     if (testConfig.databases.length === 0) return false
     if (hasMissingProfiles || hasMixedProfiles) return false
+    if (hasInvalidLogicalDb || hasMissingActiveBundle) return false
     if (testConfig.testMode === "custom_query") {
       return testConfig.customSql.trim().length > 0
     }
@@ -334,6 +352,28 @@ export function ConfigPage() {
         </div>
       )}
 
+      {selectedLogicalDatabaseDetail && (
+        <div className="rounded-lg border border-border bg-card p-4 text-sm">
+          <div className="font-medium">Состояние logical database</div>
+          <div className="mt-1 text-muted-foreground">
+            Профиль: {selectedLogicalDatabaseDetail.schema_profile_name || "не назначен"} ·
+            Reference: {selectedLogicalDatabaseDetail.reference_connection_name || "не выбран"} ·
+            Совместимость: {selectedLogicalDatabaseDetail.compatibility_status || "unknown"}
+          </div>
+          {selectedLogicalDatabaseDetail.compatibility_report?.errors?.length ? (
+            <div className="mt-2 text-red-700">
+              {selectedLogicalDatabaseDetail.compatibility_report.errors[0]}
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      {testConfig.databases.length > 0 && hasInvalidLogicalDb && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700">
+          Запуск заблокирован: logical database помечена как несовместимая. Проверьте отчёт совместимости и эталонное подключение.
+        </div>
+      )}
+
       <TestModeSelectorCard
         testMode={testConfig.testMode}
         onModeChange={(mode) => setTestConfig({ testMode: mode })}
@@ -360,6 +400,12 @@ export function ConfigPage() {
           }}
           onUseIndexesChange={(value) => setTestConfig({ useIndexes: value })}
         />
+      )}
+
+      {testConfig.testMode === "scenario" && hasMissingActiveBundle && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700">
+          Для выбранного logical scenario нет активного SQL bundle. Сначала сгенерируйте или активируйте bundle для профиля.
+        </div>
       )}
 
       {testConfig.testMode === "custom_query" && (

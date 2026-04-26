@@ -126,7 +126,7 @@ class NativeDumpStrategy(BackupStrategy):
             f"хост={conn_params['host']}:{conn_params['port']}"
         )
 
-        t0 = _time.time()
+        t0 = _time.monotonic()
         if dialect.native_dump_family == "postgresql":
             file_path = await self._create_postgres_backup(backup_id, conn_params, tables)
         elif dialect.native_dump_family == "mysql":
@@ -136,7 +136,7 @@ class NativeDumpStrategy(BackupStrategy):
         else:
             raise ValueError(f"Unsupported DBMS type: {dbms_type}")
         
-        dump_ms = (_time.time() - t0) * 1000
+        dump_ms = (_time.monotonic() - t0) * 1000
         file_size_mb = os.path.getsize(file_path) / 1024 / 1024 if os.path.exists(file_path) else 0
         print(
             f"[BACKUP:Native] [{dbms_type}] Дамп создан | "
@@ -267,7 +267,7 @@ class NativeDumpStrategy(BackupStrategy):
             f"размер={file_size_mb:.1f}МБ"
         )
 
-        t0 = _time.time()
+        t0 = _time.monotonic()
         if dialect.native_dump_family == "postgresql":
             await self._restore_postgres_backup(
                 engine, conn_params, backup_info.file_path, backup_info.tables
@@ -276,7 +276,7 @@ class NativeDumpStrategy(BackupStrategy):
             await self._restore_mysql_backup(
                 conn_params, backup_info.file_path, dbms_type
             )
-        restore_ms = (_time.time() - t0) * 1000
+        restore_ms = (_time.monotonic() - t0) * 1000
         print(
             f"[RESTORE:Native] [{dbms_type}] Восстановление завершено | "
             f"backup_id={backup_info.backup_id} | "
@@ -317,38 +317,82 @@ class NativeDumpStrategy(BackupStrategy):
         """Восстановление PostgreSQL через pg_restore"""
         await self._truncate_postgres_tables(engine, tables)
 
-        cmd = [
+        restore_cmd = [
             "pg_restore",
-            "-h", conn_params["host"],
-            "-p", str(conn_params["port"]),
-            "-U", conn_params["user"],
-            "-d", conn_params["database"],
             "--data-only",
             "--disable-triggers",
             "--no-owner",
+            "--file", "-",
             file_path
         ]
         
-        print(f"[RESTORE:Native] [postgresql] Запуск pg_restore ← {file_path}")
+        print(f"[RESTORE:Native] [postgresql] Запуск pg_restore | psql ← {file_path}")
         env = os.environ.copy()
         if conn_params["password"]:
             env["PGPASSWORD"] = conn_params["password"]
         
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
+        restore_proc = await asyncio.create_subprocess_exec(
+            *restore_cmd,
             env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        stdout, stderr = await proc.communicate()
+        stdout, restore_stderr = await restore_proc.communicate()
         
-        if proc.returncode != 0:
-            print(f"[RESTORE:Native] [postgresql] ОШИБКА pg_restore (код {proc.returncode}): {stderr.decode()}")
-            raise RuntimeError(f"pg_restore failed: {stderr.decode()}")
-        if stderr:
-            stderr_text = stderr.decode().strip()
+        if restore_proc.returncode != 0:
+            stderr_text = restore_stderr.decode()
+            print(f"[RESTORE:Native] [postgresql] ОШИБКА pg_restore (код {restore_proc.returncode}): {stderr_text}")
+            raise RuntimeError(f"pg_restore failed: {stderr_text}")
+
+        sanitized_sql, removed_lines = self._sanitize_postgres_restore_sql(stdout)
+        if removed_lines:
+            print(
+                f"[RESTORE:Native] [postgresql] Удалены несовместимые SET из дампа: "
+                f"{removed_lines}"
+            )
+
+        psql_cmd = [
+            "psql",
+            "-h", conn_params["host"],
+            "-p", str(conn_params["port"]),
+            "-U", conn_params["user"],
+            "-d", conn_params["database"],
+            "-v", "ON_ERROR_STOP=1",
+            "-q",
+        ]
+        psql_proc = await asyncio.create_subprocess_exec(
+            *psql_cmd,
+            env=env,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, psql_stderr = await psql_proc.communicate(sanitized_sql)
+
+        if psql_proc.returncode != 0:
+            stderr_text = psql_stderr.decode()
+            print(f"[RESTORE:Native] [postgresql] ОШИБКА psql restore (код {psql_proc.returncode}): {stderr_text}")
+            raise RuntimeError(f"psql restore failed: {stderr_text}")
+        if restore_stderr or psql_stderr:
+            stderr_text = (restore_stderr + psql_stderr).decode().strip()
             if stderr_text:
-                print(f"[RESTORE:Native] [postgresql] pg_restore предупреждения: {stderr_text[:200]}")
+                print(f"[RESTORE:Native] [postgresql] restore предупреждения: {stderr_text[:200]}")
+
+    @staticmethod
+    def _sanitize_postgres_restore_sql(sql_content: bytes) -> Tuple[bytes, int]:
+        """Убрать SET-параметры, отсутствующие в части версий PostgreSQL."""
+        removed = 0
+        sanitized_lines = []
+        incompatible_set_pattern = re.compile(
+            rb"^\s*SET\s+(?:transaction_timeout)\s*=",
+            re.IGNORECASE,
+        )
+        for line in sql_content.splitlines(keepends=True):
+            if incompatible_set_pattern.match(line):
+                removed += 1
+                continue
+            sanitized_lines.append(line)
+        return b"".join(sanitized_lines), removed
     
     async def _restore_mysql_backup(
         self,

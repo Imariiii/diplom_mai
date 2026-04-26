@@ -263,7 +263,8 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
             )
             if not preflight.get("valid"):
                 raise ValueError(
-                    "Preflight-проверка scenario bundle не пройдена: "
+                    "Сценарий не может быть запущен для выбранных БД. "
+                    "Проверка совместимости SQL bundle обнаружила ошибки: "
                     + "; ".join(preflight.get("errors", []))
                 )
             if preflight.get("warnings"):
@@ -414,10 +415,11 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         print(f"[TEST] Ошибка выполнения теста {test_id}: {e}")
         import traceback
         traceback.print_exc()
+        error_message = str(e)
         active_tests[test_id]["status"] = "failed"
-        active_tests[test_id]["error"] = str(e)
+        active_tests[test_id]["error"] = error_message
         
-        await streaming_callback.on_test_error(str(e))
+        await streaming_callback.on_test_error(error_message)
         
         if HISTORY_ENABLED and test_repository:
             try:
@@ -425,7 +427,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                 await test_repository.update_test_run_status(
                     test_id,
                     'failed',
-                    None,
+                    {"error": error_message},
                     started_at=start_ts,
                     finished_at=finish_ts
                 )
@@ -456,7 +458,10 @@ async def get_async_test_results(test_id: str):
     if test_info["status"] != "completed":
         return {
             "status": test_info["status"],
-            "message": "Тест ещё не завершён"
+            "message": test_info.get("error") or "Тест ещё не завершён",
+            "error": test_info.get("error"),
+            "connection_names": test_info.get("connection_names", {}),
+            "connection_db_types": test_info.get("connection_db_types", {})
         }
     
     return {

@@ -102,13 +102,13 @@ class ConnectionRepository(BaseRepository):
                 database=database,
                 group=group,
                 logical_database_id=logical_db.id if logical_db else self._parse_uuid(logical_database_id),
-                schema_profile_id=logical_db.schema_profile_id if logical_db and logical_db.schema_profile_id else None,
+                schema_profile_id=None,
                 detected_profile_name=(
                     logical_db.schema_profile.name
                     if logical_db and logical_db.schema_profile
                     else None
                 ),
-                profile_source='inherited' if logical_db and logical_db.schema_profile_id else 'manual',
+                profile_source='pending_review' if logical_db and logical_db.schema_profile_id else 'manual',
                 extra_params=extra_params or {},
             )
             session.add(config)
@@ -246,6 +246,17 @@ class ConnectionRepository(BaseRepository):
                 config.logical_database_id = (
                     target_logical_db.id if target_logical_db else self._parse_uuid(logical_database_id)
                 )
+                config.schema_profile_id = None
+                config.detected_profile_name = (
+                    target_logical_db.schema_profile.name
+                    if target_logical_db and target_logical_db.schema_profile
+                    else None
+                )
+                config.profile_source = (
+                    'pending_review'
+                    if target_logical_db and target_logical_db.schema_profile_id
+                    else 'manual'
+                )
             if is_active is not None:
                 config.is_active = 't' if is_active else 'f'
             if extra_params is not None:
@@ -258,15 +269,6 @@ class ConnectionRepository(BaseRepository):
                 config.profile_confidence = profile_confidence
             if profile_source is not None:
                 config.profile_source = profile_source
-
-            if target_logical_db and target_logical_db.schema_profile_id:
-                config.schema_profile_id = target_logical_db.schema_profile_id
-                config.detected_profile_name = (
-                    target_logical_db.schema_profile.name
-                    if target_logical_db.schema_profile
-                    else config.detected_profile_name
-                )
-                config.profile_source = 'inherited'
 
             config.updated_at = get_local_now()
 

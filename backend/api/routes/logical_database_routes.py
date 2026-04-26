@@ -3,7 +3,7 @@ API маршруты для управления логическими база
 """
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import inspect
 
 from backend import initialize
@@ -14,8 +14,10 @@ from backend.api.schemas.logical_database_schemas import (
     LogicalDatabaseDetailResponse,
     LogicalDatabaseListResponse,
     LogicalDatabaseProfileAssignRequest,
+    LogicalDatabaseReferenceUpdateRequest,
     LogicalDatabaseResponse,
     LogicalDatabaseUpdateRequest,
+    LogicalDatabaseValidationResponse,
 )
 from backend.api.schemas.profile_schemas import (
     ProfileBundleGenerateRequest,
@@ -74,6 +76,9 @@ def _serialize_connections(db, connections=None):
             group=connection.group,
             schema_profile_id=str(connection.schema_profile_id) if connection.schema_profile_id else None,
             schema_profile_name=connection.schema_profile.name if connection.schema_profile else None,
+            detected_profile_name=connection.detected_profile_name,
+            profile_confidence=connection.profile_confidence,
+            profile_source=connection.profile_source,
             is_active=connection.is_active == 't',
         )
         for connection in conn_list
@@ -89,6 +94,14 @@ def _to_response(db, connections=None) -> LogicalDatabaseResponse:
         description=db.description,
         schema_profile_id=str(db.schema_profile_id) if db.schema_profile_id else None,
         schema_profile_name=db.schema_profile.name if getattr(db, "schema_profile", None) else None,
+        reference_connection_id=str(db.reference_connection_id) if getattr(db, "reference_connection_id", None) else None,
+        reference_connection_name=(
+            db.reference_connection.name if getattr(db, "reference_connection", None) else None
+        ),
+        profile_status=getattr(db, "profile_status", "draft"),
+        compatibility_status=getattr(db, "compatibility_status", "unknown"),
+        compatibility_report=getattr(db, "compatibility_report", None),
+        validated_at=db.validated_at.isoformat() if getattr(db, "validated_at", None) else None,
         created_at=db.created_at.isoformat() if db.created_at else None,
         updated_at=db.updated_at.isoformat() if db.updated_at else None,
         connections=_serialize_connections(db, connections=connections),
@@ -249,7 +262,7 @@ async def assign_logical_database_profile(
             or (str(profile.reference_connection_id) if profile.reference_connection_id else None)
             or fallback_reference_connection_id
         )
-        if target_reference_connection_id != (
+        if profile.is_builtin != 't' and target_reference_connection_id != (
             str(profile.reference_connection_id) if profile.reference_connection_id else None
         ):
             await profile_repo.update_profile(
@@ -258,11 +271,51 @@ async def assign_logical_database_profile(
                 reference_connection_id=target_reference_connection_id,
             )
 
+        active_connections = [connection for connection in db.connections if connection.is_active == 't']
+        if active_connections:
+            active_ids = {str(connection.id) for connection in active_connections}
+            if target_reference_connection_id not in active_ids:
+                raise HTTPException(
+                    status_code=400,
+                    detail="reference_connection_id должен принадлежать выбранной logical database",
+                )
+            validator = LogicalDatabaseValidator(get_connection_repo())
+            compatibility = await validator.validate_connections(
+                [str(connection.id) for connection in active_connections],
+                reference_connection_id=target_reference_connection_id,
+                mode="strict",
+            )
+            if not compatibility.get("valid"):
+                await repo.update_profile_state(
+                    logical_db_id=logical_db_id,
+                    profile_status="incompatible",
+                    compatibility_status="invalid",
+                    compatibility_report=compatibility,
+                    reference_connection_id=target_reference_connection_id,
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Подключения logical database несовместимы: "
+                        + "; ".join(compatibility.get("errors", []))
+                    ),
+                )
+        else:
+            compatibility = None
+
         updated = await repo.assign_profile(
             logical_db_id=logical_db_id,
             schema_profile_id=str(profile.id),
             schema_profile_name=profile.name,
             profile_source='inherited',
+            reference_connection_id=target_reference_connection_id,
+            profile_status="confirmed",
+            compatibility_status=(
+                "valid_with_warnings"
+                if compatibility and compatibility.get("warnings")
+                else "valid"
+            ),
+            compatibility_report=compatibility,
         )
         if not updated:
             raise HTTPException(status_code=404, detail="Логическая БД не найдена")
@@ -308,13 +361,42 @@ async def generate_logical_database_bundles(
                 detail="reference_connection_id должен принадлежать выбранной logical database",
             )
 
+        validator = LogicalDatabaseValidator(get_connection_repo())
+        compatibility = await validator.validate_connections(
+            [str(connection.id) for connection in active_connections],
+            reference_connection_id=reference_connection_id,
+            mode="strict",
+        )
+        if not compatibility.get("valid"):
+            await repo.update_profile_state(
+                logical_db_id=logical_db_id,
+                profile_status="incompatible",
+                compatibility_status="invalid",
+                compatibility_report=compatibility,
+                reference_connection_id=reference_connection_id,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Подключения logical database несовместимы: "
+                    + "; ".join(compatibility.get("errors", []))
+                ),
+            )
+
+        await repo.update_profile_state(
+            logical_db_id=logical_db_id,
+            profile_status="confirmed",
+            compatibility_status="valid_with_warnings" if compatibility.get("warnings") else "valid",
+            compatibility_report=compatibility,
+            reference_connection_id=reference_connection_id,
+        )
+
         generator = ScenarioGenerator(
             connection_repo=get_connection_repo(),
             bundle_repository=get_bundle_repo(),
         )
-        bundles = await generator.generate_bundles_for_profile(
-            schema_profile_id=str(db.schema_profile_id),
-            reference_connection_id=reference_connection_id,
+        bundles = await generator.generate_bundles_for_logical_database(
+            logical_database_id=logical_db_id,
             scenario_types=data.scenario_template_ids,
         )
 
@@ -331,9 +413,11 @@ async def generate_logical_database_bundles(
         raise HTTPException(status_code=500, detail=f"Ошибка генерации bundle'ов logical database: {e}")
 
 
-@router.get("/{logical_db_id}/validate")
+@router.get("/{logical_db_id}/validate", response_model=LogicalDatabaseValidationResponse)
 async def validate_logical_database(
     logical_db_id: str,
+    reference_connection_id: str | None = Query(default=None),
+    mode: str = Query(default="lenient", pattern="^(lenient|strict)$"),
     repo: LogicalDatabaseRepository = Depends(get_logical_db_repo),
 ) -> Dict[str, Any]:
     """Проверить совместимость active-подключений logical database."""
@@ -347,14 +431,129 @@ async def validate_logical_database(
             raise HTTPException(status_code=400, detail="Для logical database нет активных подключений")
 
         validator = LogicalDatabaseValidator(get_connection_repo())
-        return await validator.validate_connections(
-            [str(connection.id) for connection in active_connections]
+        effective_reference_connection_id = (
+            reference_connection_id
+            or (str(db.reference_connection_id) if getattr(db, "reference_connection_id", None) else None)
         )
+        compatibility = await validator.validate_connections(
+            [str(connection.id) for connection in active_connections],
+            reference_connection_id=effective_reference_connection_id,
+            mode=mode,
+        )
+        await repo.update_profile_state(
+            logical_db_id=logical_db_id,
+            profile_status="confirmed" if compatibility.get("valid") else "incompatible",
+            compatibility_status=(
+                "invalid"
+                if not compatibility.get("valid")
+                else ("valid_with_warnings" if compatibility.get("warnings") else "valid")
+            ),
+            compatibility_report=compatibility,
+            reference_connection_id=compatibility.get("reference_connection_id"),
+        )
+        return compatibility
     except HTTPException:
         raise
     except Exception as e:
         print(f"[LOGICAL_DB] Ошибка проверки logical database: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка проверки logical database: {e}")
+
+
+@router.put("/{logical_db_id}/reference-connection", response_model=LogicalDatabaseResponse)
+async def update_logical_database_reference(
+    logical_db_id: str,
+    data: LogicalDatabaseReferenceUpdateRequest,
+    repo: LogicalDatabaseRepository = Depends(get_logical_db_repo),
+):
+    """Назначить эталонное подключение logical database."""
+    try:
+        db = await repo.get_by_id(logical_db_id)
+        if not db:
+            raise HTTPException(status_code=404, detail="Логическая БД не найдена")
+        active_ids = {
+            str(connection.id)
+            for connection in (db.connections or [])
+            if connection.is_active == 't'
+        }
+        if data.reference_connection_id not in active_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="reference_connection_id должен принадлежать выбранной logical database",
+            )
+        updated = await repo.update_profile_state(
+            logical_db_id=logical_db_id,
+            reference_connection_id=data.reference_connection_id,
+            compatibility_status="unknown",
+        )
+        return _to_response(updated)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[LOGICAL_DB] Ошибка назначения reference connection: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка назначения reference connection: {e}")
+
+
+@router.post("/{logical_db_id}/connections/{connection_id}/confirm-profile", response_model=LogicalDatabaseDetailResponse)
+async def confirm_logical_database_connection_profile(
+    logical_db_id: str,
+    connection_id: str,
+    repo: LogicalDatabaseRepository = Depends(get_logical_db_repo),
+):
+    """Подтвердить подключение через strict compatibility и синхронизировать профиль logical DB."""
+    try:
+        db = await repo.get_by_id(logical_db_id)
+        if not db:
+            raise HTTPException(status_code=404, detail="Логическая БД не найдена")
+        if not db.schema_profile_id:
+            raise HTTPException(status_code=400, detail="Для logical database сначала назначьте schema_profile")
+        if connection_id not in {str(connection.id) for connection in (db.connections or [])}:
+            raise HTTPException(status_code=400, detail="Подключение не принадлежит logical database")
+
+        active_connections = [connection for connection in db.connections if connection.is_active == 't']
+        reference_connection_id = (
+            str(db.reference_connection_id)
+            if getattr(db, "reference_connection_id", None)
+            else connection_id
+        )
+        validator = LogicalDatabaseValidator(get_connection_repo())
+        compatibility = await validator.validate_connections(
+            [str(connection.id) for connection in active_connections],
+            reference_connection_id=reference_connection_id,
+            mode="strict",
+        )
+        if not compatibility.get("valid"):
+            await repo.update_profile_state(
+                logical_db_id=logical_db_id,
+                profile_status="incompatible",
+                compatibility_status="invalid",
+                compatibility_report=compatibility,
+                reference_connection_id=reference_connection_id,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Подключения logical database несовместимы: "
+                    + "; ".join(compatibility.get("errors", []))
+                ),
+            )
+
+        updated = await repo.assign_profile(
+            logical_db_id=logical_db_id,
+            schema_profile_id=str(db.schema_profile_id),
+            schema_profile_name=db.schema_profile.name if db.schema_profile else None,
+            profile_source="inherited",
+            reference_connection_id=reference_connection_id,
+            profile_status="confirmed",
+            compatibility_status="valid_with_warnings" if compatibility.get("warnings") else "valid",
+            compatibility_report=compatibility,
+        )
+        bundles = await get_bundle_repo().list_bundles(schema_profile_id=str(db.schema_profile_id))
+        return _to_detail_response(updated, bundles=bundles)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[LOGICAL_DB] Ошибка подтверждения подключения logical database: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка подтверждения подключения logical database: {e}")
 
 
 @router.delete("/{logical_db_id}")

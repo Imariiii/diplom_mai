@@ -26,6 +26,15 @@ class LogicalDatabase(Base):
         ForeignKey('schema_profiles.id', ondelete='SET NULL'),
         nullable=True,
     )
+    reference_connection_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('db_connection_configs.id', ondelete='SET NULL'),
+        nullable=True,
+    )
+    profile_status = Column(String(30), nullable=False, default='draft')
+    compatibility_status = Column(String(30), nullable=False, default='unknown')
+    compatibility_report = Column(JSON, nullable=True)
+    validated_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -39,10 +48,18 @@ class LogicalDatabase(Base):
         back_populates="logical_database",
         foreign_keys="DatabaseConnectionConfig.logical_database_id",
     )
+    reference_connection = relationship(
+        "DatabaseConnectionConfig",
+        foreign_keys=[reference_connection_id],
+        post_update=True,
+    )
 
     __table_args__ = (
         Index('idx_logical_databases_name', 'name'),
         Index('idx_logical_databases_schema_profile_id', 'schema_profile_id'),
+        Index('idx_logical_databases_reference_connection_id', 'reference_connection_id'),
+        Index('idx_logical_databases_profile_status', 'profile_status'),
+        Index('idx_logical_databases_compatibility_status', 'compatibility_status'),
     )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -52,6 +69,12 @@ class LogicalDatabase(Base):
             'description': self.description,
             'schema_profile_id': str(self.schema_profile_id) if self.schema_profile_id else None,
             'schema_profile_name': self.schema_profile.name if self.schema_profile else None,
+            'reference_connection_id': str(self.reference_connection_id) if self.reference_connection_id else None,
+            'reference_connection_name': self.reference_connection.name if self.reference_connection else None,
+            'profile_status': self.profile_status,
+            'compatibility_status': self.compatibility_status,
+            'compatibility_report': self.compatibility_report,
+            'validated_at': self.validated_at.isoformat() if self.validated_at else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }

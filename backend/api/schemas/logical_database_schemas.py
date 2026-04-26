@@ -42,6 +42,9 @@ class LogicalDatabaseConnectionSummary(BaseModel):
     group: Optional[str] = None
     schema_profile_id: Optional[str] = None
     schema_profile_name: Optional[str] = None
+    detected_profile_name: Optional[str] = None
+    profile_confidence: Optional[float] = None
+    profile_source: Optional[str] = None
     is_active: bool
 
 
@@ -52,6 +55,12 @@ class LogicalDatabaseResponse(BaseModel):
     description: Optional[str] = None
     schema_profile_id: Optional[str] = None
     schema_profile_name: Optional[str] = None
+    reference_connection_id: Optional[str] = None
+    reference_connection_name: Optional[str] = None
+    profile_status: str = "draft"
+    compatibility_status: str = "unknown"
+    compatibility_report: Optional[dict] = None
+    validated_at: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     connections: List[LogicalDatabaseConnectionSummary] = Field(default_factory=list)
@@ -71,3 +80,19 @@ class LogicalDatabaseBundlesGenerateResponse(BaseModel):
     """Ответ генерации bundle'ов для logical database."""
     logical_database: LogicalDatabaseDetailResponse
     generated_count: int
+
+
+class LogicalDatabaseReferenceUpdateRequest(BaseModel):
+    """Назначение эталонного подключения logical database."""
+    reference_connection_id: str = Field(..., min_length=1)
+
+
+class LogicalDatabaseValidationResponse(BaseModel):
+    """Результат проверки совместимости logical database."""
+    valid: bool
+    errors: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    reference_connection_id: Optional[str] = None
+    reference_connection_name: Optional[str] = None
+    mode: str = "lenient"
+    connections: List[dict] = Field(default_factory=list)

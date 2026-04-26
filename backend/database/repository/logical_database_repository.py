@@ -2,7 +2,8 @@
 LogicalDatabaseRepository — управление логическими базами данных
 """
 import uuid
-from typing import List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
@@ -20,6 +21,7 @@ class LogicalDatabaseRepository(BaseRepository):
             select(LogicalDatabase)
             .options(
                 joinedload(LogicalDatabase.schema_profile),
+                joinedload(LogicalDatabase.reference_connection),
                 joinedload(LogicalDatabase.connections).joinedload(
                     DatabaseConnectionConfig.schema_profile
                 )
@@ -178,6 +180,10 @@ class LogicalDatabaseRepository(BaseRepository):
         schema_profile_id: Optional[str],
         schema_profile_name: Optional[str] = None,
         profile_source: str = "inherited",
+        reference_connection_id: Optional[str] = None,
+        profile_status: Optional[str] = None,
+        compatibility_status: Optional[str] = None,
+        compatibility_report: Optional[Dict[str, Any]] = None,
     ) -> Optional[LogicalDatabase]:
         """Назначить профиль логической БД и каскадно синхронизировать её подключения."""
         logical_db_uuid = self._parse_uuid(logical_db_id)
@@ -196,6 +202,15 @@ class LogicalDatabaseRepository(BaseRepository):
                 return None
 
             db.schema_profile_id = profile_uuid
+            if reference_connection_id is not None:
+                db.reference_connection_id = self._parse_uuid(reference_connection_id)
+            if profile_status is not None:
+                db.profile_status = profile_status
+            if compatibility_status is not None:
+                db.compatibility_status = compatibility_status
+            if compatibility_report is not None:
+                db.compatibility_report = compatibility_report
+                db.validated_at = datetime.now(timezone.utc)
             db.updated_at = get_local_now()
 
             for connection in db.connections or []:
@@ -209,6 +224,55 @@ class LogicalDatabaseRepository(BaseRepository):
             updated_id = str(db.id)
 
         return await self.get_by_id(updated_id)
+
+    async def update_profile_state(
+        self,
+        logical_db_id: str,
+        profile_status: Optional[str] = None,
+        compatibility_status: Optional[str] = None,
+        compatibility_report: Optional[Dict[str, Any]] = None,
+        reference_connection_id: Optional[str] = None,
+    ) -> Optional[LogicalDatabase]:
+        """Обновить статус профиля/совместимости logical database без каскада на подключения."""
+        logical_db_uuid = self._parse_uuid(logical_db_id)
+        if logical_db_uuid is None:
+            return None
+
+        updated_id: Optional[str] = None
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(LogicalDatabase).where(LogicalDatabase.id == logical_db_uuid)
+            )
+            db = result.scalar_one_or_none()
+            if not db:
+                return None
+
+            if profile_status is not None:
+                db.profile_status = profile_status
+            if compatibility_status is not None:
+                db.compatibility_status = compatibility_status
+            if compatibility_report is not None:
+                db.compatibility_report = compatibility_report
+                db.validated_at = datetime.now(timezone.utc)
+            if reference_connection_id is not None:
+                db.reference_connection_id = self._parse_uuid(reference_connection_id)
+            db.updated_at = get_local_now()
+
+            await session.commit()
+            updated_id = str(db.id)
+
+        return await self.get_by_id(updated_id)
+
+    async def set_reference_connection(
+        self,
+        logical_db_id: str,
+        reference_connection_id: Optional[str],
+    ) -> Optional[LogicalDatabase]:
+        """Назначить эталонное подключение logical database."""
+        return await self.update_profile_state(
+            logical_db_id=logical_db_id,
+            reference_connection_id=reference_connection_id or "",
+        )
 
     async def delete(self, logical_db_id: str) -> bool:
         """

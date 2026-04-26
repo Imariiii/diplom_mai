@@ -117,3 +117,102 @@ class TestScenarioBundleValidator:
         )
 
         assert tables == {"payment", "customer"}
+
+    def test_insert_missing_required_column_is_blocking_error(self):
+        metadata = _metadata("pg", [
+            _table(
+                "rental",
+                [
+                    ColumnInfo("rental_id", "integer", False, is_primary_key=True, category="integer"),
+                    ColumnInfo("rental_date", "timestamp", False, category="date"),
+                ],
+                primary_key=["rental_id"],
+            )
+        ])
+        validator = ScenarioBundleValidator.__new__(ScenarioBundleValidator)
+        errors = []
+        warnings = []
+
+        validator._validate_write_query(
+            "INSERT INTO rental (rental_date) VALUES ('{insert_rental_date}')",
+            metadata,
+            "Pagila",
+            errors,
+            warnings,
+        )
+
+        assert "Pagila: INSERT в rental пропускает обязательную колонку rental_id без server default" in errors
+
+    def test_insert_auto_generated_column_is_blocking_error(self):
+        metadata = _metadata("pg", [
+            _table(
+                "rental",
+                [
+                    ColumnInfo(
+                        "rental_id",
+                        "integer",
+                        False,
+                        is_primary_key=True,
+                        is_auto_generated=True,
+                        column_default="nextval('rental_rental_id_seq'::regclass)",
+                        has_server_default=True,
+                        default_kind="serial",
+                        category="integer",
+                    ),
+                    ColumnInfo("rental_date", "timestamp", False, category="date"),
+                ],
+                primary_key=["rental_id"],
+            )
+        ])
+        validator = ScenarioBundleValidator.__new__(ScenarioBundleValidator)
+        errors = []
+        warnings = []
+
+        validator._validate_write_query(
+            "INSERT INTO rental (rental_id, rental_date) VALUES ({insert_rental_id}, '{insert_rental_date}')",
+            metadata,
+            "Pagila",
+            errors,
+            warnings,
+        )
+
+        assert "Pagila: INSERT в rental явно заполняет auto-generated колонку rental_id" in errors
+
+    def test_insert_composite_unique_is_blocking_error(self):
+        metadata = _metadata("pg", [
+            _table(
+                "rental",
+                [
+                    ColumnInfo(
+                        "rental_id",
+                        "integer",
+                        False,
+                        is_primary_key=True,
+                        is_auto_generated=True,
+                        column_default="nextval('rental_rental_id_seq'::regclass)",
+                        has_server_default=True,
+                        default_kind="serial",
+                        category="integer",
+                    ),
+                    ColumnInfo("rental_date", "timestamp", False, category="date"),
+                    ColumnInfo("inventory_id", "integer", False, category="integer"),
+                    ColumnInfo("customer_id", "integer", False, category="integer"),
+                ],
+                primary_key=["rental_id"],
+            )
+        ])
+        metadata.tables["rental"].unique_constraints.append(["rental_date", "inventory_id", "customer_id"])
+        validator = ScenarioBundleValidator.__new__(ScenarioBundleValidator)
+        errors = []
+        warnings = []
+
+        validator._validate_write_query(
+            "INSERT INTO rental (rental_date, inventory_id, customer_id) "
+            "VALUES ('{insert_rental_date}', {insert_inventory_id}, {insert_customer_id})",
+            metadata,
+            "Pagila",
+            errors,
+            warnings,
+        )
+
+        assert any("composite UNIQUE (rental_date, inventory_id, customer_id)" in error for error in errors)

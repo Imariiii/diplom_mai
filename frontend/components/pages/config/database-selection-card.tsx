@@ -106,7 +106,9 @@ export function DatabaseSelectionCard({
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {group.connections.map((conn) => {
                 const check = connectionChecks[conn.id]
-                const canSelect = !checksPending && check?.ok === true
+                const requiresProfileReview =
+                  conn.logical_database_id && (!conn.schema_profile_id || conn.profile_source === "pending_review")
+                const canSelect = !checksPending && check?.ok === true && !requiresProfileReview
                 return (
                   <label
                     key={conn.id}
@@ -131,6 +133,14 @@ export function DatabaseSelectionCard({
                       {!group.id && (
                         <div className="text-xs text-muted-foreground">
                           Профиль: {conn.schema_profile_name || conn.detected_profile_name || "не назначен"}
+                        </div>
+                      )}
+                      {group.id && (
+                        <div className={`text-xs ${
+                          requiresProfileReview ? "text-amber-700" : "text-muted-foreground"
+                        }`}>
+                          Профиль: {conn.schema_profile_name || conn.detected_profile_name || "не назначен"}
+                          {requiresProfileReview ? " · требует подтверждения" : " · подтверждён"}
                         </div>
                       )}
                       <div id={`conn-status-${conn.id}`}>{rowStatus(conn.id)}</div>

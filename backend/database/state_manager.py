@@ -236,9 +236,9 @@ class DatabaseStateManager:
         
         # Создаём backup для ВСЕХ таблиц
         print(f"[BACKUP] [{dbms_type}] Создание бэкапа ({len(all_tables)} таблиц) через {strategy_label}...")
-        backup_start = time.time()
+        backup_start = time.monotonic()
         backup_info = await self._strategy.create_backup(engine, all_tables)
-        backup_duration_ms = (time.time() - backup_start) * 1000
+        backup_duration_ms = (time.monotonic() - backup_start) * 1000
         
         total_rows_backed = sum(backup_info.row_counts.values())
         print(
@@ -302,7 +302,7 @@ class DatabaseStateManager:
             f"строк={total_rows:,}"
         )
 
-        start_time = time.time()
+        start_time = time.monotonic()
         errors: List[str] = []
         
         # Блокируем СУБД на время restore
@@ -339,7 +339,7 @@ class DatabaseStateManager:
                 backup_key = self._make_backup_key(dbms_type, backup_id)
                 self._active_backups.pop(backup_key, None)
                 
-                duration_ms = (time.time() - start_time) * 1000
+                duration_ms = (time.monotonic() - start_time) * 1000
                 status = "успешно" if verified else "с ошибками верификации"
                 print(
                     f"[RESTORE] [{dbms_type}] Восстановление завершено {status} | "
@@ -356,7 +356,7 @@ class DatabaseStateManager:
                 )
                 
             except Exception as e:
-                duration_ms = (time.time() - start_time) * 1000
+                duration_ms = (time.monotonic() - start_time) * 1000
                 errors.append(str(e))
                 print(
                     f"[RESTORE] [{dbms_type}] ОШИБКА восстановления | "
@@ -448,7 +448,7 @@ class DatabaseStateManager:
         if backup_info.file_path:
             print(f"[RESTORE] [{dbms_type}] Файл дампа: {backup_info.file_path}")
 
-        start_time = time.time()
+        start_time = time.monotonic()
         errors: List[str] = []
         
         # Создаём фингерпринт текущего состояния
@@ -482,7 +482,7 @@ class DatabaseStateManager:
             # Удаляем из активных бэкапов
             self._active_backups.pop(backup_key, None)
             
-            duration_ms = (time.time() - start_time) * 1000
+            duration_ms = (time.monotonic() - start_time) * 1000
             status = "успешно" if verified else "с ошибками верификации"
             print(
                 f"[RESTORE] [{dbms_type}] Восстановление завершено {status} | "
@@ -499,7 +499,7 @@ class DatabaseStateManager:
             )
             
         except Exception as e:
-            duration_ms = (time.time() - start_time) * 1000
+            duration_ms = (time.monotonic() - start_time) * 1000
             errors.append(str(e))
             print(
                 f"[RESTORE] [{dbms_type}] ОШИБКА восстановления | "

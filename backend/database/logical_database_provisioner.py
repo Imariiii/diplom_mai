@@ -63,11 +63,6 @@ class LogicalDatabaseProvisioner:
                 "used_connection_id": None,
             }
 
-        reference_connection = self._pick_reference_connection(
-            active_connections=active_connections,
-            reference_connection_id=reference_connection_id,
-        )
-
         profile = None
         profile_was_created = False
         if logical_database.schema_profile_id:
@@ -75,28 +70,48 @@ class LogicalDatabaseProvisioner:
                 str(logical_database.schema_profile_id)
             )
 
-        if profile and profile.reference_connection_id:
-            inherited_reference = next(
-                (
-                    connection for connection in active_connections
-                    if str(connection.id) == str(profile.reference_connection_id)
-                ),
-                None,
-            )
-            if inherited_reference:
-                reference_connection = inherited_reference
+        reference_connection = self._pick_reference_connection(
+            active_connections=active_connections,
+            reference_connection_id=reference_connection_id,
+            logical_database=logical_database,
+            profile=profile,
+        )
 
         compatibility = None
         if len(active_connections) > 1:
             compatibility = await self.validator.validate_connections(
                 [str(connection.id) for connection in active_connections],
                 reference_connection_id=str(reference_connection.id),
+                mode="strict",
             )
             if not compatibility.get("valid"):
+                await self.logical_database_repository.update_profile_state(
+                    logical_db_id=str(logical_database.id),
+                    profile_status="incompatible",
+                    compatibility_status="invalid",
+                    compatibility_report=compatibility,
+                    reference_connection_id=str(reference_connection.id),
+                )
                 raise ValueError(
                     "Подключения logical database несовместимы: "
                     + "; ".join(compatibility.get("errors", []))
                 )
+        else:
+            compatibility = {
+                "valid": True,
+                "errors": [],
+                "warnings": [],
+                "reference_connection_id": str(reference_connection.id),
+                "reference_connection_name": reference_connection.name,
+                "mode": "strict",
+                "connections": [
+                    {
+                        "id": str(reference_connection.id),
+                        "name": reference_connection.name,
+                        "dbms_type": reference_connection.dbms_type,
+                    }
+                ],
+            }
 
         if not profile:
             profile, profile_was_created = await self._resolve_or_create_profile(
@@ -108,6 +123,21 @@ class LogicalDatabaseProvisioner:
                 schema_profile_id=str(profile.id),
                 schema_profile_name=profile.name,
                 profile_source='auto',
+                reference_connection_id=str(reference_connection.id),
+                profile_status="confirmed",
+                compatibility_status=self._compatibility_status(compatibility),
+                compatibility_report=compatibility,
+            )
+        else:
+            logical_database = await self.logical_database_repository.assign_profile(
+                logical_db_id=str(logical_database.id),
+                schema_profile_id=str(profile.id),
+                schema_profile_name=profile.name,
+                profile_source='inherited',
+                reference_connection_id=str(reference_connection.id),
+                profile_status="confirmed",
+                compatibility_status=self._compatibility_status(compatibility),
+                compatibility_report=compatibility,
             )
 
         if profile and not profile.reference_connection_id:
@@ -123,9 +153,9 @@ class LogicalDatabaseProvisioner:
         )
         generated_bundles: List[Dict[str, Any]] = []
         if should_generate:
-            generated_bundles = await self.generator.generate_bundles_for_profile(
-                schema_profile_id=str(profile.id),
-                reference_connection_id=str(reference_connection.id),
+            generated_bundles = await self.generator.generate_bundles_for_logical_database(
+                logical_database_id=str(logical_database.id),
+                scenario_types=None,
             )
 
         logical_database = await self.logical_database_repository.get_by_id(str(logical_database.id))
@@ -139,13 +169,20 @@ class LogicalDatabaseProvisioner:
         }
 
     async def _resolve_or_create_profile(self, logical_database, reference_connection):
-        """Получить существующий профиль по анализу схемы или создать новый."""
+        """Создать logical-DB scoped профиль по анализу схемы reference connection."""
         preview = await self.profile_resolver.build_connection_profile_preview(str(reference_connection.id))
         suggestion = preview["suggested_profile"]
 
-        profile_name = suggestion["name"]
+        profile_name = self._build_profile_name_from_logical_db(
+            logical_database.name,
+            logical_database_id=str(logical_database.id),
+            detected_name=suggestion["name"],
+        )
         if suggestion.get("confidence", 0) < 0.45:
-            profile_name = self._build_profile_name_from_logical_db(logical_database.name)
+            profile_name = self._build_profile_name_from_logical_db(
+                logical_database.name,
+                logical_database_id=str(logical_database.id),
+            )
 
         existing_profile = await self.profile_repository.get_profile_by_name(profile_name)
         if existing_profile:
@@ -179,23 +216,55 @@ class LogicalDatabaseProvisioner:
         }
         return any(template_id not in generated_templates for template_id in LOGICAL_SCENARIO_TEMPLATE_IDS)
 
-    def _pick_reference_connection(self, active_connections, reference_connection_id: Optional[str] = None):
+    def _pick_reference_connection(
+        self,
+        active_connections,
+        reference_connection_id: Optional[str] = None,
+        logical_database=None,
+        profile=None,
+    ):
         """Выбрать эталонное подключение для анализа и генерации bundle'ов."""
         if reference_connection_id:
             for connection in active_connections:
                 if str(connection.id) == reference_connection_id:
                     return connection
             raise ValueError("reference_connection_id не принадлежит logical database")
+        if logical_database and logical_database.reference_connection_id:
+            for connection in active_connections:
+                if str(connection.id) == str(logical_database.reference_connection_id):
+                    return connection
+        if profile and profile.reference_connection_id:
+            for connection in active_connections:
+                if str(connection.id) == str(profile.reference_connection_id):
+                    return connection
         return sorted(active_connections, key=lambda connection: connection.name)[0]
 
-    def _build_profile_name_from_logical_db(self, logical_database_name: str) -> str:
+    def _build_profile_name_from_logical_db(
+        self,
+        logical_database_name: str,
+        logical_database_id: Optional[str] = None,
+        detected_name: Optional[str] = None,
+    ) -> str:
         """Построить machine-friendly имя профиля из названия logical database."""
-        normalized = re.sub(r"[^a-z0-9]+", "_", logical_database_name.lower()).strip("_")
+        base = detected_name or logical_database_name
+        normalized = re.sub(r"[^a-z0-9]+", "_", base.lower()).strip("_")
         if not normalized:
             normalized = "custom_schema"
         if not normalized.endswith("_like"):
             normalized = f"{normalized}_like"
-        return normalized
+        if logical_database_id:
+            suffix = logical_database_id.replace("-", "")[:8]
+            normalized = f"{normalized}_{suffix}"
+        return normalized[:100]
+
+    def _compatibility_status(self, compatibility: Optional[Dict[str, Any]]) -> str:
+        if not compatibility:
+            return "unknown"
+        if not compatibility.get("valid"):
+            return "invalid"
+        if compatibility.get("warnings"):
+            return "valid_with_warnings"
+        return "valid"
 
     def _build_profile_description(
         self,

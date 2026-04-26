@@ -2,11 +2,13 @@
 Модуль автоматической генерации сценариев тестирования по схеме БД.
 """
 from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from backend.database.query_templates import QUERY_TEMPLATES, QueryTemplateDefinition, TemplateRequirements
 from backend.database.repository.scenario_bundle_repository import ScenarioBundleRepository
-from backend.database.schema_analyzer import ColumnInfo, SchemaAnalyzer, SchemaMetadata, TableInfo
+from backend.database.scenario_bundle_validator import ScenarioBundleValidator
+from backend.database.schema_analyzer import ColumnInfo, ForeignKeyInfo, SchemaAnalyzer, SchemaMetadata, TableInfo
 
 
 DEFAULT_SCENARIO_TYPES: List[str] = [
@@ -18,7 +20,7 @@ DEFAULT_SCENARIO_TYPES: List[str] = [
     "olap",
 ]
 
-SCENARIO_GENERATOR_VERSION = "logical-scenario-generator-v6"
+SCENARIO_GENERATOR_VERSION = "logical-scenario-generator-v7"
 
 SCENARIO_QUERY_LIMITS: Dict[str, int] = {
     "read_only": 6,
@@ -28,6 +30,16 @@ SCENARIO_QUERY_LIMITS: Dict[str, int] = {
     "oltp": 5,
     "olap": 5,
 }
+
+
+@dataclass
+class InsertPlan:
+    """План безопасного INSERT для одной таблицы."""
+
+    table_name: str
+    columns: List[ColumnInfo] = field(default_factory=list)
+    values_sql: List[str] = field(default_factory=list)
+    params: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class ScenarioGenerator:
@@ -100,6 +112,101 @@ class ScenarioGenerator:
 
         return generated_bundles
 
+    async def generate_bundles_for_logical_database(
+        self,
+        logical_database_id: str,
+        scenario_types: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Сгенерировать bundles по пересечению capabilities всех active-подключений logical DB."""
+        if self.bundle_repository is None:
+            raise ValueError("ScenarioBundleRepository не передан в ScenarioGenerator")
+        if self.connection_repo is None:
+            raise ValueError("ConnectionRepository не передан в ScenarioGenerator")
+
+        from backend import initialize
+
+        logical_db_repo = getattr(initialize, "logical_database_repository", None)
+        if logical_db_repo is None:
+            raise ValueError("LogicalDatabaseRepository не инициализирован")
+
+        logical_database = await logical_db_repo.get_by_id(logical_database_id)
+        if not logical_database:
+            raise ValueError("Логическая БД не найдена")
+        if not logical_database.schema_profile_id:
+            raise ValueError("Для logical database сначала назначьте schema_profile")
+
+        active_connections = [
+            connection
+            for connection in (logical_database.connections or [])
+            if connection.is_active == 't'
+        ]
+        if not active_connections:
+            raise ValueError("Для logical database нет активных подключений")
+
+        connection_ids = [str(connection.id) for connection in active_connections]
+        reference_connection_id = (
+            str(logical_database.reference_connection_id)
+            if getattr(logical_database, "reference_connection_id", None)
+            else connection_ids[0]
+        )
+        if reference_connection_id not in connection_ids:
+            reference_connection_id = connection_ids[0]
+
+        metadata_by_connection = {
+            connection_id: await self.schema_analyzer.analyze_connection(connection_id)
+            for connection_id in connection_ids
+        }
+        reference_metadata = metadata_by_connection[reference_connection_id]
+        common_metadata = self._build_common_capability_metadata(
+            reference_metadata=reference_metadata,
+            all_metadata=list(metadata_by_connection.values()),
+        )
+
+        selected_types = self._normalize_scenario_types(scenario_types)
+        validator = ScenarioBundleValidator(self.connection_repo)
+        generated_bundles: List[Dict[str, Any]] = []
+
+        for scenario_type in selected_types:
+            queries, indexes = self._build_scenario_assets(common_metadata, scenario_type)
+            if not queries:
+                continue
+
+            transient_bundle = {
+                "queries": queries,
+                "indexes": indexes,
+                "scenario_template_id": scenario_type,
+            }
+            validation = await validator.validate_bundle_for_connections(
+                transient_bundle,
+                connection_ids,
+                smoke_run=False,
+            )
+            if not validation.get("valid"):
+                print(
+                    f"[SCENARIO_GENERATOR] Bundle {scenario_type} для logical DB "
+                    f"{logical_database.name} не прошёл preflight: {validation.get('errors')}"
+                )
+                continue
+
+            bundle = await self.bundle_repository.upsert_generated_bundle(
+                schema_profile_id=str(logical_database.schema_profile_id),
+                scenario_template_id=scenario_type,
+                name=f"{scenario_type}::{logical_database.name}::common",
+                description=(
+                    f"Bundle, сгенерированный по общему безопасному subset "
+                    f"logical database '{logical_database.name}'"
+                ),
+                generation_source=SCENARIO_GENERATOR_VERSION,
+                generated_from_connection_id=reference_connection_id,
+                queries=queries,
+                indexes=indexes,
+            )
+            full_bundle = await self.bundle_repository.get_bundle(str(bundle.id))
+            if full_bundle:
+                generated_bundles.append(full_bundle.to_dict())
+
+        return generated_bundles
+
     def _normalize_scenario_types(self, scenario_types: Optional[List[str]]) -> List[str]:
         """Нормализовать и провалидировать список типов сценариев."""
         requested = scenario_types or DEFAULT_SCENARIO_TYPES
@@ -108,6 +215,121 @@ class ScenarioGenerator:
             if scenario_type in DEFAULT_SCENARIO_TYPES and scenario_type not in normalized:
                 normalized.append(scenario_type)
         return normalized
+
+    def _build_common_capability_metadata(
+        self,
+        reference_metadata: SchemaMetadata,
+        all_metadata: List[SchemaMetadata],
+    ) -> SchemaMetadata:
+        """Построить conservative metadata, безопасную для всех подключений logical DB."""
+        common_table_names = set(reference_metadata.tables.keys())
+        for metadata in all_metadata:
+            common_table_names &= set(metadata.tables.keys())
+
+        common_tables: Dict[str, TableInfo] = {}
+        for table_name in sorted(common_table_names):
+            reference_table = reference_metadata.tables[table_name]
+            peer_tables = [metadata.tables[table_name] for metadata in all_metadata]
+            common_column_names = {column.name for column in reference_table.columns}
+            for peer_table in peer_tables:
+                common_column_names &= {column.name for column in peer_table.columns}
+
+            merged_columns: List[ColumnInfo] = []
+            for reference_column in reference_table.columns:
+                if reference_column.name not in common_column_names:
+                    continue
+                peer_columns = [peer_table.get_column(reference_column.name) for peer_table in peer_tables]
+                if any(peer_column is None for peer_column in peer_columns):
+                    continue
+                if any(peer_column.category != reference_column.category for peer_column in peer_columns):
+                    continue
+
+                merged_columns.append(
+                    ColumnInfo(
+                        name=reference_column.name,
+                        data_type=reference_column.data_type,
+                        is_nullable=any(peer_column.is_nullable for peer_column in peer_columns),
+                        is_primary_key=all(peer_column.is_primary_key for peer_column in peer_columns),
+                        is_unique=all(peer_column.is_unique for peer_column in peer_columns),
+                        is_partition_key=any(peer_column.is_partition_key for peer_column in peer_columns),
+                        is_auto_generated=all(peer_column.is_auto_generated for peer_column in peer_columns),
+                        column_default=reference_column.column_default,
+                        has_server_default=all(peer_column.has_server_default for peer_column in peer_columns),
+                        default_kind=reference_column.default_kind,
+                        identity_generation=reference_column.identity_generation,
+                        category=reference_column.category,
+                    )
+                )
+
+            common_primary_key = list(reference_table.primary_key)
+            if any(peer_table.primary_key != common_primary_key for peer_table in peer_tables):
+                common_primary_key = []
+
+            common_foreign_keys = self._common_foreign_keys(reference_table, peer_tables, common_column_names)
+            common_unique_constraints = self._common_unique_constraints(peer_tables, common_column_names)
+            merged_table = TableInfo(
+                name=table_name,
+                columns=merged_columns,
+                primary_key=common_primary_key,
+                row_count=min(peer_table.row_count for peer_table in peer_tables),
+                foreign_keys_out=common_foreign_keys,
+                unique_constraints=common_unique_constraints,
+                check_constraints=self._common_check_constraints(peer_tables),
+            )
+            for column in merged_table.columns:
+                column.is_primary_key = column.name in merged_table.primary_key
+                if any([column.name] == constraint for constraint in merged_table.unique_constraints):
+                    column.is_unique = True
+                    merged_table.unique_columns.add(column.name)
+            common_tables[table_name] = merged_table
+
+        analyzer = SchemaAnalyzer.__new__(SchemaAnalyzer)
+        for table in common_tables.values():
+            table.capabilities = analyzer._classify_table(table, common_tables)
+
+        return SchemaMetadata(
+            connection_id=reference_metadata.connection_id,
+            connection_name=f"{reference_metadata.connection_name} common subset",
+            dbms_type=reference_metadata.dbms_type,
+            tables=common_tables,
+        )
+
+    def _common_foreign_keys(
+        self,
+        reference_table: TableInfo,
+        peer_tables: List[TableInfo],
+        common_column_names: Set[str],
+    ) -> List[ForeignKeyInfo]:
+        result: List[ForeignKeyInfo] = []
+        peer_signatures = [
+            {
+                (fk.from_column, fk.to_table, fk.to_column)
+                for fk in peer_table.foreign_keys_out
+            }
+            for peer_table in peer_tables
+        ]
+        common_signatures = set.intersection(*peer_signatures) if peer_signatures else set()
+        for fk in reference_table.foreign_keys_out:
+            signature = (fk.from_column, fk.to_table, fk.to_column)
+            if signature in common_signatures and fk.from_column in common_column_names:
+                result.append(fk)
+        return result
+
+    def _common_unique_constraints(self, peer_tables: List[TableInfo], common_column_names: Set[str]) -> List[List[str]]:
+        peer_constraints = [
+            {tuple(columns) for columns in peer_table.unique_constraints}
+            for peer_table in peer_tables
+        ]
+        common_constraints = set.intersection(*peer_constraints) if peer_constraints else set()
+        return [
+            list(columns)
+            for columns in sorted(common_constraints)
+            if set(columns).issubset(common_column_names)
+        ]
+
+    def _common_check_constraints(self, peer_tables: List[TableInfo]) -> List[str]:
+        peer_checks = [set(peer_table.check_constraints) for peer_table in peer_tables]
+        return sorted(set.intersection(*peer_checks)) if peer_checks else []
 
     def _get_available_scenario_types(self, metadata: SchemaMetadata) -> List[str]:
         """Определить, для каких типов сценариев можно собрать хотя бы один запрос."""
@@ -625,42 +847,15 @@ class ScenarioGenerator:
         table: TableInfo,
         template: QueryTemplateDefinition,
     ) -> Optional[Dict[str, Any]]:
-        insert_parts: List[Tuple[ColumnInfo, str, Optional[Dict[str, Any]]]] = []
-        foreign_key_mapping = {
-            fk.from_column: fk
-            for fk in table.foreign_keys_out
-        }
-
-        self._enrich_fk_mapping_heuristic(metadata, table, foreign_key_mapping)
-
-        for column in table.columns:
-            if column.is_auto_generated:
-                continue
-            if column.is_primary_key and column.column_default:
-                continue
-            if column.is_partition_key:
-                if not column.is_nullable and not column.column_default:
-                    return None
-                continue
-            part = self._build_insert_part(table.name, column, foreign_key_mapping.get(column.name))
-            if part is None:
-                if not column.is_nullable and not column.column_default:
-                    return None
-                continue
-            insert_parts.append((column, part[0], part[1]))
-
-        if not insert_parts:
+        insert_plan = self._build_insert_plan(metadata, table)
+        if not insert_plan or not insert_plan.columns:
             return None
 
         columns_sql = ", ".join(
             self._identifier(column.name)
-            for column, _, _ in insert_parts
+            for column in insert_plan.columns
         )
-        values_sql = ", ".join(value_sql for _, value_sql, _ in insert_parts)
-        params = [
-            param for _, _, param in insert_parts
-            if param is not None
-        ]
+        values_sql = ", ".join(insert_plan.values_sql)
 
         sql_template = (
             f"INSERT INTO {self._identifier(table.name)} ({columns_sql}) "
@@ -670,8 +865,79 @@ class ScenarioGenerator:
             template=template,
             sql_template=sql_template,
             description=f"{template.description} Таблица: {table.name}",
-            params=params,
+            params=insert_plan.params,
         )
+
+    def _build_insert_plan(
+        self,
+        metadata: SchemaMetadata,
+        table: TableInfo,
+    ) -> Optional[InsertPlan]:
+        """Построить безопасный план INSERT с учётом обязательных колонок."""
+        if self._has_unsafe_composite_unique(table):
+            return None
+
+        insert_plan = InsertPlan(table_name=table.name)
+        foreign_key_mapping = {
+            fk.from_column: fk
+            for fk in table.foreign_keys_out
+        }
+
+        self._enrich_fk_mapping_heuristic(metadata, table, foreign_key_mapping)
+
+        for column in table.columns:
+            if self._database_fills_column(column):
+                continue
+            if self._has_insert_default(column):
+                continue
+            if column.is_primary_key:
+                return None
+            if column.is_partition_key:
+                if self._requires_explicit_insert_value(column):
+                    return None
+                continue
+            part = self._build_insert_part(table.name, column, foreign_key_mapping.get(column.name))
+            if part is None:
+                if self._requires_explicit_insert_value(column):
+                    return None
+                continue
+            insert_plan.columns.append(column)
+            insert_plan.values_sql.append(part[0])
+            if part[1] is not None:
+                insert_plan.params.append(part[1])
+
+        if not insert_plan.columns:
+            return None
+
+        return insert_plan
+
+    def _database_fills_column(self, column: ColumnInfo) -> bool:
+        """Проверить, должна ли СУБД сама заполнить колонку при INSERT."""
+        return bool(
+            column.is_auto_generated
+            or (column.is_primary_key and self._has_insert_default(column))
+        )
+
+    def _has_insert_default(self, column: ColumnInfo) -> bool:
+        """Есть ли у колонки server-side default, применимый при INSERT."""
+        default_kind = (column.default_kind or "").lower()
+        default_text = (column.column_default or "").strip().lower()
+        return bool(
+            column.has_server_default
+            or column.column_default
+            or column.identity_generation
+            or default_kind in {"identity", "serial", "auto_increment", "generated", "default"}
+            or default_text in {"identity", "auto_increment"}
+            or "nextval(" in default_text
+        )
+
+    def _requires_explicit_insert_value(self, column: ColumnInfo) -> bool:
+        """Нужно ли обязательно указать значение колонки в INSERT."""
+        return not column.is_nullable and not self._has_insert_default(column)
+
+    def _has_unsafe_composite_unique(self, table: TableInfo) -> bool:
+        """Отсечь таблицы, где универсальный INSERT рискует нарушить composite UNIQUE."""
+        return any(len(columns) > 1 for columns in table.unique_constraints)
 
     def _template_delete_by_pk(
         self,

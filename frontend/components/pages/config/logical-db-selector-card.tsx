@@ -78,6 +78,14 @@ export function LogicalDbSelectorCard({ databases, selectedId, onSelect }: Logic
                   Профиль: {db.schema_profile_name}
                 </div>
               )}
+              <div className="text-xs text-muted-foreground mt-0.5">
+                Reference: {db.reference_connection_name || "не выбран"}
+              </div>
+              <div className={`text-xs mt-0.5 ${
+                db.compatibility_status === "invalid" ? "text-red-600" : "text-muted-foreground"
+              }`}>
+                Совместимость: {db.compatibility_status || "unknown"}
+              </div>
             </button>
           ))}
         </div>

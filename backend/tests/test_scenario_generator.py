@@ -235,3 +235,159 @@ class TestScenarioGenerator:
             ("insert_geolocation_city", "olist_geolocation_dataset", "geolocation_city"),
             ("insert_geolocation_state", "olist_geolocation_dataset", "geolocation_state"),
         }
+
+    def test_insert_skips_primary_key_with_server_default(self):
+        table = TableInfo(
+            name="rental",
+            row_count=100,
+            primary_key=["rental_id"],
+            columns=[
+                ColumnInfo(
+                    name="rental_id",
+                    data_type="integer",
+                    is_nullable=False,
+                    is_primary_key=True,
+                    is_auto_generated=True,
+                    column_default="nextval('rental_rental_id_seq'::regclass)",
+                    has_server_default=True,
+                    default_kind="serial",
+                    category="integer",
+                ),
+                ColumnInfo(
+                    name="rental_date",
+                    data_type="timestamp",
+                    is_nullable=False,
+                    category="date",
+                ),
+            ],
+        )
+
+        query = ScenarioGenerator()._template_insert_basic(
+            metadata=SchemaMetadata(
+                connection_id="test",
+                connection_name="test",
+                dbms_type="postgresql",
+                tables={"rental": table},
+            ),
+            table=table,
+            template=QUERY_TEMPLATES_BY_ID["insert_basic"],
+        )
+
+        assert query is not None
+        assert "rental_id" not in query["sql_template"]
+
+    def test_insert_skips_table_when_required_primary_key_has_no_default(self):
+        table = TableInfo(
+            name="rental",
+            row_count=100,
+            primary_key=["rental_id"],
+            columns=[
+                ColumnInfo(
+                    name="rental_id",
+                    data_type="integer",
+                    is_nullable=False,
+                    is_primary_key=True,
+                    category="integer",
+                ),
+                ColumnInfo(
+                    name="rental_date",
+                    data_type="timestamp",
+                    is_nullable=False,
+                    category="date",
+                ),
+            ],
+        )
+
+        query = ScenarioGenerator()._template_insert_basic(
+            metadata=SchemaMetadata(
+                connection_id="test",
+                connection_name="test",
+                dbms_type="postgresql",
+                tables={"rental": table},
+            ),
+            table=table,
+            template=QUERY_TEMPLATES_BY_ID["insert_basic"],
+        )
+
+        assert query is None
+
+    def test_insert_skips_table_with_composite_unique_constraint(self):
+        table = TableInfo(
+            name="rental",
+            row_count=100,
+            primary_key=["rental_id"],
+            unique_constraints=[["rental_date", "inventory_id", "customer_id"]],
+            columns=[
+                ColumnInfo(
+                    name="rental_id",
+                    data_type="integer",
+                    is_nullable=False,
+                    is_primary_key=True,
+                    is_auto_generated=True,
+                    column_default="nextval('rental_rental_id_seq'::regclass)",
+                    has_server_default=True,
+                    default_kind="serial",
+                    category="integer",
+                ),
+                ColumnInfo("rental_date", "timestamp", False, category="date"),
+                ColumnInfo("inventory_id", "integer", False, category="integer"),
+                ColumnInfo("customer_id", "integer", False, category="integer"),
+            ],
+        )
+
+        query = ScenarioGenerator()._template_insert_basic(
+            metadata=SchemaMetadata(
+                connection_id="test",
+                connection_name="test",
+                dbms_type="postgresql",
+                tables={"rental": table},
+            ),
+            table=table,
+            template=QUERY_TEMPLATES_BY_ID["insert_basic"],
+        )
+
+        assert query is None
+
+    def test_insert_omits_non_pk_column_with_server_default(self):
+        table = TableInfo(
+            name="payment",
+            row_count=100,
+            primary_key=["payment_id"],
+            columns=[
+                ColumnInfo(
+                    name="payment_id",
+                    data_type="integer",
+                    is_nullable=False,
+                    is_primary_key=True,
+                    is_auto_generated=True,
+                    column_default="auto_increment",
+                    has_server_default=True,
+                    default_kind="auto_increment",
+                    category="integer",
+                ),
+                ColumnInfo("amount", "decimal", False, category="numeric"),
+                ColumnInfo(
+                    name="last_update",
+                    data_type="timestamp",
+                    is_nullable=False,
+                    column_default="current_timestamp() on update current_timestamp()",
+                    has_server_default=True,
+                    default_kind="default",
+                    category="date",
+                ),
+            ],
+        )
+
+        query = ScenarioGenerator()._template_insert_basic(
+            metadata=SchemaMetadata(
+                connection_id="test",
+                connection_name="test",
+                dbms_type="mysql",
+                tables={"payment": table},
+            ),
+            table=table,
+            template=QUERY_TEMPLATES_BY_ID["insert_basic"],
+        )
+
+        assert query is not None
+        assert "last_update" not in query["sql_template"]

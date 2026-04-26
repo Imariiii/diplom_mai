@@ -43,6 +43,7 @@ export interface TestRun {
     overall_tps?: number
     total_duration?: number
   }
+  error?: string | null
   connection_names?: Record<string, string>
   connection_db_types?: Record<string, string>
 }
@@ -248,6 +249,12 @@ export interface LogicalDatabase {
   description: string | null
   schema_profile_id?: string | null
   schema_profile_name?: string | null
+  reference_connection_id?: string | null
+  reference_connection_name?: string | null
+  profile_status?: 'draft' | 'confirmed' | 'needs_review' | 'incompatible' | string
+  compatibility_status?: 'unknown' | 'valid' | 'valid_with_warnings' | 'invalid' | string
+  compatibility_report?: LogicalDatabaseCompatibilityReport | null
+  validated_at?: string | null
   created_at: string | null
   updated_at: string | null
 }
@@ -278,6 +285,20 @@ export interface LogicalDatabaseProfileAssignRequest {
   description?: string
   reference_connection_id?: string
   profile_source?: string
+}
+
+export interface LogicalDatabaseReferenceUpdateRequest {
+  reference_connection_id: string
+}
+
+export interface LogicalDatabaseCompatibilityReport {
+  valid: boolean
+  errors: string[]
+  warnings: string[]
+  reference_connection_id?: string | null
+  reference_connection_name?: string | null
+  mode?: string
+  connections?: Array<{ id: string; name: string; dbms_type: string }>
 }
 
 export interface LogicalDatabaseListResponse {

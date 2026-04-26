@@ -23,6 +23,11 @@ export function DashboardsPage() {
   const [statusMessage, setStatusMessage] = useState<string>("")
   const [showProgressBar, setShowProgressBar] = useState(false)
 
+  const formatFailureMessage = (message?: string | null) => {
+    const cleaned = (message || "").replace(/^Ошибка:\s*/i, "").trim()
+    return cleaned || "Тест завершился с ошибкой до сбора метрик. Подробности отсутствуют."
+  }
+
   // Ref always holds the latest currentTest so the cleanup closure is never stale.
   const currentTestRef = useRef(currentTest)
   currentTestRef.current = currentTest
@@ -45,6 +50,7 @@ export function DashboardsPage() {
             ...currentTest,
             status: data.status,
             endTime: new Date(),
+            error: data.status === "failed" ? formatFailureMessage(data.message) : currentTest.error,
           }
 
           if (data.status === "completed") {
@@ -210,7 +216,20 @@ export function DashboardsPage() {
             }).catch(console.error)
           } else {
             setCurrentTest(updatedTest)
-            toast.error("Тестирование завершилось с ошибкой")
+            apiClient.getAsyncTestResults(currentTest.id)
+              .then((response) => {
+                const errorMessage = formatFailureMessage(response.error || response.message || data.message)
+                setCurrentTest({
+                  ...updatedTest,
+                  error: errorMessage,
+                  connection_names: response.connection_names,
+                  connection_db_types: response.connection_db_types,
+                })
+              })
+              .catch(() => {
+                setCurrentTest(updatedTest)
+              })
+            toast.error(formatFailureMessage(data.message))
           }
         }
       }
@@ -325,6 +344,9 @@ export function DashboardsPage() {
     () => currentTest?.results?.filter((result) => (result.selfCheckWarnings?.length || 0) > 0) || [],
     [currentTest?.results]
   )
+  const failedMessage = currentTest?.status === "failed"
+    ? formatFailureMessage(currentTest.error || statusMessage)
+    : null
 
   if (!currentTest && Object.keys(realtimeData).length === 0) {
     return (
@@ -357,6 +379,20 @@ export function DashboardsPage() {
           <AlertTitle>Финализация результатов</AlertTitle>
           <AlertDescription className="text-sm text-muted-foreground">
             Сбор метрик, сохранение в историю и подготовка сводки… Это обычно занимает несколько секунд.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {failedMessage && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Тест не был выполнен</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <p>{failedMessage}</p>
+            <p className="text-sm">
+              Метрики и графики пустые, потому что нагрузка остановлена на этапе подготовки или preflight-проверки.
+              Исправьте указанную причину и запустите тест повторно.
+            </p>
           </AlertDescription>
         </Alert>
       )}

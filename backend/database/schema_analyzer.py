@@ -75,6 +75,9 @@ class ColumnInfo:
     is_partition_key: bool = False
     is_auto_generated: bool = False
     column_default: Optional[str] = None
+    has_server_default: bool = False
+    default_kind: Optional[str] = None
+    identity_generation: Optional[str] = None
     category: str = "other"
 
     def to_dict(self) -> Dict[str, Any]:
@@ -87,6 +90,9 @@ class ColumnInfo:
             "is_partition_key": self.is_partition_key,
             "is_auto_generated": self.is_auto_generated,
             "column_default": self.column_default,
+            "has_server_default": self.has_server_default,
+            "default_kind": self.default_kind,
+            "identity_generation": self.identity_generation,
             "category": self.category,
         }
 
@@ -122,6 +128,8 @@ class TableInfo:
     foreign_keys_out: List[ForeignKeyInfo] = field(default_factory=list)
     foreign_keys_in: List[ForeignKeyInfo] = field(default_factory=list)
     unique_columns: Set[str] = field(default_factory=set)
+    unique_constraints: List[List[str]] = field(default_factory=list)
+    check_constraints: List[str] = field(default_factory=list)
     capabilities: List[str] = field(default_factory=list)
 
     def get_column(self, column_name: str) -> Optional[ColumnInfo]:
@@ -150,6 +158,8 @@ class TableInfo:
             "foreign_keys_out": [fk.to_dict() for fk in self.foreign_keys_out],
             "foreign_keys_in": [fk.to_dict() for fk in self.foreign_keys_in],
             "unique_columns": sorted(self.unique_columns),
+            "unique_constraints": [list(columns) for columns in self.unique_constraints],
+            "check_constraints": list(self.check_constraints),
             "capabilities": list(self.capabilities),
         }
 
@@ -200,7 +210,17 @@ class SchemaAnalyzer:
 
             columns_result = await conn.execute(text(dialect.get_columns_sql()))
             for row in columns_result.fetchall():
-                table_name, column_name, data_type, is_nullable, column_default, _ = row
+                (
+                    table_name,
+                    column_name,
+                    data_type,
+                    is_nullable,
+                    column_default,
+                    _,
+                    identity_generation,
+                    default_kind,
+                    has_server_default,
+                ) = self._normalize_column_row(row)
                 if table_name not in tables:
                     continue
                 tables[table_name].columns.append(
@@ -209,7 +229,14 @@ class SchemaAnalyzer:
                         data_type=data_type,
                         is_nullable=str(is_nullable).upper() == "YES",
                         column_default=column_default,
-                        is_auto_generated=self._is_auto_generated(column_default),
+                        has_server_default=has_server_default,
+                        default_kind=default_kind,
+                        identity_generation=identity_generation,
+                        is_auto_generated=self._is_auto_generated(
+                            column_default=column_default,
+                            default_kind=default_kind,
+                            identity_generation=identity_generation,
+                        ),
                         category=self._categorize_data_type(data_type),
                     )
                 )
@@ -226,15 +253,37 @@ class SchemaAnalyzer:
                     column.is_primary_key = True
 
             unique_constraints_result = await conn.execute(text(dialect.get_unique_constraints_sql()))
+            unique_groups: Dict[tuple, List[tuple]] = {}
             for row in unique_constraints_result.fetchall():
-                table_name, column_name, _ = row
+                table_name, column_name, constraint_name = row
                 table = tables.get(table_name)
                 if not table:
                     continue
-                table.unique_columns.add(column_name)
-                column = table.get_column(column_name)
-                if column:
-                    column.is_unique = True
+                unique_groups.setdefault((table_name, constraint_name), []).append((column_name, len(unique_groups)))
+            for (table_name, _), column_entries in unique_groups.items():
+                table = tables.get(table_name)
+                if not table:
+                    continue
+                columns = [column_name for column_name, _ in column_entries]
+                table.unique_constraints.append(columns)
+                if len(columns) == 1:
+                    column_name = columns[0]
+                    table.unique_columns.add(column_name)
+                    column = table.get_column(column_name)
+                    if column:
+                        column.is_unique = True
+
+            check_sql = dialect.get_check_constraints_sql()
+            if check_sql:
+                try:
+                    check_constraints_result = await conn.execute(text(check_sql))
+                    for row in check_constraints_result.fetchall():
+                        table_name, check_clause = row
+                        table = tables.get(table_name)
+                        if table and check_clause:
+                            table.check_constraints.append(str(check_clause))
+                except Exception as exc:
+                    print(f"[SCHEMA_ANALYZER] Не удалось получить check constraints: {exc}")
 
             partition_sql = dialect.get_partition_columns_sql()
             if partition_sql:
@@ -307,14 +356,43 @@ class SchemaAnalyzer:
         normalized = (data_type or "").strip().lower()
         return TYPE_CATEGORY_MAPPING.get(normalized, "other")
 
-    def _is_auto_generated(self, column_default: Optional[str]) -> bool:
+    @staticmethod
+    def _normalize_column_row(row) -> tuple:
+        """Привести результат dialect.get_columns_sql к расширенному формату."""
+        values = tuple(row)
+        table_name, column_name, data_type, is_nullable, column_default, ordinal_position = values[:6]
+        identity_generation = values[6] if len(values) > 6 else None
+        default_kind = values[7] if len(values) > 7 else None
+        has_server_default_raw = values[8] if len(values) > 8 else column_default is not None
+        has_server_default = str(has_server_default_raw).lower() in {"true", "t", "1", "yes"}
+        return (
+            table_name,
+            column_name,
+            data_type,
+            is_nullable,
+            column_default,
+            ordinal_position,
+            identity_generation,
+            default_kind,
+            has_server_default,
+        )
+
+    def _is_auto_generated(
+        self,
+        column_default: Optional[str],
+        default_kind: Optional[str] = None,
+        identity_generation: Optional[str] = None,
+    ) -> bool:
         """Определить, генерируется ли значение колонки СУБД автоматически."""
         default = (column_default or "").lower()
+        kind = (default_kind or "").lower()
+        identity = (identity_generation or "").lower()
         return (
             "nextval(" in default
             or "auto_increment" in default
-            or "generated" in default
             or "identity" in default
+            or kind in {"identity", "serial", "auto_increment", "generated"}
+            or bool(identity)
         )
 
     def _classify_table(self, table: TableInfo, all_tables: Optional[Dict[str, "TableInfo"]] = None) -> List[str]:
@@ -394,5 +472,18 @@ class SchemaAnalyzer:
             if column.name in foreign_key_columns:
                 continue
             if column.category not in supported_categories:
+                return False
+
+        for unique_constraint in table.unique_constraints:
+            if len(unique_constraint) <= 1:
+                continue
+            constrained_columns = [
+                table.get_column(column_name)
+                for column_name in unique_constraint
+            ]
+            if all(column is not None for column in constrained_columns):
+                # Независимая выборка существующих значений по composite UNIQUE легко
+                # создаёт уже существующую комбинацию. Без доменной стратегии такие
+                # таблицы небезопасны для универсального INSERT.
                 return False
         return True

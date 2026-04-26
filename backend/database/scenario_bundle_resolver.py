@@ -58,7 +58,7 @@ class ScenarioBundleResolver:
             inconsistent_connections = [
                 connection.name
                 for connection in connections
-                if connection.schema_profile_id and str(connection.schema_profile_id) != schema_profile_id
+                if not connection.schema_profile_id or str(connection.schema_profile_id) != schema_profile_id
             ]
             if inconsistent_connections:
                 raise ValueError(
@@ -89,7 +89,19 @@ class ScenarioBundleResolver:
         compatibility = None
         if len(connections) > 1:
             validator = LogicalDatabaseValidator(self.connection_repository)
-            compatibility = await validator.validate_connections(connection_ids)
+            reference_connection_id = None
+            if logical_database_ids:
+                logical_database = connections[0].logical_database
+                reference_connection_id = (
+                    str(logical_database.reference_connection_id)
+                    if logical_database and getattr(logical_database, "reference_connection_id", None)
+                    else None
+                )
+            compatibility = await validator.validate_connections(
+                connection_ids,
+                reference_connection_id=reference_connection_id,
+                mode="strict",
+            )
             if not compatibility.get("valid"):
                 raise ValueError(
                     "Подключения logical database несовместимы: "

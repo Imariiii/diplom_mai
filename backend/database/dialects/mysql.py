@@ -43,7 +43,15 @@ class MySQLDialect(DbmsDialect):
                 data_type,
                 is_nullable,
                 CONCAT_WS(' ', column_default, extra) AS column_default,
-                ordinal_position
+                ordinal_position,
+                NULL AS identity_generation,
+                CASE
+                    WHEN LOWER(extra) LIKE '%auto_increment%' THEN 'auto_increment'
+                    WHEN LOWER(extra) LIKE '%virtual generated%' OR LOWER(extra) LIKE '%stored generated%' THEN 'generated'
+                    WHEN column_default IS NOT NULL THEN 'default'
+                    ELSE NULL
+                END AS default_kind,
+                (column_default IS NOT NULL OR extra <> '') AS has_server_default
             FROM information_schema.columns
             WHERE table_schema = DATABASE()
             ORDER BY table_name, ordinal_position
@@ -100,6 +108,20 @@ class MySQLDialect(DbmsDialect):
             WHERE tc.constraint_type = 'UNIQUE'
               AND tc.table_schema = DATABASE()
             ORDER BY tc.table_name, tc.constraint_name, kcu.ordinal_position
+        """
+
+    def get_check_constraints_sql(self) -> str:
+        return """
+            SELECT
+                tc.table_name,
+                cc.check_clause
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.check_constraints cc
+                ON tc.constraint_name = cc.constraint_name
+               AND tc.constraint_schema = cc.constraint_schema
+            WHERE tc.constraint_type = 'CHECK'
+              AND tc.table_schema = DATABASE()
+            ORDER BY tc.table_name, tc.constraint_name
         """
 
     def get_table_size_sql(self, table: str) -> str:

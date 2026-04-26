@@ -4,6 +4,7 @@ Bootstrap нового profile-centric слоя сценариев.
 from typing import List, Optional
 
 from backend.database.logical_database_provisioner import LogicalDatabaseProvisioner
+from backend.database.logical_database_validator import LogicalDatabaseValidator
 from backend.database.repository.connection_repository import ConnectionRepository
 from backend.database.repository.logical_database_repository import LogicalDatabaseRepository
 from backend.database.repository.profile_repository import ProfileRepository
@@ -44,12 +45,14 @@ class LogicalScenarioBootstrap:
             )
             if logical_database_repository else None
         )
+        self.validator = LogicalDatabaseValidator(connection_repository)
 
     async def bootstrap(self) -> None:
         """Запустить seed и мягкую миграцию существующих сущностей."""
         await self.profile_repository.seed_builtin_templates()
         await self._auto_provision_existing_logical_databases()
         await self._sync_logical_databases_profiles()
+        await self._ensure_logical_database_reference_state()
         await self._ensure_reference_connections()
         await self._ensure_builtin_bundles()
 
@@ -79,7 +82,7 @@ class LogicalScenarioBootstrap:
                 )
 
     async def _sync_logical_databases_profiles(self) -> None:
-        """Синхронизировать profile_id на уровне logical database по её подключениям."""
+        """Синхронизировать profile_id только если strict validation подтверждает совместимость."""
         if not self.logical_database_repository:
             return
 
@@ -105,16 +108,86 @@ class LogicalScenarioBootstrap:
                 ),
                 None,
             )
-            await self.logical_database_repository.assign_profile(
-                logical_db_id=str(logical_database.id),
-                schema_profile_id=target_profile_id,
-                schema_profile_name=(
-                    reference_connection.schema_profile.name
-                    if reference_connection and reference_connection.schema_profile
-                    else None
-                ),
-                profile_source='inherited',
-            )
+            if not reference_connection:
+                continue
+            try:
+                compatibility = await self.validator.validate_connections(
+                    [str(connection.id) for connection in active_connections],
+                    reference_connection_id=str(reference_connection.id),
+                    mode="strict",
+                )
+                if not compatibility.get("valid"):
+                    await self.logical_database_repository.update_profile_state(
+                        logical_db_id=str(logical_database.id),
+                        profile_status="incompatible",
+                        compatibility_status="invalid",
+                        compatibility_report=compatibility,
+                        reference_connection_id=str(reference_connection.id),
+                    )
+                    continue
+                await self.logical_database_repository.assign_profile(
+                    logical_db_id=str(logical_database.id),
+                    schema_profile_id=target_profile_id,
+                    schema_profile_name=(
+                        reference_connection.schema_profile.name
+                        if reference_connection and reference_connection.schema_profile
+                        else None
+                    ),
+                    profile_source='inherited',
+                    reference_connection_id=str(reference_connection.id),
+                    profile_status="confirmed",
+                    compatibility_status=(
+                        "valid_with_warnings" if compatibility.get("warnings") else "valid"
+                    ),
+                    compatibility_report=compatibility,
+                )
+            except Exception as exc:
+                print(
+                    f"[LOGICAL_BOOTSTRAP] Не удалось синхронизировать профиль "
+                    f"{logical_database.name}: {exc}"
+                )
+
+    async def _ensure_logical_database_reference_state(self) -> None:
+        """Восстановить reference/status для существующих logical database без слепой синхронизации."""
+        if not self.logical_database_repository:
+            return
+
+        logical_databases = await self.logical_database_repository.get_all_with_connections()
+        for logical_database in logical_databases:
+            active_connections = [
+                connection
+                for connection in logical_database.connections
+                if connection.is_active == 't'
+            ]
+            if not active_connections:
+                continue
+
+            reference_connection = self._pick_logical_database_reference(logical_database, active_connections)
+            if not reference_connection:
+                continue
+
+            try:
+                compatibility = await self.validator.validate_connections(
+                    [str(connection.id) for connection in active_connections],
+                    reference_connection_id=str(reference_connection.id),
+                    mode="strict",
+                )
+                await self.logical_database_repository.update_profile_state(
+                    logical_db_id=str(logical_database.id),
+                    profile_status="confirmed" if compatibility.get("valid") else "incompatible",
+                    compatibility_status=(
+                        "invalid"
+                        if not compatibility.get("valid")
+                        else ("valid_with_warnings" if compatibility.get("warnings") else "valid")
+                    ),
+                    compatibility_report=compatibility,
+                    reference_connection_id=str(reference_connection.id),
+                )
+            except Exception as exc:
+                print(
+                    f"[LOGICAL_BOOTSTRAP] Не удалось проверить logical database "
+                    f"{logical_database.name}: {exc}"
+                )
 
     async def _ensure_reference_connections(self) -> None:
         profiles = await self.profile_repository.list_profiles()
@@ -190,3 +263,16 @@ class LogicalScenarioBootstrap:
             if preferred_name.lower() in lower_map:
                 return lower_map[preferred_name.lower()]
         return sorted(connections, key=lambda item: item.name)[0]
+
+    def _pick_logical_database_reference(self, logical_database, active_connections: List) -> Optional[object]:
+        if not active_connections:
+            return None
+        if getattr(logical_database, "reference_connection_id", None):
+            for connection in active_connections:
+                if str(connection.id) == str(logical_database.reference_connection_id):
+                    return connection
+        if logical_database.schema_profile and logical_database.schema_profile.reference_connection_id:
+            for connection in active_connections:
+                if str(connection.id) == str(logical_database.schema_profile.reference_connection_id):
+                    return connection
+        return sorted(active_connections, key=lambda item: item.name)[0]

@@ -28,6 +28,8 @@ import type {
   LogicalDatabaseDetail,
   LogicalDatabaseBundlesGenerateResponse,
   LogicalDatabaseProfileAssignRequest,
+  LogicalDatabaseReferenceUpdateRequest,
+  LogicalDatabaseCompatibilityReport,
   LogicalDatabaseWithConnections,
   LogicalDatabaseCreateRequest,
   LogicalDatabaseUpdateRequest,
@@ -335,6 +337,41 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(data),
     })
+  }
+
+  async validateLogicalDatabase(
+    id: string,
+    params?: { reference_connection_id?: string; mode?: 'lenient' | 'strict' }
+  ): Promise<LogicalDatabaseCompatibilityReport> {
+    const queryParams = new URLSearchParams()
+    if (params?.reference_connection_id) {
+      queryParams.set('reference_connection_id', params.reference_connection_id)
+    }
+    if (params?.mode) queryParams.set('mode', params.mode)
+    const qs = queryParams.toString()
+    return this.request<LogicalDatabaseCompatibilityReport>(
+      `/api/logical-databases/${id}/validate${qs ? `?${qs}` : ''}`
+    )
+  }
+
+  async updateLogicalDatabaseReference(
+    id: string,
+    data: LogicalDatabaseReferenceUpdateRequest
+  ): Promise<LogicalDatabaseWithConnections> {
+    return this.request<LogicalDatabaseWithConnections>(`/api/logical-databases/${id}/reference-connection`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async confirmLogicalDatabaseConnectionProfile(
+    logicalDatabaseId: string,
+    connectionId: string
+  ): Promise<LogicalDatabaseDetail> {
+    return this.request<LogicalDatabaseDetail>(
+      `/api/logical-databases/${logicalDatabaseId}/connections/${connectionId}/confirm-profile`,
+      { method: 'POST' },
+    )
   }
 
   // ==================== Логические сценарии и профили схем ====================

@@ -46,7 +46,15 @@ class PostgreSQLDialect(DbmsDialect):
                     WHEN is_identity = 'YES' THEN 'identity'
                     ELSE column_default
                 END AS column_default,
-                ordinal_position
+                ordinal_position,
+                NULLIF(identity_generation, '') AS identity_generation,
+                CASE
+                    WHEN is_identity = 'YES' THEN 'identity'
+                    WHEN column_default LIKE 'nextval(%' THEN 'serial'
+                    WHEN column_default IS NOT NULL THEN 'default'
+                    ELSE NULL
+                END AS default_kind,
+                (is_identity = 'YES' OR column_default IS NOT NULL) AS has_server_default
             FROM information_schema.columns
             WHERE table_schema = current_schema()
             ORDER BY table_name, ordinal_position
@@ -126,6 +134,20 @@ class PostgreSQLDialect(DbmsDialect):
             WHERE tc.constraint_type = 'UNIQUE'
               AND tc.table_schema = current_schema()
             ORDER BY tc.table_name, tc.constraint_name, kcu.ordinal_position
+        """
+
+    def get_check_constraints_sql(self) -> str:
+        return """
+            SELECT
+                tc.table_name,
+                cc.check_clause
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.check_constraints cc
+                ON tc.constraint_name = cc.constraint_name
+               AND tc.constraint_schema = cc.constraint_schema
+            WHERE tc.constraint_type = 'CHECK'
+              AND tc.table_schema = current_schema()
+            ORDER BY tc.table_name, tc.constraint_name
         """
 
     def get_table_size_sql(self, table: str) -> str:
