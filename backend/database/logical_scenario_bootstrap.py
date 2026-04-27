@@ -234,31 +234,56 @@ class LogicalScenarioBootstrap:
             if template.is_builtin == 't'
         ]
 
+        logical_profile_ids = set()
+        if self.logical_database_repository:
+            logical_databases = await self.logical_database_repository.get_all_with_connections()
+            for logical_database in logical_databases:
+                if not logical_database.schema_profile_id:
+                    continue
+                if getattr(logical_database, "profile_status", None) != "confirmed":
+                    continue
+                if getattr(logical_database, "compatibility_status", None) == "invalid":
+                    continue
+
+                profile_id = str(logical_database.schema_profile_id)
+                logical_profile_ids.add(profile_id)
+                existing_bundles = await self.bundle_repository.list_bundles(schema_profile_id=profile_id)
+                missing_or_incomplete_template_ids = self._missing_or_incomplete_template_ids(
+                    templates=templates,
+                    existing_bundles=existing_bundles,
+                    expected_name_builder=(
+                        lambda template_id, name=logical_database.name: f"{template_id}::{name}::common"
+                    ),
+                )
+                if not missing_or_incomplete_template_ids:
+                    continue
+
+                try:
+                    await self.generator.generate_bundles_for_logical_database(
+                        logical_database_id=str(logical_database.id),
+                        scenario_types=missing_or_incomplete_template_ids,
+                    )
+                except Exception as exc:
+                    print(
+                        f"[LOGICAL_BOOTSTRAP] Не удалось сгенерировать common bundles "
+                        f"для logical database {logical_database.name}: {exc}"
+                    )
+
         for profile in profiles:
+            if str(profile.id) in logical_profile_ids:
+                continue
             if not profile.reference_connection_id:
                 continue
 
             existing_bundles = await self.bundle_repository.list_bundles(schema_profile_id=str(profile.id))
-            existing_builtin_template_ids = {
-                bundle.scenario_template_id
-                for bundle in existing_bundles
-                if bundle.is_builtin == 't'
-            }
-            missing_or_incomplete_template_ids = [
-                template.id for template in templates
-                if template.id not in existing_builtin_template_ids
-                or any(
-                    bundle.scenario_template_id == template.id
-                    and bundle.is_builtin == 't'
-                    and (
-                        not bundle.queries
-                        or not bundle.indexes
-                        or str(bundle.generated_from_connection_id) != str(profile.reference_connection_id)
-                        or bundle.generation_source != SCENARIO_GENERATOR_VERSION
-                    )
-                    for bundle in existing_bundles
-                )
-            ]
+            missing_or_incomplete_template_ids = self._missing_or_incomplete_template_ids(
+                templates=templates,
+                existing_bundles=existing_bundles,
+                expected_name_builder=(
+                    lambda template_id, profile_name=profile.name: f"{template_id}::{profile_name}::canonical"
+                ),
+                reference_connection_id=str(profile.reference_connection_id),
+            )
             if not missing_or_incomplete_template_ids:
                 continue
 
@@ -270,6 +295,40 @@ class LogicalScenarioBootstrap:
                 )
             except Exception as exc:
                 print(f"[LOGICAL_BOOTSTRAP] Не удалось сгенерировать bundles для {profile.name}: {exc}")
+
+    def _missing_or_incomplete_template_ids(
+        self,
+        templates: List,
+        existing_bundles: List,
+        expected_name_builder,
+        reference_connection_id: Optional[str] = None,
+    ) -> List[str]:
+        """Найти builtin templates, для которых bundle отсутствует или устарел."""
+        missing_or_incomplete_template_ids: List[str] = []
+        for template in templates:
+            bundle = next(
+                (
+                    item for item in existing_bundles
+                    if item.scenario_template_id == template.id and item.is_builtin == 't'
+                ),
+                None,
+            )
+            if not bundle:
+                missing_or_incomplete_template_ids.append(template.id)
+                continue
+            if not bundle.queries or not bundle.indexes:
+                missing_or_incomplete_template_ids.append(template.id)
+                continue
+            if bundle.generation_source != SCENARIO_GENERATOR_VERSION:
+                missing_or_incomplete_template_ids.append(template.id)
+                continue
+            if bundle.name != expected_name_builder(template.id):
+                missing_or_incomplete_template_ids.append(template.id)
+                continue
+            if reference_connection_id and str(bundle.generated_from_connection_id) != reference_connection_id:
+                missing_or_incomplete_template_ids.append(template.id)
+                continue
+        return missing_or_incomplete_template_ids
 
     def _pick_reference_connection(self, profile_name: str, connections: List) -> Optional[object]:
         if not connections:
