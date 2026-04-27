@@ -546,15 +546,6 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
             except Exception as e:
                 print(f"[HISTORY_DB] ❌ Ошибка сохранения в БД истории: {e}")
         
-        # Добавляем db_name в результаты для отображения
-        for result in results:
-            if 'comparison' in result:
-                for db_key, stats in result.get('comparison', {}).items():
-                    stats['connection_key'] = db_key
-                    stats['db_name'] = connection_names.get(db_key, db_key)
-            elif 'db_key' in result:
-                result['db_name'] = connection_names.get(result['db_key'], result['db_key'])
-
         # Добавляем connection_names в результаты для frontend
         for result in results:
             if 'comparison' in result:

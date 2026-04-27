@@ -43,13 +43,6 @@ export interface HealthStatus {
   history_db: 'connected' | 'disconnected'
 }
 
-export interface Query {
-  id: string
-  name: string
-  sql: string
-  description: string
-}
-
 class ApiClient {
   private baseUrl: string
 
@@ -102,10 +95,6 @@ class ApiClient {
 
   async getHealth(): Promise<HealthStatus> {
     return this.request<HealthStatus>('/health')
-  }
-
-  async getQueries(): Promise<Query[]> {
-    return this.request<Query[]>('/queries')
   }
 
   // ==================== Асинхронное тестирование ====================

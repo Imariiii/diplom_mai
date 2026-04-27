@@ -202,16 +202,6 @@ class DatabaseConnection:
             await engine.dispose()
         self.engines.clear()
     
-    async def recreate_engine(self, db_type: str) -> AsyncEngine:
-        """
-        Пересоздать engine для указанной СУБД
-        Закрывает старые соединения и создаёт новый engine
-        """
-        if db_type in self.engines:
-            await self.engines[db_type].dispose()
-            del self.engines[db_type]
-        return self.get_engine(db_type)
-    
     async def terminate_other_connections(self, engine: AsyncEngine, db_type: str) -> int:
         """
         Завершить другие активные соединения с БД

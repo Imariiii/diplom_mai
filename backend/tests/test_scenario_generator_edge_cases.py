@@ -319,7 +319,7 @@ class TestScenarioGeneratorEdgeCases:
         )
         schema = metadata(customer, payment)
 
-        queries = ScenarioGenerator()._build_queries_for_scenario(schema, "mixed_light")
+        queries, _ = ScenarioGenerator()._build_scenario_assets(schema, "mixed_light")
 
         assert {"select", "update", "insert"}.issubset({query["query_type"] for query in queries})
         insert_sql = next(query["sql_template"] for query in queries if query["query_type"] == "insert")

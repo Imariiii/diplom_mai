@@ -364,11 +364,6 @@ class ScenarioGenerator:
             matching[table.name] = matches
         return matching
 
-    def _build_queries_for_scenario(self, metadata: SchemaMetadata, scenario_type: str) -> List[Dict[str, Any]]:
-        """Построить набор конкретных SQL-запросов для одного типа сценария."""
-        queries, _ = self._build_scenario_assets(metadata, scenario_type)
-        return queries
-
     def _build_scenario_assets(
         self,
         metadata: SchemaMetadata,

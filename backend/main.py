@@ -19,7 +19,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.load_tester.tester import LoadTester
 from backend.database.connection import DatabaseConnection
-from backend.database.queries import QueryManager
 from backend.websocket_manager import manager, TestStreamingCallback
 from backend.database.state_manager import DatabaseStateManager
 
@@ -116,7 +115,6 @@ app.add_middleware(
 # Инициализация компонентов тестирования
 tester = LoadTester(connection_repo=initialize.connection_repository)
 db_connection = get_db_connection()
-query_manager = QueryManager()
 
 # Хранилище активных тестов (для WebSocket)
 active_tests: Dict[str, Dict] = {}
@@ -134,12 +132,6 @@ async def health_check():
         "api": "connected",
         "history_db": history_status,
     }
-
-
-@app.get("/queries")
-async def get_queries():
-    """Получить список всех доступных запросов"""
-    return query_manager.get_all_queries()
 
 
 # ==================== WebSocket Endpoints ====================

@@ -299,37 +299,6 @@ class TestSelfCheckIntegration:
         assert not any("Закон Литтла нарушен" in warning for warning in self_check["warnings"])
 
     @pytest.mark.asyncio
-    async def test_run_single_test_attaches_self_check(self, tester):
-        tester.query_manager = MagicMock()
-        tester.query_manager.get_query.return_value = {"sql": "SELECT 1"}
-        tester.prepare_database_for_test = AsyncMock(return_value={
-            "needs_restore": False,
-            "affected_tables": [],
-        })
-        tester.restore_database_after_test = AsyncMock(return_value={
-            "restored": False,
-            "duration_ms": 0.0,
-            "verified": True,
-            "errors": [],
-        })
-        tester._run_workers = AsyncMock(return_value=[
-            {"execution_time_ms": 20.0, "error": None, "timestamp": datetime.now(timezone.utc).isoformat()},
-            {"execution_time_ms": 25.0, "error": None, "timestamp": datetime.now(timezone.utc).isoformat()},
-        ])
-        tester.build_metric_samples = MagicMock(return_value=[{"sample_type": "request_latency"}])
-
-        stats = await tester.run_single_test(
-            db_key="conn_pg",
-            query_id="q1",
-            iterations=2,
-            virtual_users=1,
-        )
-
-        assert "self_check" in stats
-        assert "littles_law" in stats["self_check"]
-        assert isinstance(stats["self_check"]["warnings"], list)
-
-    @pytest.mark.asyncio
     async def test_run_scenario_test_attaches_self_check(self, tester):
         tester._emit_backup_status = AsyncMock()
         tester._emit_status = AsyncMock()

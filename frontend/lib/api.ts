@@ -4,7 +4,7 @@
 
 // Реэкспорт из модульной структуры
 export { apiClient } from "./api/client"
-export type { HealthStatus, Query } from "./api/client"
+export type { HealthStatus } from "./api/client"
 
 // Типы - реэкспорт из database
 // (функции возвращают Promise с inline типами, отдельные типы не требуются)

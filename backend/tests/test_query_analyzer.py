@@ -1,7 +1,6 @@
 """
 Unit-тесты для backend/database/query_analyzer.py
-Проверка классификации SQL-запросов, извлечения таблиц,
-нормализации и полного анализа сценариев.
+Проверка определения write-запросов, извлечения таблиц и нормализации.
 """
 import pytest
 
@@ -95,28 +94,6 @@ class TestExtractAffectedTables:
 
 
 # =========================================================================
-# classify_queries
-# =========================================================================
-
-class TestClassifyQueries:
-    def test_mixed_operations(self, analyzer):
-        queries = [
-            "SELECT * FROM film",
-            "UPDATE film SET title = 'A'",
-            "DELETE FROM actor WHERE actor_id = 1",
-            "INSERT INTO payment (amount) VALUES (10)",
-        ]
-        classification = analyzer.classify_queries(queries)
-        assert "UPDATE" in classification.get("film", set())
-        assert "DELETE" in classification.get("actor", set())
-        assert "INSERT" in classification.get("payment", set())
-
-    def test_select_not_classified(self, analyzer):
-        classification = analyzer.classify_queries(["SELECT * FROM film"])
-        assert len(classification) == 0
-
-
-# =========================================================================
 # _normalize_query
 # =========================================================================
 
@@ -136,40 +113,3 @@ class TestNormalizeQuery:
     def test_preserves_named_parameters(self, analyzer):
         result = analyzer._normalize_query("SELECT * FROM film WHERE film_id = :film_id")
         assert ":film_id" in result
-
-
-# =========================================================================
-# analyze_scenario
-# =========================================================================
-
-class TestAnalyzeScenario:
-    def test_full_analysis(self, analyzer):
-        queries = [
-            "SELECT * FROM film WHERE film_id = :id",
-            "UPDATE film SET title = :title WHERE film_id = :id",
-            "INSERT INTO rental (customer_id) VALUES (:cid)",
-            "SELECT COUNT(*) FROM actor",
-        ]
-        analysis = analyzer.analyze_scenario(queries)
-
-        assert analysis["has_write_operations"] is True
-        assert analysis["total_queries"] == 4
-        assert analysis["write_queries"] == 2
-        assert "film" in analysis["affected_tables"]
-        assert "rental" in analysis["affected_tables"]
-
-    def test_read_only_scenario(self, analyzer):
-        queries = [
-            "SELECT * FROM film",
-            "SELECT * FROM actor",
-        ]
-        analysis = analyzer.analyze_scenario(queries)
-
-        assert analysis["has_write_operations"] is False
-        assert analysis["write_queries"] == 0
-        assert analysis["affected_tables"] == []
-
-    def test_empty_scenario(self, analyzer):
-        analysis = analyzer.analyze_scenario([])
-        assert analysis["total_queries"] == 0
-        assert analysis["write_queries"] == 0

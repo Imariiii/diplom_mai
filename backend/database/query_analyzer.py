@@ -2,7 +2,7 @@
 Анализатор SQL запросов для определения write-операций и затронутых таблиц
 """
 import re
-from typing import List, Set, Dict
+from typing import List, Set
 
 
 class QueryAnalyzer:
@@ -76,33 +76,6 @@ class QueryAnalyzer:
         
         return tables
     
-    def classify_queries(self, queries: List[str]) -> Dict[str, Set[str]]:
-        """
-        Классифицировать запросы по типам операций для каждой таблицы
-        
-        Args:
-            queries: Список SQL запросов
-            
-        Returns:
-            Словарь {table_name: {operation_types}}
-            Например: {"film": {"UPDATE"}, "customer": {"UPDATE", "DELETE"}}
-        """
-        classification: Dict[str, Set[str]] = {}
-        
-        for query in queries:
-            normalized = self._normalize_query(query)
-            
-            for op_type, pattern in self.TABLE_PATTERNS.items():
-                if op_type in normalized.upper():
-                    match = pattern.search(normalized)
-                    if match:
-                        table_name = match.group(1).lower()
-                        if table_name not in classification:
-                            classification[table_name] = set()
-                        classification[table_name].add(op_type.upper())
-        
-        return classification
-    
     def _normalize_query(self, query: str) -> str:
         """
         Нормализовать SQL запрос для анализа
@@ -130,34 +103,3 @@ class QueryAnalyzer:
                 tables.add(table_name)
         
         return tables
-    
-    def analyze_scenario(self, queries: List[str]) -> Dict:
-        """
-        Полный анализ сценария
-        
-        Args:
-            queries: Список SQL запросов сценария
-            
-        Returns:
-            Словарь с результатами анализа:
-            {
-                "has_write_operations": bool,
-                "affected_tables": [str],
-                "table_operations": {table: [operations]},
-                "total_queries": int,
-                "write_queries": int
-            }
-        """
-        has_write = self.has_write_operations(queries)
-        affected_tables = self.extract_affected_tables(queries)
-        table_ops = self.classify_queries(queries)
-        
-        write_count = sum(1 for q in queries if self._is_write_query(q))
-        
-        return {
-            "has_write_operations": has_write,
-            "affected_tables": sorted(list(affected_tables)),
-            "table_operations": {k: sorted(list(v)) for k, v in table_ops.items()},
-            "total_queries": len(queries),
-            "write_queries": write_count
-        }
