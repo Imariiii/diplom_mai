@@ -122,11 +122,14 @@ class ScenarioBundleResolver:
                     if logical_database and getattr(logical_database, "reference_connection_id", None)
                     else None
                 )
-            compatibility = await validator.validate_connections(
-                connection_ids,
-                reference_connection_id=reference_connection_id,
-                mode="strict",
-            )
+            try:
+                compatibility = await validator.validate_connections(
+                    connection_ids,
+                    reference_connection_id=reference_connection_id,
+                    mode="strict",
+                )
+            finally:
+                await validator.schema_analyzer.db_connection.close_all()
             if not compatibility.get("valid"):
                 raise ValueError(
                     "Подключения logical database несовместимы: "

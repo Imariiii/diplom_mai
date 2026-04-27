@@ -25,7 +25,7 @@ DEFAULT_SCENARIO_TYPES: List[str] = [
     "olap",
 ]
 
-SCENARIO_GENERATOR_VERSION = "logical-scenario-generator-v7"
+SCENARIO_GENERATOR_VERSION = "logical-scenario-generator-v8"
 
 SCENARIO_QUERY_LIMITS: Dict[str, int] = {
     "read_only": 6,

@@ -311,6 +311,71 @@ class TestScenarioGenerator:
 
         assert query is None
 
+    def test_common_metadata_disables_insert_when_any_db_requires_explicit_primary_key(self):
+        pagila_payment = TableInfo(
+            name="payment",
+            row_count=100,
+            primary_key=["payment_id"],
+            columns=[
+                ColumnInfo("payment_id", "integer", False, is_primary_key=True, category="integer"),
+                ColumnInfo("customer_id", "integer", False, category="integer"),
+                ColumnInfo("amount", "numeric", False, category="numeric"),
+            ],
+            capabilities=["insert_safe"],
+        )
+        sakila_payment = TableInfo(
+            name="payment",
+            row_count=100,
+            primary_key=["payment_id"],
+            columns=[
+                ColumnInfo(
+                    "payment_id",
+                    "integer",
+                    False,
+                    is_primary_key=True,
+                    is_auto_generated=True,
+                    has_server_default=True,
+                    default_kind="auto_increment",
+                    category="integer",
+                ),
+                ColumnInfo("customer_id", "integer", False, category="integer"),
+                ColumnInfo("amount", "numeric", False, category="numeric"),
+            ],
+            capabilities=["insert_safe"],
+        )
+        generator = ScenarioGenerator()
+
+        common = generator._build_common_capability_metadata(
+            reference_metadata=SchemaMetadata(
+                connection_id="pagila",
+                connection_name="Pagila",
+                dbms_type="postgresql",
+                tables={"payment": pagila_payment},
+            ),
+            all_metadata=[
+                SchemaMetadata(
+                    connection_id="pagila",
+                    connection_name="Pagila",
+                    dbms_type="postgresql",
+                    tables={"payment": pagila_payment},
+                ),
+                SchemaMetadata(
+                    connection_id="sakila",
+                    connection_name="Sakila",
+                    dbms_type="mysql",
+                    tables={"payment": sakila_payment},
+                ),
+            ],
+        )
+
+        query = generator._template_insert_basic(
+            metadata=common,
+            table=common.tables["payment"],
+            template=QUERY_TEMPLATES_BY_ID["insert_basic"],
+        )
+
+        assert query is None
+
     def test_insert_skips_table_with_composite_unique_constraint(self):
         table = TableInfo(
             name="rental",
