@@ -35,19 +35,19 @@ interface MetricRow {
 }
 
 const METRIC_ROWS: MetricRow[] = [
-  { key: "latency_mean", label: "Latency mean", better: "lower", isCore: true, unit: "мс", accessor: (b) => b?.latency_ms?.mean, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
-  { key: "latency_median", label: "Latency median", better: "lower", isCore: true, unit: "мс", accessor: (b) => b?.latency_ms?.median, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
-  { key: "latency_p95", label: "Latency p95", better: "lower", isCore: true, unit: "мс", accessor: (b) => b?.latency_ms?.p95, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
-  { key: "latency_p99", label: "Latency p99", better: "lower", isCore: true, unit: "мс", accessor: (b) => b?.latency_ms?.p99, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
-  { key: "latency_cv", label: "Latency CV", better: "lower", isCore: true, unit: "%", accessor: (b) => b?.latency_ms?.cv, format: (v) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`) },
-  { key: "throughput_mean", label: "Throughput mean", better: "higher", isCore: true, unit: "req/s", accessor: (b) => b?.throughput?.mean, format: (v) => (v == null ? "—" : `${v.toFixed(0)} req/s`) },
-  { key: "error_rate", label: "Error rate", better: "lower", isCore: true, unit: "%", accessor: (b) => b?.error_rate, format: (v) => (v == null ? "—" : `${v.toFixed(2)}%`) },
+  { key: "latency_mean", label: "Задержка (среднее)", better: "lower", isCore: true, unit: "мс", accessor: (b) => b?.latency_ms?.mean, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
+  { key: "latency_median", label: "Задержка (медиана)", better: "lower", isCore: true, unit: "мс", accessor: (b) => b?.latency_ms?.median, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
+  { key: "latency_p95", label: "Задержка p95", better: "lower", isCore: true, unit: "мс", accessor: (b) => b?.latency_ms?.p95, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
+  { key: "latency_p99", label: "Задержка p99", better: "lower", isCore: true, unit: "мс", accessor: (b) => b?.latency_ms?.p99, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
+  { key: "latency_cv", label: "Вариативность задержки (CV)", better: "lower", isCore: true, unit: "%", accessor: (b) => b?.latency_ms?.cv, format: (v) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`) },
+  { key: "throughput_mean", label: "Пропускная способность (среднее)", better: "higher", isCore: true, unit: "зап/с", accessor: (b) => b?.throughput?.mean, format: (v) => (v == null ? "—" : `${v.toFixed(0)} зап/с`) },
+  { key: "error_rate", label: "Доля ошибок", better: "lower", isCore: true, unit: "%", accessor: (b) => b?.error_rate, format: (v) => (v == null ? "—" : `${v.toFixed(2)}%`) },
   { key: "duration", label: "Общее время", better: "lower", isCore: true, unit: "с", accessor: (b) => b?.total_duration_sec, format: (v) => (v == null ? "—" : `${v.toFixed(1)} с`) },
-  { key: "latency_min", label: "Latency min", better: "lower", isCore: false, unit: "мс", accessor: (b) => b?.latency_ms?.min, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
-  { key: "latency_max", label: "Latency max", better: "lower", isCore: false, unit: "мс", accessor: (b) => b?.latency_ms?.max, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
-  { key: "latency_iqr", label: "Latency IQR", better: "lower", isCore: false, unit: "мс", accessor: (b) => b?.latency_ms?.iqr, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
-  { key: "throughput_median", label: "Throughput median", better: "higher", isCore: false, unit: "req/s", accessor: (b) => b?.throughput?.median, format: (v) => (v == null ? "—" : `${v.toFixed(0)} req/s`) },
-  { key: "throughput_cv", label: "Throughput CV", better: "lower", isCore: false, unit: "%", accessor: (b) => b?.throughput?.cv, format: (v) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`) },
+  { key: "latency_min", label: "Задержка (мин)", better: "lower", isCore: false, unit: "мс", accessor: (b) => b?.latency_ms?.min, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
+  { key: "latency_max", label: "Задержка (макс)", better: "lower", isCore: false, unit: "мс", accessor: (b) => b?.latency_ms?.max, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
+  { key: "latency_iqr", label: "Задержка IQR", better: "lower", isCore: false, unit: "мс", accessor: (b) => b?.latency_ms?.iqr, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
+  { key: "throughput_median", label: "Пропускная способность (медиана)", better: "higher", isCore: false, unit: "зап/с", accessor: (b) => b?.throughput?.median, format: (v) => (v == null ? "—" : `${v.toFixed(0)} зап/с`) },
+  { key: "throughput_cv", label: "Вариативность пропускной способности (CV)", better: "lower", isCore: false, unit: "%", accessor: (b) => b?.throughput?.cv, format: (v) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`) },
 ]
 
 export function ComparisonTable({ result }: ComparisonTableProps) {
@@ -129,7 +129,7 @@ function PerTestTable({
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{metricRow.label}</span>
                       <Badge variant="outline" className="h-4 px-1 font-mono text-[9px] uppercase">
-                        {metricRow.better === "lower" ? "↓ lower" : "↑ higher"}
+                        {metricRow.better === "lower" ? "↓ меньше" : "↑ больше"}
                       </Badge>
                     </div>
                   </td>
@@ -227,7 +227,7 @@ function SeriesTable({
           {baselineLevelId && (
             <Badge variant="outline" className="gap-1 font-mono text-[11px]">
               <Crown className="h-3 w-3" />
-              Baseline: {levelLabels[baselineLevelId]}
+              Базовый: {levelLabels[baselineLevelId]}
             </Badge>
           )}
           {hasExtended && (
@@ -303,7 +303,7 @@ function SeriesTable({
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{metricRow.label}</span>
                       <Badge variant="outline" className="h-4 px-1 font-mono text-[9px] uppercase">
-                        {metricRow.better === "lower" ? "↓ lower" : "↑ higher"}
+                        {metricRow.better === "lower" ? "↓ меньше" : "↑ больше"}
                       </Badge>
                     </div>
                   </td>
@@ -345,7 +345,7 @@ function SeriesTable({
                             </div>
                           )}
                           {cellView === "delta" && isBaseline && (
-                            <span className="text-xs text-muted-foreground">baseline</span>
+                            <span className="text-xs text-muted-foreground">базовый</span>
                           )}
                         </div>
                       </td>

@@ -103,14 +103,14 @@ function SeriesChartsView({
     return (
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <SeriesTrajectoryChart
-          title="Latency p95 по уровням нагрузки"
+          title="Задержка p95 по уровням нагрузки"
           description="Деградация хвостовых задержек (p95)"
           data={charts.p95_by_load}
           dbKeyLabels={result.db_key_labels}
           unit="мс"
         />
         <SeriesTrajectoryChart
-          title="Latency p99 по уровням нагрузки"
+          title="Задержка p99 по уровням нагрузки"
           description="Деградация хвостовых задержек (p99)"
           data={charts.p99_by_load}
           dbKeyLabels={result.db_key_labels}
@@ -125,7 +125,7 @@ function SeriesChartsView({
     return (
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <SeriesTrajectoryChart
-          title="Error rate по уровням нагрузки"
+          title="Доля ошибок по уровням нагрузки"
           description="Доля ошибок при росте нагрузки"
           data={charts.error_rate_by_load}
           dbKeyLabels={result.db_key_labels}
@@ -133,8 +133,8 @@ function SeriesChartsView({
         />
         {Object.keys(charts.scaling_efficiency).length > 0 && (
           <SeriesTrajectoryChart
-            title="Scaling efficiency"
-            description="Эффективность масштабирования"
+            title="Эффективность масштабирования"
+            description="Коэффициент масштабирования при росте нагрузки"
             data={charts.scaling_efficiency}
             dbKeyLabels={result.db_key_labels}
             unit="%"
@@ -148,28 +148,28 @@ function SeriesChartsView({
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
       <SeriesTrajectoryChart
-        title="Throughput по уровням нагрузки"
+        title="Пропускная способность по уровням нагрузки"
         description="Средняя пропускная способность на каждом уровне"
         data={charts.throughput_by_load}
         dbKeyLabels={result.db_key_labels}
-        unit="req/s"
+        unit="зап/с"
       />
       <SeriesTrajectoryChart
-        title="Latency по уровням нагрузки"
+        title="Задержка по уровням нагрузки"
         description="Средняя задержка на каждом уровне"
         data={charts.latency_by_load}
         dbKeyLabels={result.db_key_labels}
         unit="мс"
       />
       <SeriesTrajectoryChart
-        title="Latency p95 по уровням нагрузки"
+        title="Задержка p95 по уровням нагрузки"
         description="Хвостовые задержки p95"
         data={charts.p95_by_load}
         dbKeyLabels={result.db_key_labels}
         unit="мс"
       />
       <SeriesTrajectoryChart
-        title="Latency p99 по уровням нагрузки"
+        title="Задержка p99 по уровням нагрузки"
         description="Хвостовые задержки p99"
         data={charts.p99_by_load}
         dbKeyLabels={result.db_key_labels}
@@ -315,7 +315,7 @@ function GroupedLatencyChart({
   )
 
   return (
-    <ChartCard title="Latency" description="Среднее по СУБД (мс)" icon={Activity}>
+    <ChartCard title="Задержка" description="Среднее по СУБД (мс)" icon={Activity}>
       <ChartContainer config={config} className="h-full w-full">
         <BarChart data={data} barGap={2} barCategoryGap="20%">
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
@@ -352,12 +352,12 @@ function GroupedThroughputChart({
 
   return (
     <ChartCard
-      title="Throughput"
-      description="Пропускная способность по СУБД (req/s)"
+      title="Пропускная способность"
+      description="Пропускная способность по СУБД (зап/с)"
       icon={BarChart3}
       badge={
         <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-          max {Math.round(maxVal).toLocaleString()} req/s
+          макс {Math.round(maxVal).toLocaleString()} зап/с
         </span>
       }
     >
@@ -401,7 +401,7 @@ function PercentilesChart({
   }
 
   return (
-    <ChartCard title="Перцентили latency" description="p50 / p95 / p99 — хвостовые задержки" icon={LineIcon}>
+    <ChartCard title="Перцентили задержки" description="p50 / p95 / p99 — хвостовые задержки" icon={LineIcon}>
       <ChartContainer config={config} className="h-full w-full">
         <LineChart data={data}>
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
@@ -449,7 +449,7 @@ function DistributionChart({
   }
 
   return (
-    <ChartCard title="Распределение latency" description="Five-number summary (min · Q1 · median · Q3 · max)" icon={BarChart3}>
+    <ChartCard title="Распределение задержки" description="Пятичисловой анализ (мин · Q1 · медиана · Q3 · макс)" icon={BarChart3}>
       <ChartContainer config={config} className="h-full w-full">
         <BarChart data={mapped} layout="vertical" stackOffset="expand">
           <CartesianGrid horizontal={false} strokeDasharray="3 3" />
@@ -464,15 +464,15 @@ function DistributionChart({
                 <div className="rounded-lg border border-border bg-popover p-2.5 text-xs shadow-md">
                   <p className="font-medium">{d.name}</p>
                   <div className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5 font-mono tabular-nums">
-                    <span className="text-muted-foreground">min</span>
+                    <span className="text-muted-foreground">мин</span>
                     <span>{d.min.toFixed(2)} мс</span>
                     <span className="text-muted-foreground">Q1</span>
                     <span>{d.q1.toFixed(2)} мс</span>
-                    <span className="text-muted-foreground">median</span>
+                    <span className="text-muted-foreground">медиана</span>
                     <span className="font-semibold">{d.median.toFixed(2)} мс</span>
                     <span className="text-muted-foreground">Q3</span>
                     <span>{d.q3.toFixed(2)} мс</span>
-                    <span className="text-muted-foreground">max</span>
+                    <span className="text-muted-foreground">макс</span>
                     <span>{d.max.toFixed(2)} мс</span>
                   </div>
                   <p className="mt-1 text-[11px] text-muted-foreground">n = {d.sample_count}</p>
@@ -544,7 +544,7 @@ function ThroughputTimeline({
 
   return (
     <ChartCard
-      title="Throughput по времени"
+      title="Пропускная способность по времени"
       description="Временные ряды пропускной способности (относительное время)"
       icon={LineIcon}
       chartHeight={320}
@@ -627,7 +627,7 @@ function SeriesTrajectoryChart({
                   <div className="flex w-full justify-between gap-4">
                     <span className="text-muted-foreground">{name}</span>
                     <span className="font-mono font-medium tabular-nums">
-                      {typeof value === "number" ? value.toFixed(2) : "—"} {unit}
+                      {typeof value === "number" ? (unit === "зап/с" ? value.toFixed(0) : value.toFixed(2)) : "—"} {unit}
                     </span>
                   </div>
                 )}
@@ -734,7 +734,7 @@ function StabilityIndexChart({
   return (
     <ChartCard
       title="Стабильность и эластичность"
-      description="CV-индекс стабильности и эластичность throughput/нагрузку"
+      description="CV-индекс стабильности и эластичность пропускной способности"
       icon={Activity}
     >
       <ChartContainer config={config} className="h-full w-full">

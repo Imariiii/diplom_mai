@@ -33,14 +33,14 @@ const PARAM_ICONS: Record<string, React.ReactNode> = {
 }
 
 const METRIC_LABELS: Record<string, string> = {
-  throughput: "Throughput",
-  latency_mean: "Latency mean",
-  latency_p99: "Latency p99",
+  throughput: "Пропускная способность",
+  latency_mean: "Задержка (среднее)",
+  latency_p99: "Задержка p99",
   latency_cv: "Стабильность (CV)",
 }
 
 const METRIC_UNITS: Record<string, string> = {
-  throughput: "req/s",
+  throughput: "зап/с",
   latency_mean: "мс",
   latency_p99: "мс",
   latency_cv: "",
@@ -232,7 +232,7 @@ function EffectCell({ effect }: { effect: MetricEffect }) {
         : Minus
 
   const fmtVal = (v: number) =>
-    unit === "req/s" ? v.toFixed(0) : unit === "мс" ? v.toFixed(2) : v.toFixed(2)
+    unit === "зап/с" ? v.toFixed(0) : unit === "мс" ? v.toFixed(2) : v.toFixed(2)
 
   return (
     <div className="flex flex-col items-center gap-0.5">

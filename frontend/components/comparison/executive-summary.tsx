@@ -121,14 +121,14 @@ export function ExecutiveSummary({ result }: ExecutiveSummaryProps) {
             <div className="grid gap-2 pt-2 sm:grid-cols-2">
               <WinnerPill
                 icon={<Zap className="h-3.5 w-3.5" />}
-                label="Лидер throughput"
+                label="Лидер по пропускной способности"
                 name={bestThroughput.testName}
                 db={resolveDbKeyLabel(bestThroughput.dbKey, result.db_key_labels)}
-                value={`${bestThroughput.value.toFixed(0)} req/s`}
+                value={`${bestThroughput.value.toFixed(0)} зап/с`}
               />
               <WinnerPill
                 icon={<Timer className="h-3.5 w-3.5" />}
-                label="Лидер latency"
+                label="Лидер по задержке"
                 name={bestLatency.testName}
                 db={resolveDbKeyLabel(bestLatency.dbKey, result.db_key_labels)}
                 value={`${bestLatency.value.toFixed(2)} мс`}
@@ -148,7 +148,7 @@ export function ExecutiveSummary({ result }: ExecutiveSummaryProps) {
           />
           <KpiTile
             icon={<Target className="h-3.5 w-3.5" />}
-            label="Large/Medium effects"
+            label="Большой/средний эффект"
             primary={`${largeEffects.length}`}
             secondary="практических различий"
             progress={totalComparisons > 0 ? largeEffects.length / totalComparisons : 0}
@@ -156,22 +156,22 @@ export function ExecutiveSummary({ result }: ExecutiveSummaryProps) {
           />
           <KpiTile
             icon={<TrendingUp className="h-3.5 w-3.5" />}
-            label="Throughput диапазон"
-            primary={bestThroughput ? `${bestThroughput.value.toFixed(0)} req/s` : "—"}
+            label="Пропускная способность"
+            primary={bestThroughput ? `${bestThroughput.value.toFixed(0)} зап/с` : "—"}
             secondary={
               worstThroughput && bestThroughput && worstThroughput.value !== bestThroughput.value
-                ? `min ${worstThroughput.value.toFixed(0)} req/s`
+                ? `мин ${worstThroughput.value.toFixed(0)} зап/с`
                 : "по всем СУБД"
             }
             tone="success"
           />
           <KpiTile
             icon={<CheckCircle2 className="h-3.5 w-3.5" />}
-            label="Latency диапазон"
+            label="Задержка"
             primary={bestLatency ? `${bestLatency.value.toFixed(2)} мс` : "—"}
             secondary={
               worstLatency && bestLatency && worstLatency.value !== bestLatency.value
-                ? `max ${worstLatency.value.toFixed(2)} мс`
+                ? `макс ${worstLatency.value.toFixed(2)} мс`
                 : "по всем СУБД"
             }
             tone="neutral"
@@ -194,9 +194,9 @@ function SeriesTrendsStrip({ result }: { result: ComparisonResult }) {
       const tpVals = summary.trajectory.map((t) => t.throughput_mean ?? 0)
       const latVals = summary.trajectory.map((t) => t.latency_p95 ?? 0)
       if (tpVals.some((v) => v > 0))
-        series.push({ key: `tp-${dbKey}`, label: `${label} · Throughput`, unit: "req/s", values: tpVals })
+        series.push({ key: `tp-${dbKey}`, label: `${label} · Пропускная способность`, unit: "зап/с", values: tpVals })
       if (latVals.some((v) => v > 0))
-        series.push({ key: `lat-${dbKey}`, label: `${label} · p95`, unit: "мс", values: latVals })
+        series.push({ key: `lat-${dbKey}`, label: `${label} · Задержка p95`, unit: "мс", values: latVals })
     }
     return series
   }, [result])

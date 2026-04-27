@@ -32,10 +32,10 @@ interface StatisticalSummaryProps {
 
 const METRIC_ORDER = ["latency_ms", "throughput", "throughput_per_thread", "scaling_efficiency"]
 const METRIC_LABELS: Record<string, string> = {
-  latency_ms: "Latency",
-  throughput: "Throughput",
-  throughput_per_thread: "Throughput на поток",
-  scaling_efficiency: "Scaling efficiency",
+  latency_ms: "Задержка",
+  throughput: "Пропускная способность",
+  throughput_per_thread: "Пропускная способность на поток",
+  scaling_efficiency: "Эффективность масштабирования",
 }
 
 const EFFECT_VARIANTS: Record<
@@ -124,7 +124,7 @@ export function StatisticalSummary({ result }: StatisticalSummaryProps) {
     : "Статистические тесты"
   const sectionDesc = isSeriesResult(result)
     ? "Попарные сравнения метрик между соседними уровнями нагрузки"
-    : "Попарные сравнения с baseline · p-value · Cohen\u2019s d · 95% CI"
+    : "Попарные сравнения с базовым · p-value · Cohen\u2019s d · 95% CI"
 
   return (
     <section className="space-y-4">
@@ -146,7 +146,7 @@ export function StatisticalSummary({ result }: StatisticalSummaryProps) {
             </Badge>
             <Badge variant="outline" className="gap-1.5">
               <AlertTriangle className="h-3 w-3 text-warning" />
-              <span className="font-mono tabular-nums">{totalLarge}</span> large effect
+              <span className="font-mono tabular-nums">{totalLarge}</span> большой эффект
             </Badge>
             <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-2 py-1">
               <Label htmlFor="sig-filter" className="cursor-pointer text-xs text-muted-foreground">
@@ -337,7 +337,7 @@ function ComparisonCard({
   const effectKey = item.effect_size_label || "negligible"
   const effectCfg = EFFECT_VARIANTS[effectKey]
 
-  const unit = item.metric === "latency_ms" ? "мс" : "req/s"
+  const unit = item.metric === "latency_ms" ? "мс" : "зап/с"
 
   return (
     <div
