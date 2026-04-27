@@ -5,7 +5,8 @@ Rule-based генерация аналитического отчёта.
 - PerTestReportGenerator: отчёт по одному прогону (сравнение СУБД)
 - SeriesReportGenerator: отчёт по серии прогонов (траектории СУБД)
 """
-from typing import Dict, List, Optional
+import re
+from typing import Dict, List, Optional, Tuple
 
 from backend.comparison.schemas import (
     AnalysisReport,
@@ -13,6 +14,9 @@ from backend.comparison.schemas import (
     AnalysisSection,
     ComparisonTestInfo,
     CrossDbLevelRank,
+    DbFinding,
+    DbFindingStatus,
+    DbMetricChip,
     DbSeriesSummary,
     LoadLevel,
     MetricRanking,
@@ -26,6 +30,9 @@ from backend.comparison.schemas import (
 # Общие утилиты
 # ---------------------------------------------------------------------------
 
+_UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
+
+
 class _ReportBase:
     THROUGHPUT_PARITY_THRESHOLD = 5.0
     LATENCY_NEAR_THRESHOLD = 5.0
@@ -36,6 +43,10 @@ class _ReportBase:
     HIGH_THROUGHPUT_THRESHOLD = 100.0
     THROUGHPUT_DROP_ALERT_THRESHOLD = 30.0
     LATENCY_SPIKE_RATIO_THRESHOLD = 5.0
+    DEGRADATION_CRITICAL_THRESHOLD = 50.0
+    MAX_IMPORTANT_ITEMS = 4
+    MAX_ACTION_ITEMS = 3
+    MAX_RELIABILITY_ITEMS = 2
 
     @staticmethod
     def _deduplicate(items: List[str]) -> List[str]:
@@ -47,59 +58,93 @@ class _ReportBase:
                 seen.add(item)
         return result
 
-    def _analyze_bundle_patterns(self, label: str, bundle: MetricStatsBundle) -> List[str]:
-        patterns = []
-        latency = bundle.latency_ms
-        if latency:
-            if latency.median > 0 and (latency.p99 / latency.median) > self.HIGH_TAIL_RATIO_THRESHOLD:
-                patterns.append(f"{label}: высокий p99/median — есть выбросы latency и длинный хвост распределения")
-            if latency.mean > 0 and (latency.std / latency.mean) > self.HIGH_VARIABILITY_THRESHOLD:
-                patterns.append(f"{label}: высокая вариативность latency — производительность нестабильна")
-            if latency.p99 < 10 and latency.mean < 5:
-                patterns.append(f"{label}: отличная latency для OLTP-нагрузок")
-        if bundle.error_rate and bundle.error_rate > 0:
-            patterns.append(f"{label}: есть ошибки — {bundle.error_rate:.2f}% запросов завершились неуспешно")
-        return patterns
+    @staticmethod
+    def _limit(items: List[str], limit: int) -> List[str]:
+        return items[:limit]
 
-    def _bundle_recommendations(self, label: str, bundle: MetricStatsBundle) -> List[str]:
-        recs = []
-        if bundle.throughput and bundle.throughput.mean > self.HIGH_THROUGHPUT_THRESHOLD:
-            recs.append(f"{label}: подходит для high-throughput сценариев")
-        if bundle.latency_ms and bundle.latency_ms.p50 > 0:
-            if (bundle.latency_ms.p99 / bundle.latency_ms.p50) < self.PREDICTABLE_PERFORMANCE_THRESHOLD:
-                recs.append(f"{label}: производительность предсказуема — подходит для production-нагрузок")
-        if bundle.error_rate and bundle.error_rate > 0:
-            recs.append(f"{label}: устраните ошибки перед выводами о производительности")
-        return recs
+    @staticmethod
+    def _is_significant(pair: PairwiseComparison) -> bool:
+        if pair.p_value_adjusted is not None:
+            return pair.is_significant_adjusted
+        return pair.is_significant
 
-    def _effect_size_insights(self, pairwise: List[PairwiseComparison]) -> List[str]:
+    @staticmethod
+    def _format_p_value(pair: PairwiseComparison) -> str:
+        if pair.p_value_adjusted is not None:
+            return f"p(adj) = {pair.p_value_adjusted:.4f}"
+        if pair.p_value is not None:
+            return f"p = {pair.p_value:.4f}"
+        return "p недоступно"
+
+    @staticmethod
+    def _metric_label(metric: str) -> str:
+        return {
+            "latency_ms": "latency",
+            "throughput": "throughput",
+            "throughput_mean": "throughput",
+            "latency_mean": "latency mean",
+            "latency_p95": "latency p95",
+            "latency_p99": "latency p99",
+        }.get(metric, metric)
+
+    @staticmethod
+    def _safe_label(raw: str) -> str:
+        """Заменить UUID-подобные метки на человекочитаемый fallback."""
+        if _UUID_RE.fullmatch(raw.strip()):
+            return "СУБД"
+        return raw
+
+    def _sections(
+        self,
+        verdict: str,
+        facts: List[str],
+        important: List[str],
+        reliability: List[str],
+        actions: List[str],
+    ) -> List[AnalysisSection]:
+        return [
+            AnalysisSection(title="Итог", items=self._deduplicate([verdict] + facts)),
+            AnalysisSection(title="Что важно", items=self._limit(self._deduplicate(important), self.MAX_IMPORTANT_ITEMS)),
+            AnalysisSection(title="Надёжность вывода", items=self._limit(self._deduplicate(reliability), self.MAX_RELIABILITY_ITEMS)),
+            AnalysisSection(title="Что делать дальше", items=self._limit(self._deduplicate(actions), self.MAX_ACTION_ITEMS)),
+        ]
+
+    def _effect_size_insights(
+        self,
+        pairwise: List[PairwiseComparison],
+        label_overrides: Optional[Dict[str, str]] = None,
+        limit: int = 3,
+    ) -> List[str]:
         insights = []
-        for p in pairwise:
-            if not p.is_significant or p.effect_size is None:
-                continue
-            label = p.db_key
-            metric_label = "latency" if p.metric == "latency_ms" else p.metric
-            if p.effect_size_label == "large":
-                ci = ""
-                if p.ci_lower is not None and p.ci_upper is not None:
-                    unit = "мс" if p.metric == "latency_ms" else "req/s"
-                    ci = f" 95% CI: [{p.ci_lower:.2f}, {p.ci_upper:.2f}] {unit}."
-                insights.append(
-                    f"{label} · {metric_label}: различие практически существенно "
-                    f"(Cohen's d = {abs(p.effect_size):.2f}, большой эффект).{ci}"
-                )
-            elif p.effect_size_label == "medium":
-                insights.append(
-                    f"{label} · {metric_label}: средний размер эффекта "
-                    f"(Cohen's d = {abs(p.effect_size):.2f})."
-                )
-            elif p.effect_size_label == "negligible":
-                insights.append(
-                    f"{label} · {metric_label}: практический эффект пренебрежимо мал "
-                    f"(Cohen's d = {abs(p.effect_size):.2f}), несмотря на статистическую значимость."
-                )
+        label_overrides = label_overrides or {}
+        candidates = [
+            p for p in pairwise
+            if self._is_significant(p) and p.effect_size is not None and p.effect_size_label in ("medium", "large")
+        ]
+        candidates.sort(key=lambda p: abs(p.effect_size or 0), reverse=True)
+        for p in candidates[:limit]:
+            label = self._safe_label(label_overrides.get(p.db_key, p.db_key))
+            metric_label = self._metric_label(p.metric)
+            effect = "большой" if p.effect_size_label == "large" else "средний"
+            insights.append(
+                f"{label}: {metric_label} отличается практически значимо "
+                f"(Cohen's d = {abs(p.effect_size):.2f}, {effect} эффект, {self._format_p_value(p)})."
+            )
         return self._deduplicate(insights)
 
+    def _significance_summary(self, pairwise: List[PairwiseComparison]) -> str:
+        tested = [p for p in pairwise if p.p_value is not None]
+        if not tested:
+            return "Статистические тесты не применялись: недостаточно выборок для попарных сравнений."
+        raw_sig = sum(1 for p in tested if p.is_significant)
+        adjusted = [p for p in tested if p.p_value_adjusted is not None]
+        if adjusted:
+            adj_sig = sum(1 for p in adjusted if p.is_significant_adjusted)
+            return (
+                f"После FDR-коррекции значимыми остаются {adj_sig} из {len(adjusted)} "
+                f"сравнений; до коррекции было {raw_sig}."
+            )
+        return f"Значимых сравнений до FDR-коррекции: {raw_sig} из {len(tested)}."
 
 # ---------------------------------------------------------------------------
 # Режим A: Per-test report
@@ -117,43 +162,107 @@ class PerTestReportGenerator(_ReportBase):
         db_key_labels: Dict[str, str],
         config: Optional[AnalysisReportConfig] = None,
     ) -> AnalysisReport:
-        cfg = config or AnalysisReportConfig()
-
-        verdict = self._verdict(pairwise, rankings, db_key_labels) if cfg.include_verdict else ""
-        patterns = self._patterns(descriptive_stats, db_key_labels) if cfg.include_patterns else []
-        recommendations = self._recommendations(descriptive_stats, pairwise, db_key_labels) if cfg.include_recommendations else []
-        hypotheses = self._hypotheses(pairwise, db_key_labels, test_info) if cfg.include_hypotheses else []
-
-        sections: List[AnalysisSection] = []
-
-        summary = self._executive_summary(test_info, descriptive_stats, pairwise, rankings, db_key_labels)
-        if summary:
-            sections.append(AnalysisSection(title="Краткое резюме", items=summary))
-        if cfg.include_verdict:
-            sections.append(AnalysisSection(title="Основной вердикт", items=[verdict]))
-        if cfg.include_patterns:
-            sections.append(AnalysisSection(title="Выявленные паттерны", items=patterns))
-
-        effect_insights = self._effect_size_insights(pairwise)
-        if effect_insights:
-            sections.append(AnalysisSection(title="Практическая значимость различий", items=effect_insights))
-
-        if cfg.include_recommendations:
-            sections.append(AnalysisSection(title="Рекомендации", items=recommendations))
-        if cfg.include_hypotheses:
-            sections.append(AnalysisSection(title="Возможные причины различий", items=hypotheses))
-
-        conclusion = self._conclusion(pairwise)
-        if conclusion:
-            sections.append(AnalysisSection(title="Заключение", items=conclusion))
+        _ = config
+        verdict = self._verdict(pairwise, rankings, db_key_labels)
+        facts = self._facts(test_info, descriptive_stats, pairwise, db_key_labels)
+        important = self._important(descriptive_stats, pairwise, db_key_labels)
+        reliability = self._reliability(descriptive_stats, pairwise)
+        actions = self._actions(descriptive_stats, pairwise, db_key_labels)
+        sections = self._sections(verdict, facts, important, reliability, actions)
+        findings = self._per_db_findings(descriptive_stats, pairwise, db_key_labels)
 
         return AnalysisReport(
             verdict=verdict,
-            patterns=patterns,
-            recommendations=recommendations,
-            hypotheses=hypotheses,
+            patterns=important,
+            recommendations=actions,
+            hypotheses=reliability,
             sections=sections,
+            per_db_findings=findings,
         )
+
+    # ------------------------------------------------------------------
+    # Per-DB scorecards
+    # ------------------------------------------------------------------
+
+    def _per_db_findings(
+        self,
+        descriptive_stats: Dict[str, MetricStatsBundle],
+        pairwise: List[PairwiseComparison],
+        db_key_labels: Dict[str, str],
+    ) -> List[DbFinding]:
+        findings: List[DbFinding] = []
+        for db_key, bundle in descriptive_stats.items():
+            label = self._safe_label(db_key_labels.get(db_key, db_key))
+            status, reason = self._per_test_status(bundle)
+            chips = self._per_test_chips(bundle)
+            highlights = self._per_test_highlights(db_key, label, bundle, pairwise, db_key_labels)
+            findings.append(DbFinding(
+                db_key=db_key,
+                db_label=label,
+                status=status,
+                status_reason=reason,
+                chips=chips,
+                highlights=highlights[:3],
+            ))
+        return findings
+
+    def _per_test_status(self, bundle: MetricStatsBundle) -> Tuple[DbFindingStatus, str]:
+        if bundle.error_rate and bundle.error_rate > 0:
+            return DbFindingStatus.CRITICAL, f"ошибки {bundle.error_rate:.2f}%"
+        latency = bundle.latency_ms
+        reasons: List[str] = []
+        if latency:
+            if latency.median > 0 and (latency.p99 / latency.median) > self.HIGH_TAIL_RATIO_THRESHOLD:
+                reasons.append(f"хвост p99/median ×{latency.p99 / latency.median:.1f}")
+            if latency.mean > 0 and (latency.std / latency.mean) > self.HIGH_VARIABILITY_THRESHOLD:
+                reasons.append("высокая вариативность")
+        if reasons:
+            return DbFindingStatus.WARNING, "; ".join(reasons)
+        return DbFindingStatus.GOOD, "стабильна"
+
+    def _per_test_chips(self, bundle: MetricStatsBundle) -> List[DbMetricChip]:
+        chips: List[DbMetricChip] = []
+        if bundle.throughput and bundle.throughput.mean is not None:
+            chips.append(DbMetricChip(label="throughput", value=f"{bundle.throughput.mean:.0f} req/s", tone="neutral"))
+        if bundle.latency_ms:
+            chips.append(DbMetricChip(label="p95", value=f"{bundle.latency_ms.p95:.1f} ms", tone="neutral"))
+            chips.append(DbMetricChip(label="p99", value=f"{bundle.latency_ms.p99:.1f} ms", tone="neutral"))
+        if bundle.error_rate and bundle.error_rate > 0:
+            chips.append(DbMetricChip(label="errors", value=f"{bundle.error_rate:.2f}%", tone="negative"))
+        return chips
+
+    def _per_test_highlights(
+        self,
+        db_key: str,
+        label: str,
+        bundle: MetricStatsBundle,
+        pairwise: List[PairwiseComparison],
+        db_key_labels: Dict[str, str],
+    ) -> List[str]:
+        items: List[str] = []
+        if bundle.error_rate and bundle.error_rate > 0:
+            items.append(f"Ошибки запросов: {bundle.error_rate:.2f}%.")
+        latency = bundle.latency_ms
+        if latency:
+            if latency.median > 0 and (latency.p99 / latency.median) > self.HIGH_TAIL_RATIO_THRESHOLD:
+                items.append(f"Длинный хвост latency: p99/median ×{latency.p99 / latency.median:.1f}.")
+            if latency.mean > 0 and (latency.std / latency.mean) > self.HIGH_VARIABILITY_THRESHOLD:
+                items.append(f"Высокая вариативность (CV = {latency.std / latency.mean:.2f}).")
+        relevant = [
+            p for p in pairwise
+            if self._is_significant(p)
+            and p.effect_size is not None
+            and p.effect_size_label in ("medium", "large")
+            and (db_key in (p.baseline_id, p.compared_id) or db_key in p.db_key)
+        ]
+        for p in sorted(relevant, key=lambda x: abs(x.effect_size or 0), reverse=True)[:1]:
+            effect = "большой" if p.effect_size_label == "large" else "средний"
+            items.append(f"{self._metric_label(p.metric)}: {effect} эффект (d = {abs(p.effect_size or 0):.2f}).")
+        return items
+
+    # ------------------------------------------------------------------
+    # Verdict / sections
+    # ------------------------------------------------------------------
 
     def _verdict(
         self,
@@ -162,125 +271,110 @@ class PerTestReportGenerator(_ReportBase):
         db_key_labels: Dict[str, str],
     ) -> str:
         tp_ranking = next((r for r in rankings if r.metric == "throughput_mean"), None)
+        latency_ranking = next((r for r in rankings if r.metric in ("latency_mean", "latency_p95")), None)
         if tp_ranking and tp_ranking.rankings:
             best = tp_ranking.rankings[0]
-            label = db_key_labels.get(best.db_key, best.db_key)
-            return (
-                f"Лидер по пропускной способности — {label} ({best.value:.1f} req/s). "
-                f"Ранжирование основано на средних значениях throughput при одинаковой нагрузке."
-            )
+            label = self._safe_label(db_key_labels.get(best.db_key, best.db_key))
+            if latency_ranking and latency_ranking.rankings:
+                lat_best = latency_ranking.rankings[0]
+                lat_label = self._safe_label(db_key_labels.get(lat_best.db_key, lat_best.db_key))
+                return (
+                    f"Лидер по throughput — {label} ({best.value:.1f} req/s); "
+                    f"лучшая latency у {lat_label} ({lat_best.value:.2f} мс)."
+                )
+            return f"Лидер по throughput — {label} ({best.value:.1f} req/s)."
 
         throughput_items = [p for p in pairwise if p.metric == "throughput" and p.warning is None]
-        sig = [p for p in throughput_items if p.is_significant and p.pct_difference is not None]
+        sig = [p for p in throughput_items if self._is_significant(p) and p.pct_difference is not None]
         if sig:
             best = max(sig, key=lambda p: abs(p.pct_difference or 0))
             return (
-                f"Статистически значимая разница по throughput: "
-                f"{best.db_key}, Δ = {abs(best.pct_difference or 0):.1f}% (p = {best.p_value:.4f})"
+                f"Главное различие по throughput: {self._safe_label(best.db_key)}, "
+                f"Δ = {abs(best.pct_difference or 0):.1f}% ({self._format_p_value(best)})."
             )
 
-        return "Статистически значимых различий по пропускной способности между СУБД не обнаружено"
+        return "Явного лидера по throughput не выявлено: ключевые различия статистически не подтверждены."
 
-    def _patterns(
+    def _facts(
         self,
+        test_info: ComparisonTestInfo,
         descriptive_stats: Dict[str, MetricStatsBundle],
+        pairwise: List[PairwiseComparison],
         db_key_labels: Dict[str, str],
     ) -> List[str]:
-        patterns = []
+        sig_count = sum(1 for p in pairwise if self._is_significant(p))
+        return [
+            f"Прогон «{test_info.name}»: {len(descriptive_stats)} СУБД, {len(pairwise)} попарных сравнений, {sig_count} значимых.",
+        ]
+
+    def _important(
+        self,
+        descriptive_stats: Dict[str, MetricStatsBundle],
+        pairwise: List[PairwiseComparison],
+        db_key_labels: Dict[str, str],
+    ) -> List[str]:
+        patterns = self._effect_size_insights(pairwise)
+        high_tail: List[str] = []
+        high_variability: List[str] = []
+        errors: List[str] = []
         for db_key, bundle in descriptive_stats.items():
-            label = db_key_labels.get(db_key, db_key)
-            patterns.extend(self._analyze_bundle_patterns(label, bundle))
+            label = self._safe_label(db_key_labels.get(db_key, db_key))
+            latency = bundle.latency_ms
+            if latency:
+                if latency.median > 0 and (latency.p99 / latency.median) > self.HIGH_TAIL_RATIO_THRESHOLD:
+                    high_tail.append(label)
+                if latency.mean > 0 and (latency.std / latency.mean) > self.HIGH_VARIABILITY_THRESHOLD:
+                    high_variability.append(label)
+            if bundle.error_rate and bundle.error_rate > 0:
+                errors.append(f"{label} ({bundle.error_rate:.2f}%)")
+        if errors:
+            patterns.insert(0, f"Ошибки зафиксированы у: {', '.join(errors)}.")
+        if high_tail:
+            patterns.append(f"Длинный хвост latency виден у: {', '.join(high_tail)}.")
+        if high_variability:
+            patterns.append(f"Высокая вариативность latency у: {', '.join(high_variability)}.")
         if not patterns:
-            patterns.append("Явно выраженных паттернов деградации или нестабильности не обнаружено")
+            patterns.append("Критичных паттернов не видно.")
         return self._deduplicate(patterns)
 
-    def _recommendations(
+    def _reliability(
         self,
         descriptive_stats: Dict[str, MetricStatsBundle],
         pairwise: List[PairwiseComparison],
-        db_key_labels: Dict[str, str],
     ) -> List[str]:
-        recs = []
-        for db_key, bundle in descriptive_stats.items():
-            label = db_key_labels.get(db_key, db_key)
-            recs.extend(self._bundle_recommendations(label, bundle))
-        if not recs:
-            recs.append("Проведите дополнительные прогоны для повышения надёжности выводов")
-        return self._deduplicate(recs)
-
-    def _hypotheses(
-        self,
-        pairwise: List[PairwiseComparison],
-        db_key_labels: Dict[str, str],
-        test_info: ComparisonTestInfo,
-    ) -> List[str]:
-        hyp = []
-        scenario = (test_info.config.get("scenario") or "").lower()
-        for p in pairwise:
-            if p.warning or p.pct_difference is None:
-                continue
-            if p.metric == "throughput" and abs(p.pct_difference) >= self.THROUGHPUT_DROP_ALERT_THRESHOLD:
-                hyp.append(
-                    f"{p.db_key}: значительное различие throughput может указывать на lock contention или I/O bottleneck"
-                )
-            if p.metric == "latency_ms" and p.baseline_mean and p.compared_mean:
-                ratio = max(p.baseline_mean, p.compared_mean) / max(min(p.baseline_mean, p.compared_mean), 0.001)
-                if ratio >= self.LATENCY_SPIKE_RATIO_THRESHOLD:
-                    hyp.append(
-                        f"{p.db_key}: скачки latency могут быть связаны с checkpoint-операциями или всплесками конкуренции"
-                    )
-        if not hyp:
-            hyp.append("Явных эвристических гипотез не сформировано — для диагностики рекомендуется анализ планов запросов и блокировок")
-        return self._deduplicate(hyp)
-
-    def _executive_summary(
-        self,
-        test_info: ComparisonTestInfo,
-        descriptive_stats: Dict[str, MetricStatsBundle],
-        pairwise: List[PairwiseComparison],
-        rankings: List[MetricRanking],
-        db_key_labels: Dict[str, str],
-    ) -> List[str]:
-        items = []
-        db_count = len(descriptive_stats)
-        sig_count = sum(1 for p in pairwise if p.is_significant)
-        items.append(
-            f"Анализ прогона «{test_info.name}»: {db_count} СУБД, "
-            f"{len(pairwise)} попарных сравнений, {sig_count} статистически значимых."
-        )
-
-        best_tp_db = None
-        best_tp_val = -1.0
-        best_lat_db = None
-        best_lat_val = float("inf")
-        for db_key, bundle in descriptive_stats.items():
-            label = db_key_labels.get(db_key, db_key)
-            if bundle.throughput and bundle.throughput.mean > best_tp_val:
-                best_tp_val = bundle.throughput.mean
-                best_tp_db = label
-            if bundle.latency_ms and bundle.latency_ms.mean < best_lat_val:
-                best_lat_val = bundle.latency_ms.mean
-                best_lat_db = label
-        if best_tp_db:
-            items.append(f"Лучший throughput: {best_tp_db} — {best_tp_val:.1f} req/s.")
-        if best_lat_db:
-            items.append(f"Лучшая latency: {best_lat_db} — {best_lat_val:.2f} мс (среднее).")
+        items = [self._significance_summary(pairwise)]
+        sources = sorted({bundle.source for bundle in descriptive_stats.values() if bundle.source})
+        low_samples = [
+            db_key for db_key, bundle in descriptive_stats.items() if bundle.sample_size_warning
+        ]
+        parts: List[str] = []
+        if sources:
+            parts.append(f"источники: {', '.join(sources)}")
+        if low_samples:
+            parts.append(f"малая выборка у {len(low_samples)} СУБД")
+        if parts:
+            items.append("; ".join(parts).capitalize() + ".")
         return items
 
-    def _conclusion(self, pairwise: List[PairwiseComparison]) -> List[str]:
-        sig = [p for p in pairwise if p.is_significant]
-        large = [p for p in sig if p.effect_size_label in ("large", "medium")]
-        if not sig:
-            return ["Статистически значимых различий между СУБД не обнаружено. Рекомендуется увеличить выборку."]
-        if large:
-            return [
-                f"Обнаружено {len(large)} практически значимых различий из {len(sig)} статистически значимых. "
-                "Результаты достаточно надёжны для принятия решений."
-            ]
-        return [
-            "Статистически значимые различия обнаружены, но практический размер мал. "
-            "Рекомендуется учитывать другие факторы: стабильность, масштабируемость, стоимость."
-        ]
+    def _actions(
+        self,
+        descriptive_stats: Dict[str, MetricStatsBundle],
+        pairwise: List[PairwiseComparison],
+        db_key_labels: Dict[str, str],
+    ) -> List[str]:
+        recs: List[str] = []
+        if any(bundle.error_rate and bundle.error_rate > 0 for bundle in descriptive_stats.values()):
+            recs.append("Устранить ошибки запросов, затем повторить сравнение.")
+        if any(
+            bundle.latency_ms and bundle.latency_ms.median > 0 and (bundle.latency_ms.p99 / bundle.latency_ms.median) > self.HIGH_TAIL_RATIO_THRESHOLD
+            for bundle in descriptive_stats.values()
+        ):
+            recs.append("Проверить p99 latency: планы запросов, блокировки, I/O.")
+        if not any(self._is_significant(p) for p in pairwise):
+            recs.append("Увеличить выборку или повторить прогон для уверенного выбора.")
+        if not recs:
+            recs.append("Сопоставить выводы с SLA и стоимостью сопровождения СУБД.")
+        return self._deduplicate(recs)
 
 
 # ---------------------------------------------------------------------------
@@ -300,52 +394,134 @@ class SeriesReportGenerator(_ReportBase):
         parameter_impacts: List[ParameterImpactSummary],
         config: Optional[AnalysisReportConfig] = None,
     ) -> AnalysisReport:
-        cfg = config or AnalysisReportConfig()
-
-        verdict = self._verdict(per_db, load_levels, db_key_labels) if cfg.include_verdict else ""
-        patterns = self._patterns(per_db, db_key_labels) if cfg.include_patterns else []
-        recommendations = self._recommendations(per_db, db_key_labels) if cfg.include_recommendations else []
-        hypotheses = self._hypotheses(per_db, db_key_labels) if cfg.include_hypotheses else []
-
-        sections: List[AnalysisSection] = []
-
-        summary = self._executive_summary(tests, per_db, load_levels, db_key_labels)
-        if summary:
-            sections.append(AnalysisSection(title="Краткое резюме", items=summary))
-        if cfg.include_verdict:
-            sections.append(AnalysisSection(title="Основной вердикт", items=[verdict]))
-
-        if parameter_impacts:
-            pi_items = [p.summary_text for p in parameter_impacts if p.summary_text]
-            if pi_items:
-                sections.append(AnalysisSection(title="Влияние параметров конфигурации", items=pi_items))
-
-        if cfg.include_patterns:
-            sections.append(AnalysisSection(title="Выявленные паттерны", items=patterns))
-
-        all_adjacent = []
-        for s in per_db.values():
-            all_adjacent.extend(s.adjacent_level_tests)
-        effect_insights = self._effect_size_insights(all_adjacent)
-        if effect_insights:
-            sections.append(AnalysisSection(title="Практическая значимость различий", items=effect_insights))
-
-        if cfg.include_recommendations:
-            sections.append(AnalysisSection(title="Рекомендации", items=recommendations))
-        if cfg.include_hypotheses:
-            sections.append(AnalysisSection(title="Возможные причины различий", items=hypotheses))
-
-        conclusion = self._conclusion(per_db, db_key_labels)
-        if conclusion:
-            sections.append(AnalysisSection(title="Заключение", items=conclusion))
+        _ = config
+        verdict = self._verdict(per_db, load_levels, db_key_labels)
+        facts = self._facts(tests, per_db, load_levels, db_key_labels)
+        important = self._important(per_db, db_key_labels)
+        reliability = self._reliability(tests, per_db, parameter_impacts)
+        actions = self._actions(per_db, load_levels, db_key_labels, parameter_impacts)
+        sections = self._sections(verdict, facts, important, reliability, actions)
+        findings = self._per_db_findings(per_db, load_levels, db_key_labels)
 
         return AnalysisReport(
             verdict=verdict,
-            patterns=patterns,
-            recommendations=recommendations,
-            hypotheses=hypotheses,
+            patterns=important,
+            recommendations=actions,
+            hypotheses=reliability,
             sections=sections,
+            per_db_findings=findings,
         )
+
+    # ------------------------------------------------------------------
+    # Per-DB scorecards
+    # ------------------------------------------------------------------
+
+    def _per_db_findings(
+        self,
+        per_db: Dict[str, DbSeriesSummary],
+        load_levels: List[LoadLevel],
+        db_key_labels: Dict[str, str],
+    ) -> List[DbFinding]:
+        findings: List[DbFinding] = []
+        for dk, s in per_db.items():
+            label = self._safe_label(db_key_labels.get(dk, s.db_label or dk))
+            status, reason = self._series_status(s)
+            chips = self._series_chips(s)
+            highlights = self._series_highlights(dk, label, s, load_levels, db_key_labels)
+            findings.append(DbFinding(
+                db_key=dk,
+                db_label=label,
+                status=status,
+                status_reason=reason,
+                chips=chips,
+                highlights=highlights[:3],
+            ))
+        return findings
+
+    def _series_status(self, s: DbSeriesSummary) -> Tuple[DbFindingStatus, str]:
+        has_errors = any(
+            bundle.error_rate and bundle.error_rate > 0
+            for bundle in s.descriptive_stats_by_level.values()
+        )
+        if has_errors:
+            return DbFindingStatus.CRITICAL, "ошибки запросов"
+        if s.degradation.overall_p95 > self.DEGRADATION_CRITICAL_THRESHOLD:
+            return DbFindingStatus.CRITICAL, f"деградация p95 +{s.degradation.overall_p95:.0f}%"
+        if s.saturation_point is not None and s.degradation.overall_p95 > 20:
+            return DbFindingStatus.CRITICAL, "насыщение + деградация"
+        reasons: List[str] = []
+        if s.degradation.overall_p95 > 20:
+            reasons.append(f"deg p95 +{s.degradation.overall_p95:.0f}%")
+        if s.stability_index is not None and s.stability_index > 0.5:
+            reasons.append(f"нестабильна (CV {s.stability_index:.2f})")
+        tail_hit = any(
+            b.latency_ms and b.latency_ms.median > 0 and (b.latency_ms.p99 / b.latency_ms.median) > self.HIGH_TAIL_RATIO_THRESHOLD
+            for b in s.descriptive_stats_by_level.values()
+        )
+        if tail_hit:
+            reasons.append("длинный хвост p99")
+        if reasons:
+            return DbFindingStatus.WARNING, "; ".join(reasons)
+        return DbFindingStatus.GOOD, "стабильна и масштабируется"
+
+    def _series_chips(self, s: DbSeriesSummary) -> List[DbMetricChip]:
+        chips: List[DbMetricChip] = []
+        if s.trajectory:
+            last = s.trajectory[-1]
+            if last.throughput_mean is not None:
+                chips.append(DbMetricChip(label="peak throughput", value=f"{last.throughput_mean:.0f} req/s", tone="neutral"))
+            if last.latency_p95 is not None:
+                chips.append(DbMetricChip(label="p95", value=f"{last.latency_p95:.1f} ms", tone="neutral"))
+        if s.degradation.overall_p95 > 0:
+            tone = "negative" if s.degradation.overall_p95 > 20 else "neutral"
+            chips.append(DbMetricChip(label="Δ p95", value=f"+{s.degradation.overall_p95:.0f}%", tone=tone))
+        if s.elasticity is not None:
+            tone = "negative" if s.elasticity < 0.3 else "positive" if s.elasticity > 0.7 else "neutral"
+            chips.append(DbMetricChip(label="elasticity", value=f"{s.elasticity:.2f}", tone=tone))
+        return chips
+
+    def _series_highlights(
+        self,
+        dk: str,
+        label: str,
+        s: DbSeriesSummary,
+        load_levels: List[LoadLevel],
+        db_key_labels: Dict[str, str],
+    ) -> List[str]:
+        items: List[str] = []
+        if s.degradation.overall_p95 > 20:
+            items.append(f"p95 деградация +{s.degradation.overall_p95:.0f}% по серии.")
+        if s.saturation_point:
+            level = next((l for l in load_levels if l.level_id == s.saturation_point), None)
+            if level:
+                items.append(f"Насыщение на уровне {level.label}.")
+        has_latency_trend = any(
+            tr.direction == "increasing" and "latency" in key
+            for key, tr in s.trend_tests.items()
+        )
+        if has_latency_trend:
+            items.append("Рост latency подтверждён трендом.")
+        has_tp_trend = any(
+            tr.direction == "decreasing" and "throughput" in key
+            for key, tr in s.trend_tests.items()
+        )
+        if has_tp_trend:
+            items.append("Снижение throughput подтверждено трендом.")
+        if s.elasticity is not None and s.elasticity < 0.3:
+            items.append(f"Слабая масштабируемость (elasticity = {s.elasticity:.2f}).")
+        if s.stability_index is not None and s.stability_index > 0.5:
+            items.append(f"Нестабильная траектория (CV = {s.stability_index:.2f}).")
+        has_errors = any(
+            bundle.error_rate and bundle.error_rate > 0
+            for bundle in s.descriptive_stats_by_level.values()
+        )
+        if has_errors:
+            items.append("Ошибки запросов на некоторых уровнях нагрузки.")
+        return items
+
+    # ------------------------------------------------------------------
+    # Verdict / sections
+    # ------------------------------------------------------------------
 
     def _verdict(
         self,
@@ -356,19 +532,16 @@ class SeriesReportGenerator(_ReportBase):
         if not per_db:
             return "Недостаточно данных для итогового вердикта."
 
-        labels = {dk: db_key_labels.get(dk, s.db_label or dk) for dk, s in per_db.items()}
+        labels = {dk: self._safe_label(db_key_labels.get(dk, s.db_label or dk)) for dk, s in per_db.items()}
 
         max_tp: Dict[str, float] = {}
-        max_lat: Dict[str, float] = {}
         for dk, s in per_db.items():
             if s.trajectory:
                 last = s.trajectory[-1]
                 if last.throughput_mean is not None:
                     max_tp[dk] = last.throughput_mean
-                if last.latency_p95 is not None:
-                    max_lat[dk] = last.latency_p95
 
-        parts: list[str] = []
+        parts: List[str] = []
 
         if len(max_tp) >= 2:
             ranked = sorted(max_tp.items(), key=lambda x: x[1], reverse=True)
@@ -403,31 +576,6 @@ class SeriesReportGenerator(_ReportBase):
             else:
                 parts.append(f"{labels[dk]}: throughput {max_tp[dk]:.0f} req/s при максимальной нагрузке")
 
-        if len(max_lat) >= 2:
-            best_lat_dk = min(max_lat, key=max_lat.get)
-            worst_lat_dk = max(max_lat, key=max_lat.get)
-            ratio = max_lat[worst_lat_dk] / max_lat[best_lat_dk] if max_lat[best_lat_dk] > 0 else 1
-            if ratio > 1.15:
-                parts.append(
-                    f"Лучшая задержка p95 у {labels[best_lat_dk]} "
-                    f"({max_lat[best_lat_dk]:.1f} мс vs {max_lat[worst_lat_dk]:.1f} мс у {labels[worst_lat_dk]})"
-                )
-
-        saturated = []
-        for dk, s in per_db.items():
-            if s.saturation_point:
-                level = next((l for l in load_levels if l.level_id == s.saturation_point), None)
-                if level:
-                    saturated.append((dk, labels[dk], level.label))
-
-        if saturated:
-            if len(saturated) == len(per_db):
-                earliest = min(saturated, key=lambda x: x[2])
-                parts.append(f"Все СУБД достигают насыщения, раньше всех — {earliest[1]} (при {earliest[2]})")
-            else:
-                sat_items = [f"{name} при {lvl}" for _, name, lvl in saturated]
-                parts.append(f"Точка насыщения: {', '.join(sat_items)}")
-
         degraded = [
             (labels[dk], s.degradation.overall_p95)
             for dk, s in per_db.items()
@@ -444,149 +592,137 @@ class SeriesReportGenerator(_ReportBase):
                 parts.append(f"Выраженная деградация p95 у {worst[0]} (+{worst[1]:.0f}%)")
 
         if not parts:
-            return "Статистически значимых различий между СУБД не выявлено."
+            return "Серия не показывает явного лидера: различия требуют дополнительной проверки."
 
         return ". ".join(parts) + "."
 
-    def _patterns(
-        self,
-        per_db: Dict[str, DbSeriesSummary],
-        db_key_labels: Dict[str, str],
-    ) -> List[str]:
-        patterns = []
-        for db_key, s in per_db.items():
-            label = db_key_labels.get(db_key, s.db_label or db_key)
-
-            if s.degradation.overall_p95 > 20:
-                patterns.append(f"{label}: выраженная деградация p95 при росте нагрузки (среднее изменение +{s.degradation.overall_p95:.0f}%)")
-            if s.degradation.overall_p99 > 30:
-                patterns.append(f"{label}: значительная деградация p99 при росте нагрузки (+{s.degradation.overall_p99:.0f}%)")
-
-            if s.stability_index is not None and s.stability_index > 0.5:
-                patterns.append(f"{label}: нестабильная производительность по уровням нагрузки (индекс устойчивости {s.stability_index:.2f})")
-
-            if s.elasticity is not None:
-                if s.elasticity > 0.9:
-                    patterns.append(f"{label}: близкое к линейному масштабирование (эластичность {s.elasticity:.2f})")
-                elif s.elasticity < 0.3:
-                    patterns.append(f"{label}: низкая эластичность — throughput плохо масштабируется с ростом потоков ({s.elasticity:.2f})")
-
-            for trend_key, trend in s.trend_tests.items():
-                if trend.direction == "increasing" and "latency" in trend_key:
-                    patterns.append(f"{label}: обнаружен статистически значимый тренд роста latency ({trend_key}, p = {trend.p_value:.4f})")
-                elif trend.direction == "decreasing" and "throughput" in trend_key:
-                    patterns.append(f"{label}: обнаружен тренд снижения throughput ({trend_key}, p = {trend.p_value:.4f})")
-
-            for bundle in s.descriptive_stats_by_level.values():
-                patterns.extend(self._analyze_bundle_patterns(label, bundle))
-
-        if not patterns:
-            patterns.append("Явно выраженных паттернов деградации или нестабильности не обнаружено")
-        return self._deduplicate(patterns)
-
-    def _recommendations(
-        self,
-        per_db: Dict[str, DbSeriesSummary],
-        db_key_labels: Dict[str, str],
-    ) -> List[str]:
-        recs = []
-        for db_key, s in per_db.items():
-            label = db_key_labels.get(db_key, s.db_label or db_key)
-
-            if s.saturation_point:
-                recs.append(f"{label}: не превышайте нагрузку уровня {s.saturation_point} — после этого throughput не растёт")
-
-            if s.degradation.overall_p95 > 20:
-                recs.append(f"{label}: при повышении нагрузки проверьте блокировки, пул соединений и I/O")
-
-            if s.elasticity is not None and s.elasticity > 0.9:
-                recs.append(f"{label}: подходит для плавного масштабирования нагрузки")
-
-            for bundle in s.descriptive_stats_by_level.values():
-                recs.extend(self._bundle_recommendations(label, bundle))
-
-        if not recs:
-            recs.append("Проведите дополнительные прогоны с большим диапазоном нагрузок для повышения надёжности выводов")
-        return self._deduplicate(recs)
-
-    def _hypotheses(
-        self,
-        per_db: Dict[str, DbSeriesSummary],
-        db_key_labels: Dict[str, str],
-    ) -> List[str]:
-        hyp = []
-        for db_key, s in per_db.items():
-            label = db_key_labels.get(db_key, s.db_label or db_key)
-
-            if s.degradation.overall_p95 > 20:
-                hyp.append(f"{label}: деградация при росте нагрузки может указывать на lock contention, I/O bottleneck или исчерпание пула соединений")
-
-            if s.saturation_point:
-                hyp.append(f"{label}: точка насыщения может быть связана с ростом очередей и накладных расходов планировщика")
-
-            if s.elasticity is not None and s.elasticity < 0.3:
-                hyp.append(f"{label}: низкая эластичность — возможно, рабочие нагрузки упираются в однопоточные участки или блокировки")
-
-        if not hyp:
-            hyp.append("Явных эвристических гипотез не сформировано — для диагностики рекомендуется анализ планов запросов, блокировок и системных метрик")
-        return self._deduplicate(hyp)
-
-    def _executive_summary(
+    def _facts(
         self,
         tests: List[ComparisonTestInfo],
         per_db: Dict[str, DbSeriesSummary],
         load_levels: List[LoadLevel],
         db_key_labels: Dict[str, str],
     ) -> List[str]:
-        items = []
-        items.append(
-            f"Серийный анализ: {len(tests)} прогонов, {len(per_db)} СУБД, {len(load_levels)} уровней нагрузки."
-        )
+        saturated = self._saturation_items(per_db, load_levels, db_key_labels)
+        facts = [f"Серия: {len(tests)} прогонов, {len(per_db)} СУБД, {len(load_levels)} уровней нагрузки."]
+        if saturated:
+            if len(saturated) == len(per_db):
+                earliest = min(saturated, key=lambda x: (x[2].virtual_users, x[2].iterations))
+                facts.append(f"Насыщение у всех СУБД; раньше всех — {earliest[1]} ({earliest[2].label}).")
+            else:
+                facts.append("Насыщение: " + ", ".join(f"{name} ({level.label})" for _, name, level in saturated) + ".")
+        return facts
 
-        for db_key, s in per_db.items():
-            label = db_key_labels.get(db_key, s.db_label or db_key)
-            tp_vals = [tp.throughput_mean for tp in s.trajectory if tp.throughput_mean is not None]
-            if tp_vals:
-                items.append(f"{label}: throughput от {min(tp_vals):.1f} до {max(tp_vals):.1f} req/s по уровням нагрузки.")
-            lat_vals = [tp.latency_p95 for tp in s.trajectory if tp.latency_p95 is not None]
-            if lat_vals:
-                items.append(f"{label}: p95 latency от {min(lat_vals):.1f} до {max(lat_vals):.1f} мс.")
-
-        return items
-
-    def _conclusion(
+    def _important(
         self,
         per_db: Dict[str, DbSeriesSummary],
         db_key_labels: Dict[str, str],
     ) -> List[str]:
-        items = []
-        best_elasticity_db = None
-        best_elasticity = -1.0
-        for db_key, s in per_db.items():
-            if s.elasticity is not None and s.elasticity > best_elasticity:
-                best_elasticity = s.elasticity
-                best_elasticity_db = db_key_labels.get(db_key, s.db_label or db_key)
-
-        if best_elasticity_db and best_elasticity > 0.5:
-            items.append(f"Лучшую масштабируемость демонстрирует {best_elasticity_db} (эластичность {best_elasticity:.2f}).")
-
-        degradation_dbs = [
-            db_key_labels.get(dk, s.db_label or dk)
+        patterns: List[str] = []
+        labels = {dk: self._safe_label(db_key_labels.get(dk, s.db_label or dk)) for dk, s in per_db.items()}
+        degraded_p95 = [
+            (labels[dk], s.degradation.overall_p95)
             for dk, s in per_db.items()
             if s.degradation.overall_p95 > 20
         ]
-        if degradation_dbs:
-            items.append(f"Выраженная деградация p95 при росте нагрузки: {', '.join(degradation_dbs)}.")
-
-        saturation_dbs = [
-            db_key_labels.get(dk, s.db_label or dk)
+        degraded_p99 = [
+            (labels[dk], s.degradation.overall_p99)
             for dk, s in per_db.items()
-            if s.saturation_point
+            if s.degradation.overall_p99 > 30
         ]
-        if saturation_dbs:
-            items.append(f"Точка насыщения обнаружена для: {', '.join(saturation_dbs)}.")
+        latency_trend = [
+            labels[dk]
+            for dk, s in per_db.items()
+            if any(tr.direction == "increasing" and "latency" in key for key, tr in s.trend_tests.items())
+        ]
+        throughput_trend = [
+            labels[dk]
+            for dk, s in per_db.items()
+            if any(tr.direction == "decreasing" and "throughput" in key for key, tr in s.trend_tests.items())
+        ]
+        if degraded_p95:
+            worst = max(degraded_p95, key=lambda item: item[1])
+            names = ", ".join(name for name, _ in degraded_p95)
+            patterns.append(f"p95 деградирует у: {names}; сильнее — {worst[0]} (+{worst[1]:.0f}%).")
+        patterns.extend(self._effect_size_insights(self._all_adjacent(per_db), labels, limit=2))
+        if degraded_p99:
+            worst = max(degraded_p99, key=lambda item: item[1])
+            patterns.append(f"p99-хвост растёт у {worst[0]} (+{worst[1]:.0f}%).")
+        if latency_trend:
+            patterns.append(f"Тренд роста latency подтверждён у: {', '.join(latency_trend)}.")
+        if throughput_trend:
+            patterns.append(f"Тренд снижения throughput у: {', '.join(throughput_trend)}.")
+        if not patterns:
+            patterns.append("Критичных паттернов по серии не видно.")
+        return self._deduplicate(patterns)
 
-        if not items:
-            items.append("Для более точных выводов рекомендуется увеличить число уровней нагрузки и повторить прогоны.")
+    def _reliability(
+        self,
+        tests: List[ComparisonTestInfo],
+        per_db: Dict[str, DbSeriesSummary],
+        parameter_impacts: List[ParameterImpactSummary],
+    ) -> List[str]:
+        all_adjacent = self._all_adjacent(per_db)
+        items = [self._significance_summary(all_adjacent)]
+        multi_param = [p for p in parameter_impacts if len(p.changed_parameters) > 1]
+        if multi_param:
+            items.append(
+                "В baseline одновременно менялись несколько параметров; "
+                "вклад каждого параметра нельзя изолировать."
+            )
+        else:
+            source_values = sorted({
+                bundle.source
+                for summary in per_db.values()
+                for bundle in summary.descriptive_stats_by_level.values()
+                if bundle.source
+            })
+            if source_values:
+                items.append(f"Источники: {', '.join(source_values)}; {len(tests)} прогонов.")
+        return self._deduplicate(items)
 
-        return items
+    def _actions(
+        self,
+        per_db: Dict[str, DbSeriesSummary],
+        load_levels: List[LoadLevel],
+        db_key_labels: Dict[str, str],
+        parameter_impacts: List[ParameterImpactSummary],
+    ) -> List[str]:
+        actions: List[str] = []
+        if any(s.degradation.overall_p95 > 20 for s in per_db.values()):
+            actions.append("Проверить блокировки, пул соединений и I/O на уровнях деградации.")
+        if any(len(p.changed_parameters) > 1 for p in parameter_impacts):
+            actions.append("Повторить baseline с одним параметром за раз для изоляции эффекта.")
+        saturated = self._saturation_items(per_db, load_levels, db_key_labels)
+        if saturated:
+            items = ", ".join(f"{name} после {level.label}" for _, name, level in saturated)
+            actions.append(f"Не повышать нагрузку без проверки на уровнях насыщения: {items}.")
+        if not actions:
+            actions.append("Расширить серию дополнительными уровнями или повторами.")
+        return self._deduplicate(actions)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _saturation_items(
+        self,
+        per_db: Dict[str, DbSeriesSummary],
+        load_levels: List[LoadLevel],
+        db_key_labels: Dict[str, str],
+    ) -> List[Tuple[str, str, LoadLevel]]:
+        saturated = []
+        for db_key, s in per_db.items():
+            label = self._safe_label(db_key_labels.get(db_key, s.db_label or db_key))
+            if s.saturation_point:
+                level = next((l for l in load_levels if l.level_id == s.saturation_point), None)
+                if level:
+                    saturated.append((db_key, label, level))
+        return saturated
+
+    @staticmethod
+    def _all_adjacent(per_db: Dict[str, DbSeriesSummary]) -> List[PairwiseComparison]:
+        all_adjacent = []
+        for summary in per_db.values():
+            all_adjacent.extend(summary.adjacent_level_tests)
+        return all_adjacent

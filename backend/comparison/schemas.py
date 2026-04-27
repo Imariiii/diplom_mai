@@ -241,6 +241,31 @@ class AnalysisSection(BaseModel):
     items: List[str] = Field(default_factory=list)
 
 
+class DbFindingStatus(str, Enum):
+    GOOD = "good"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+
+class DbMetricChip(BaseModel):
+    """Компактный числовой показатель для scorecard СУБД"""
+
+    label: str
+    value: str
+    tone: Literal["neutral", "positive", "negative"] = "neutral"
+
+
+class DbFinding(BaseModel):
+    """Scorecard одной СУБД: статус, числовые chips и краткие выводы"""
+
+    db_key: str
+    db_label: str
+    status: DbFindingStatus
+    status_reason: str
+    chips: List[DbMetricChip] = Field(default_factory=list)
+    highlights: List[str] = Field(default_factory=list)
+
+
 class AnalysisReport(BaseModel):
     """Rule-based аналитический отчёт"""
 
@@ -249,6 +274,7 @@ class AnalysisReport(BaseModel):
     recommendations: List[str] = Field(default_factory=list)
     hypotheses: List[str] = Field(default_factory=list)
     sections: List[AnalysisSection] = Field(default_factory=list)
+    per_db_findings: List[DbFinding] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

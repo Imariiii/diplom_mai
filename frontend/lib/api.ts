@@ -65,6 +65,10 @@ export type {
   DegradationIndex,
   DbSeriesSummary,
   CrossDbLevelRank,
+  DbFinding,
+  DbFindingStatus,
+  DbMetricChip,
+  DbMetricChipTone,
 } from "./api/comparison"
 
 // Функции и type guards - реэкспорт из модулей

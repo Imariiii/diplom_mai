@@ -12,7 +12,6 @@ import {
   Table2,
   Sigma,
   FileText,
-  Settings2,
   TrendingUp,
   Activity,
   Target,
@@ -21,7 +20,6 @@ import {
 
 import {
   analyzeComparison,
-  type AnalysisReportConfig,
   type ComparisonResult,
   type AnalysisWarning,
   isPerTestResult,
@@ -30,8 +28,6 @@ import {
 import { useAppStore } from "@/lib/store"
 
 import { Button } from "@/components/ui/button"
-import { Switch } from "@/components/ui/switch"
-import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -43,12 +39,6 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import { Separator } from "@/components/ui/separator"
 import { ExecutiveSummary } from "@/components/comparison/executive-summary"
 import { ParameterImpact } from "@/components/comparison/parameter-impact"
 import { ComparisonTable } from "@/components/comparison/comparison-table"
@@ -68,12 +58,6 @@ export function ComparisonPage() {
   const [result, setResult] = useState<ComparisonResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [reportConfig, setReportConfig] = useState<AnalysisReportConfig>({
-    include_verdict: true,
-    include_patterns: true,
-    include_recommendations: true,
-    include_hypotheses: true,
-  })
   const [activeTab, setActiveTab] = useState(
     analysisMode === "per_test" ? "rankings" : "summary"
   )
@@ -126,9 +110,6 @@ export function ComparisonPage() {
     a.click()
     URL.revokeObjectURL(url)
   }
-
-  const toggleReport = (key: keyof AnalysisReportConfig, checked: boolean) =>
-    setReportConfig((current) => ({ ...current, [key]: checked }))
 
   const perTestTabs = useMemo(
     () => [
@@ -239,50 +220,6 @@ export function ComparisonPage() {
               </SheetContent>
             </Sheet>
 
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" size="sm">
-                  <Settings2 className="mr-2 h-3.5 w-3.5" />
-                  Вид
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-72">
-                <div className="space-y-4">
-                  <div>
-                    <h4 className="text-sm font-medium">Параметры отображения</h4>
-                    <p className="text-xs text-muted-foreground">
-                      Управляйте видимыми секциями отчёта
-                    </p>
-                  </div>
-                  <Separator />
-                  <div className="space-y-2">
-                    <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                      Секции отчёта
-                    </p>
-                    {(
-                      [
-                        ["include_verdict", "Вердикт"],
-                        ["include_patterns", "Паттерны"],
-                        ["include_recommendations", "Рекомендации"],
-                        ["include_hypotheses", "Гипотезы"],
-                      ] as const
-                    ).map(([key, label]) => (
-                      <div key={key} className="flex items-center justify-between gap-2">
-                        <Label htmlFor={key} className="text-sm font-normal">
-                          {label}
-                        </Label>
-                        <Switch
-                          id={key}
-                          checked={reportConfig[key]}
-                          onCheckedChange={(c) => toggleReport(key, c)}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </PopoverContent>
-            </Popover>
-
             <Button size="sm" onClick={exportJson}>
               <Download className="mr-2 h-3.5 w-3.5" />
               Экспорт
@@ -328,7 +265,6 @@ export function ComparisonPage() {
               <TabsContent value="report" className="focus-visible:outline-none">
                 <AnalysisReport
                   report={result.analysis_report}
-                  config={reportConfig}
                   analysisMode={analysisMode}
                 />
               </TabsContent>
@@ -356,7 +292,6 @@ export function ComparisonPage() {
               <TabsContent value="report" className="focus-visible:outline-none">
                 <AnalysisReport
                   report={result.analysis_report}
-                  config={reportConfig}
                   analysisMode={analysisMode}
                 />
               </TabsContent>

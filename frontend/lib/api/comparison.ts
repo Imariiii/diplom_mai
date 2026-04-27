@@ -185,12 +185,31 @@ export interface AnalysisSection {
   items: string[]
 }
 
+export type DbFindingStatus = "good" | "warning" | "critical"
+export type DbMetricChipTone = "neutral" | "positive" | "negative"
+
+export interface DbMetricChip {
+  label: string
+  value: string
+  tone: DbMetricChipTone
+}
+
+export interface DbFinding {
+  db_key: string
+  db_label: string
+  status: DbFindingStatus
+  status_reason: string
+  chips: DbMetricChip[]
+  highlights: string[]
+}
+
 export interface AnalysisReport {
   verdict: string
   patterns: string[]
   recommendations: string[]
   hypotheses: string[]
   sections: AnalysisSection[]
+  per_db_findings: DbFinding[]
 }
 
 // ---------------------------------------------------------------------------
