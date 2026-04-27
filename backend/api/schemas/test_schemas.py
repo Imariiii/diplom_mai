@@ -5,36 +5,56 @@ from pydantic import BaseModel, field_validator
 from typing import List, Optional
 
 
-class TestRequest(BaseModel):
-    """Запрос на запуск теста"""
+MAX_TEST_ITERATIONS = 10_000
+MAX_TEST_VIRTUAL_USERS = 100
+MAX_TEST_WARMUP_TIME = 300
+
+
+class BaseTestRequest(BaseModel):
+    """Базовая схема запуска теста с ограничениями дипломного стенда"""
+
     query_id: Optional[str] = None
     custom_sql: Optional[str] = None
     db_types: Optional[List[str]] = None
     connection_ids: Optional[List[str]] = None
     bundle_id: Optional[str] = None
     iterations: int = 10
-    virtual_users: Optional[int] = 10
+    virtual_users: int = 10
     scenario: Optional[str] = "mixed_light"
     use_indexes: Optional[bool] = False
-    warmup_time: Optional[int] = 5
+    warmup_time: int = 5
     test_name: Optional[str] = None
     logical_database_id: Optional[str] = None
 
+    @field_validator("iterations")
+    @classmethod
+    def validate_iterations(cls, v: int) -> int:
+        """Проверить количество итераций теста."""
+        if v < 1:
+            raise ValueError("iterations должен быть не меньше 1")
+        if v > MAX_TEST_ITERATIONS:
+            raise ValueError(f"iterations не может превышать {MAX_TEST_ITERATIONS}")
+        return v
 
-class AsyncTestRequest(BaseModel):
-    """Запрос на асинхронный запуск теста"""
-    query_id: Optional[str] = None
-    custom_sql: Optional[str] = None
-    db_types: Optional[List[str]] = None
-    connection_ids: Optional[List[str]] = None
-    bundle_id: Optional[str] = None
-    iterations: int = 10
-    virtual_users: Optional[int] = 10
-    scenario: Optional[str] = "mixed_light"
-    use_indexes: Optional[bool] = False
-    warmup_time: Optional[int] = 5
-    test_name: Optional[str] = None
-    logical_database_id: Optional[str] = None
+    @field_validator("virtual_users")
+    @classmethod
+    def validate_virtual_users(cls, v: int) -> int:
+        """Проверить количество виртуальных пользователей."""
+        if v < 1:
+            raise ValueError("virtual_users должен быть не меньше 1")
+        if v > MAX_TEST_VIRTUAL_USERS:
+            raise ValueError(f"virtual_users не может превышать {MAX_TEST_VIRTUAL_USERS}")
+        return v
+
+    @field_validator("warmup_time")
+    @classmethod
+    def validate_warmup_time(cls, v: int) -> int:
+        """Проверить длительность прогрева."""
+        if v < 0:
+            raise ValueError("warmup_time не может быть отрицательным")
+        if v > MAX_TEST_WARMUP_TIME:
+            raise ValueError(f"warmup_time не может превышать {MAX_TEST_WARMUP_TIME} секунд")
+        return v
 
     @field_validator("custom_sql")
     @classmethod
@@ -47,3 +67,11 @@ class AsyncTestRequest(BaseModel):
         if len(sql) > 10_000:
             raise ValueError("SQL-запрос не может превышать 10 000 символов")
         return sql
+
+
+class TestRequest(BaseTestRequest):
+    """Запрос на запуск теста"""
+
+
+class AsyncTestRequest(BaseTestRequest):
+    """Запрос на асинхронный запуск теста"""

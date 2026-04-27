@@ -11,7 +11,7 @@ if (typeof process.loadEnvFile === "function" && existsSync(rootEnvPath)) {
 const nextConfig = {
   output: "standalone",
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   },
   images: {
     unoptimized: true,

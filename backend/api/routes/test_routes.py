@@ -1,8 +1,9 @@
 """
 API роуты для выполнения тестов
 """
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, BackgroundTasks, HTTPException, WebSocket, WebSocketDisconnect
-from typing import Dict, List
+from typing import Dict, List, Optional
 import uuid
 import asyncio
 
@@ -16,6 +17,8 @@ router = APIRouter(prefix="/test", tags=["test"])
 
 
 BLOCKING_LOGICAL_PROFILE_STATUSES = {"draft", "needs_review", "incompatible"}
+TERMINAL_TEST_STATUSES = {"completed", "failed"}
+ACTIVE_TEST_TTL = timedelta(hours=6)
 
 
 def _extract_raw_samples(stats: Dict) -> List[Dict]:
@@ -30,6 +33,48 @@ def get_active_tests():
     """Получить хранилище активных тестов из main.py"""
     from backend.main import active_tests
     return active_tests
+
+
+def _now_utc() -> datetime:
+    """Получить текущий UTC timestamp для active_tests."""
+    return datetime.now(timezone.utc)
+
+
+def _parse_active_test_timestamp(value) -> Optional[datetime]:
+    """Безопасно разобрать timestamp из active_tests."""
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value)
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed
+        except ValueError:
+            return None
+    return None
+
+
+def prune_active_tests(active_tests: Dict[str, Dict] = None, now: datetime = None) -> int:
+    """Удалить завершённые in-memory тесты старше TTL."""
+    active_tests = active_tests if active_tests is not None else get_active_tests()
+    now = now or _now_utc()
+    pruned = 0
+
+    for test_id, test_info in list(active_tests.items()):
+        if test_info.get("status") not in TERMINAL_TEST_STATUSES:
+            continue
+
+        finished_at = _parse_active_test_timestamp(
+            test_info.get("finished_at") or test_info.get("created_at")
+        )
+        if finished_at and now - finished_at > ACTIVE_TEST_TTL:
+            del active_tests[test_id]
+            pruned += 1
+
+    return pruned
 
 
 def _build_bundle_config_snapshot(bundle: Dict) -> Dict:
@@ -186,6 +231,8 @@ async def run_async_test(request: AsyncTestRequest, background_tasks: Background
     test_name = request.test_name or f"Тест {test_id}"
     
     active_tests = get_active_tests()
+    prune_active_tests(active_tests)
+    created_at = _now_utc()
     
     # Сохраняем информацию о тесте
     active_tests[test_id] = {
@@ -193,6 +240,8 @@ async def run_async_test(request: AsyncTestRequest, background_tasks: Background
         "name": test_name,
         "status": "pending",
         "config": request.model_dump(),
+        "created_at": created_at,
+        "finished_at": None,
     }
     
     # Создаём запись в БД истории (если включена)
@@ -227,7 +276,6 @@ async def run_async_test(request: AsyncTestRequest, background_tasks: Background
 
 async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
     """Фоновая задача для выполнения теста с WebSocket стримингом"""
-    from datetime import datetime, timedelta, timezone
     import time
     
     from backend.initialize import (
@@ -290,17 +338,20 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
             traceback.print_exc()
             active_tests[test_id]["status"] = "failed"
             active_tests[test_id]["error"] = f"Ошибка загрузки подключений: {e}"
+            active_tests[test_id]["finished_at"] = _now_utc()
             await streaming_callback.on_test_error(f"Ошибка загрузки подключений: {e}")
             return
     elif not db_keys:
         active_tests[test_id]["status"] = "failed"
         active_tests[test_id]["error"] = "Не указаны connection_ids или db_types"
+        active_tests[test_id]["finished_at"] = _now_utc()
         await streaming_callback.on_test_error("Не указаны connection_ids или db_types")
         return
     
     if not db_keys:
         active_tests[test_id]["status"] = "failed"
         active_tests[test_id]["error"] = "Не удалось определить тип БД"
+        active_tests[test_id]["finished_at"] = _now_utc()
         await streaming_callback.on_test_error("Не удалось определить тип БД")
         return
     
@@ -397,6 +448,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
             print(f"[TEST] {error_msg}")
             active_tests[test_id]["status"] = "failed"
             active_tests[test_id]["error"] = error_msg
+            active_tests[test_id]["finished_at"] = _now_utc()
             await streaming_callback.on_test_error(error_msg)
             return
 
@@ -522,6 +574,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         active_tests[test_id]["dbms_metrics"] = dbms_metrics
         active_tests[test_id]["connection_names"] = connection_names
         active_tests[test_id]["connection_db_types"] = connection_db_types
+        active_tests[test_id]["finished_at"] = finish_ts
         
         await streaming_callback.on_test_complete(summary)
         
@@ -532,6 +585,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         error_message = str(e)
         active_tests[test_id]["status"] = "failed"
         active_tests[test_id]["error"] = error_message
+        active_tests[test_id]["finished_at"] = _now_utc()
         
         await streaming_callback.on_test_error(error_message)
         
@@ -555,6 +609,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
 async def get_async_test_status(test_id: str):
     """Получить статус асинхронного теста"""
     active_tests = get_active_tests()
+    prune_active_tests(active_tests)
     if test_id not in active_tests:
         raise HTTPException(status_code=404, detail=f"Тест {test_id} не найден")
     
@@ -565,6 +620,7 @@ async def get_async_test_status(test_id: str):
 async def get_async_test_results(test_id: str):
     """Получить результаты асинхронного теста"""
     active_tests = get_active_tests()
+    prune_active_tests(active_tests)
     if test_id not in active_tests:
         raise HTTPException(status_code=404, detail=f"Тест {test_id} не найден")
     
