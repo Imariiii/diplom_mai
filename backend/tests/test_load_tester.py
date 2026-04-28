@@ -51,6 +51,7 @@ def tester():
     lt._backup_callback = None
     lt._is_streaming = False
     lt._streaming_interval = 1.0
+    lt.auto_restore = True
     lt._random_value_cache = {}
     lt._random_value_cache_locks = {}
     lt.get_system_metrics = AsyncMock(return_value={
@@ -150,6 +151,54 @@ class TestCalculatePercentileExtended:
 
     def test_percentile_empty(self, tester):
         assert tester.calculate_percentile([], 95) == 0.0
+
+    def test_percentile_matches_numpy_linear_interpolation_for_skewed_small_sample(self, tester):
+        data = [1.0, 2.0, 3.0, 100.0]
+
+        assert tester.calculate_percentile(data, 50) == pytest.approx(float(np.percentile(data, 50)))
+        assert tester.calculate_percentile(data, 95) == pytest.approx(float(np.percentile(data, 95)))
+
+
+class TestRunCustomSqlTest:
+    @pytest.mark.asyncio
+    async def test_uses_wall_clock_load_elapsed_for_tps(self, tester, monkeypatch):
+        tester._emit_status = AsyncMock()
+        tester.prepare_database_for_test = AsyncMock(return_value={
+            "needs_restore": False,
+            "affected_tables": [],
+        })
+        tester.restore_database_after_test = AsyncMock(return_value={
+            "restored": False,
+            "duration_ms": 0.0,
+            "verified": True,
+            "errors": [],
+        })
+        tester._run_workers = AsyncMock(return_value=[
+            {
+                "query_id": "custom_sql",
+                "execution_time_ms": 100.0,
+                "error": None,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            for _ in range(4)
+        ])
+        monkeypatch.setattr(
+            "backend.load_tester.tester.time.perf_counter",
+            MagicMock(side_effect=[100.0, 102.0]),
+        )
+
+        results = await tester.run_custom_sql_test(
+            custom_sql="SELECT 1",
+            db_types=["conn_pg"],
+            iterations=4,
+            virtual_users=1,
+            warmup_time=0,
+        )
+
+        stats = results[0]["comparison"]["conn_pg"]
+        assert stats["tps"] == pytest.approx(2.0)
+        assert stats["throughput"] == pytest.approx(2.0)
+        assert stats["completed_tps"] == pytest.approx(2.0)
 
 
 class TestExecuteQuery:

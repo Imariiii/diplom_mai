@@ -10,6 +10,7 @@ import { useTestWebSocket } from "@/hooks/use-test-websocket"
 import { apiClient } from "@/lib/api"
 import { toast } from "sonner"
 import { DB_NAMES } from "@/lib/chart-colors"
+import { getVisibleSelfCheckWarnings } from "@/lib/self-check"
 import { EmptyStateCard } from "./dashboards/empty-state-card"
 import { PageHeader } from "./dashboards/page-header"
 import { TestProgressBar } from "./dashboards/test-progress-bar"
@@ -104,13 +105,11 @@ export function DashboardsPage() {
                       bucket.successful += stats.successful || 0
                       bucket.failed += stats.failed || 0
                       if (stats.index_info) bucket.indexInfo = stats.index_info
-                      if (Array.isArray(stats.self_check?.warnings)) {
-                        stats.self_check.warnings.forEach((warning: unknown) => {
-                          if (typeof warning === "string" && !bucket.selfCheckWarnings.includes(warning)) {
-                            bucket.selfCheckWarnings.push(warning)
-                          }
-                        })
-                      }
+                      getVisibleSelfCheckWarnings(stats.self_check).forEach((warning) => {
+                        if (!bucket.selfCheckWarnings.includes(warning)) {
+                          bucket.selfCheckWarnings.push(warning)
+                        }
+                      })
                     })
                   } else if (result.db_key && result.stats) {
                     const dbKey = result.db_key
@@ -135,13 +134,11 @@ export function DashboardsPage() {
                     bucket.successful += stats.successful || 0
                     bucket.failed += stats.failed || 0
                     if (stats.index_info) bucket.indexInfo = stats.index_info
-                    if (Array.isArray(stats.self_check?.warnings)) {
-                      stats.self_check.warnings.forEach((warning: unknown) => {
-                        if (typeof warning === "string" && !bucket.selfCheckWarnings.includes(warning)) {
-                          bucket.selfCheckWarnings.push(warning)
-                        }
-                      })
-                    }
+                    getVisibleSelfCheckWarnings(stats.self_check).forEach((warning) => {
+                      if (!bucket.selfCheckWarnings.includes(warning)) {
+                        bucket.selfCheckWarnings.push(warning)
+                      }
+                    })
                   }
                 })
 

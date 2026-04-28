@@ -389,7 +389,7 @@ function PercentilesChart({
 
   const data = barData.map((item) => ({
     name: `${item.label} · ${resolveDbKeyLabel(item.db_key, dbKeyLabels)}`,
-    p50: item.latency_mean,
+    p50: item.latency_p50,
     p95: item.latency_p95,
     p99: item.latency_p99,
   }))

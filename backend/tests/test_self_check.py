@@ -42,6 +42,20 @@ class TestVerifyLittlesLaw:
         assert result["reason"] == "concurrency_mismatch"
         assert "Закон Литтла нарушен" in result["warning"]
 
+    def test_sql_concurrency_below_virtual_users_is_not_a_violation(self):
+        result = verify_littles_law(
+            virtual_users=15,
+            avg_latency_sec=0.02507495107327365,
+            throughput_rps=368.08402309551104,
+            tolerance=0.3,
+        )
+
+        assert result["valid"] is True
+        assert result["reason"] is None
+        assert result["warning"] is None
+        assert result["computed_sql_concurrency"] == pytest.approx(9.229688869973668)
+        assert result["computed_concurrency"] == pytest.approx(9.229688869973668)
+
     def test_zero_metrics(self):
         result = verify_littles_law(
             virtual_users=10,

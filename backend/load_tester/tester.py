@@ -286,9 +286,17 @@ class LoadTester:
         if not data:
             return 0.0
         sorted_data = sorted(data)
-        index = int(len(sorted_data) * percentile / 100)
-        index = min(index, len(sorted_data) - 1)
-        return sorted_data[index]
+        if len(sorted_data) == 1:
+            return sorted_data[0]
+
+        rank = (len(sorted_data) - 1) * percentile / 100.0
+        lower_index = int(rank)
+        upper_index = min(lower_index + 1, len(sorted_data) - 1)
+        fraction = rank - lower_index
+        return (
+            sorted_data[lower_index] * (1.0 - fraction)
+            + sorted_data[upper_index] * fraction
+        )
 
     def _build_self_check(self, stats: Dict[str, Any]) -> Dict[str, Any]:
         """Сформировать блок самопроверки для рассчитанных метрик."""
@@ -521,6 +529,7 @@ class LoadTester:
                 async def _make_query(dk=db_key):
                     return await self.execute_query(dk, custom_sql, query_id)
 
+                start_time = time.perf_counter()
                 run_results = await self._run_workers(
                     db_key=db_key,
                     iterations=iterations,
@@ -529,6 +538,8 @@ class LoadTester:
                     progress_start=db_prog_start,
                     progress_end=db_prog_end,
                 )
+                end_time = time.perf_counter()
+                total_test_time = end_time - start_time
 
                 _set_prog(db_prog_end)
 
@@ -538,7 +549,6 @@ class LoadTester:
                     for r in run_results
                     if r.get("execution_time_ms") is not None
                 ]
-                total_test_time = sum(r["execution_time_ms"] for r in run_results) / 1000.0 if run_results else 0
                 db_type = self.db_connection.get_dbms_type(db_key)
 
                 if execution_times:

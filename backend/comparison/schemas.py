@@ -201,6 +201,7 @@ class BarChartPoint(BaseModel):
     label: str
     db_key: str
     latency_mean: Optional[float] = None
+    latency_p50: Optional[float] = None
     latency_p95: Optional[float] = None
     latency_p99: Optional[float] = None
     throughput_mean: Optional[float] = None

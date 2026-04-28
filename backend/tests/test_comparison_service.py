@@ -4,7 +4,7 @@
 для обоих режимов: per_test и series.
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock
 
@@ -245,6 +245,143 @@ class TestPerTestAnalyze:
         assert result.test.id == id1
         assert "conn_mysql" in result.descriptive_stats or "conn_pg" in result.descriptive_stats
         assert result.analysis_report is not None
+
+    @pytest.mark.asyncio
+    async def test_per_test_throughput_summary_uses_aggregate_metrics(self, mock_repo):
+        id1 = uuid.uuid4()
+        run = _make_test_data(id1, "Brazilian E-com", db_keys=["conn_mysql"])
+        run["results"][0]["metrics"]["throughput"] = 368.08402309551104
+        run["results"][0]["metrics"]["tps"] = 368.08402309551104
+        run["results"][0]["metrics"]["successful"] = 750
+        run["results"][0]["metrics"]["total_time_ms"] = 18806.213304955236
+        test_data = {str(id1): run}
+        samples = {
+            str(id1): _make_throughput_samples("conn_mysql", batch_values=[60.0, 5.0, 75.0]),
+        }
+        mock_repo.get_test_run_with_results = AsyncMock(side_effect=lambda tid: test_data.get(tid))
+        mock_repo.get_metric_samples = AsyncMock(side_effect=lambda tid: samples.get(tid, []))
+
+        svc = ComparisonService(repository=mock_repo)
+        request = ComparisonRequest(analysis_mode="per_test", test_ids=[id1])
+        result = await svc.analyze(request)
+
+        throughput = result.descriptive_stats["conn_mysql"].throughput
+        assert throughput is not None
+        assert throughput.mean == pytest.approx(368.08402309551104)
+        assert result.descriptive_stats["conn_mysql"].total_duration_sec == pytest.approx(2.0375782510000136)
+        assert result.charts.bar_chart[0].throughput_mean == pytest.approx(368.08402309551104)
+
+    @pytest.mark.asyncio
+    async def test_bar_chart_exposes_latency_p50_not_latency_mean(self, mock_repo):
+        id1 = uuid.uuid4()
+        run = _make_test_data(id1, "Skewed latency", db_keys=["conn_mysql"])
+        test_data = {str(id1): run}
+        samples = {
+            str(id1): [
+                {
+                    "sample_type": "request_latency",
+                    "connection_key": "conn_mysql",
+                    "latency_ms": value,
+                    "is_error": False,
+                }
+                for value in [1.0, 2.0, 3.0, 100.0]
+            ],
+        }
+        mock_repo.get_test_run_with_results = AsyncMock(side_effect=lambda tid: test_data.get(tid))
+        mock_repo.get_metric_samples = AsyncMock(side_effect=lambda tid: samples.get(tid, []))
+
+        svc = ComparisonService(repository=mock_repo)
+        request = ComparisonRequest(analysis_mode="per_test", test_ids=[id1])
+        result = await svc.analyze(request)
+
+        point = result.charts.bar_chart[0]
+        assert point.latency_mean == pytest.approx(26.5)
+        assert point.latency_p50 == pytest.approx(2.5)
+
+    @pytest.mark.asyncio
+    async def test_per_test_ranking_uses_aggregate_throughput_not_window_average(self, mock_repo):
+        id1 = uuid.uuid4()
+        run = _make_test_data(id1, "Brazilian E-com", db_keys=["conn_mysql", "conn_pg"])
+        run["results"][0]["metrics"]["throughput"] = 368.0
+        run["results"][0]["metrics"]["tps"] = 368.0
+        run["results"][1]["metrics"]["throughput"] = 703.0
+        run["results"][1]["metrics"]["tps"] = 703.0
+        test_data = {str(id1): run}
+        samples = {
+            str(id1): (
+                _make_throughput_samples("conn_mysql", batch_values=[900.0, 950.0])
+                + _make_throughput_samples("conn_pg", batch_values=[10.0, 20.0])
+            ),
+        }
+        mock_repo.get_test_run_with_results = AsyncMock(side_effect=lambda tid: test_data.get(tid))
+        mock_repo.get_metric_samples = AsyncMock(side_effect=lambda tid: samples.get(tid, []))
+
+        svc = ComparisonService(repository=mock_repo)
+        request = ComparisonRequest(analysis_mode="per_test", test_ids=[id1])
+        result = await svc.analyze(request)
+
+        throughput_ranking = next(r for r in result.rankings if r.metric == "throughput_mean")
+        assert throughput_ranking.best_db_key == "conn_pg"
+
+    @pytest.mark.asyncio
+    async def test_pairwise_throughput_keeps_window_samples_for_statistical_tests(self, mock_repo):
+        id1 = uuid.uuid4()
+        run = _make_test_data(id1, "Brazilian E-com", db_keys=["conn_mysql", "conn_pg"])
+        run["results"][0]["metrics"]["throughput"] = 368.0
+        run["results"][1]["metrics"]["throughput"] = 703.0
+        test_data = {str(id1): run}
+        samples = {
+            str(id1): (
+                _make_throughput_samples("conn_mysql", batch_values=[100.0, 110.0, 120.0])
+                + _make_throughput_samples("conn_pg", batch_values=[200.0, 210.0, 220.0])
+            ),
+        }
+        mock_repo.get_test_run_with_results = AsyncMock(side_effect=lambda tid: test_data.get(tid))
+        mock_repo.get_metric_samples = AsyncMock(side_effect=lambda tid: samples.get(tid, []))
+
+        svc = ComparisonService(repository=mock_repo)
+        request = ComparisonRequest(analysis_mode="per_test", test_ids=[id1])
+        result = await svc.analyze(request)
+
+        throughput_pair = next(p for p in result.pairwise if p.metric == "throughput")
+        assert throughput_pair.baseline_mean == pytest.approx(110.0)
+        assert throughput_pair.compared_mean == pytest.approx(210.0)
+
+    @pytest.mark.asyncio
+    async def test_per_test_latency_samples_are_not_filtered_by_global_warmup(self, mock_repo):
+        id1 = uuid.uuid4()
+        started_at = datetime(2026, 4, 28, 17, 0, 0, tzinfo=timezone.utc)
+        run = _make_test_data(id1, "Sequential DB run", db_keys=["conn_mysql"])
+        run["started_at"] = started_at.isoformat()
+        run["config"]["warmup_time"] = 5
+        test_data = {str(id1): run}
+        samples = [
+            {
+                "sample_type": "request_latency",
+                "connection_key": "conn_mysql",
+                "timestamp": (started_at - timedelta(seconds=30)).isoformat(),
+                "latency_ms": 10.0,
+                "is_error": False,
+            },
+            {
+                "sample_type": "request_latency",
+                "connection_key": "conn_mysql",
+                "timestamp": (started_at + timedelta(seconds=10)).isoformat(),
+                "latency_ms": 30.0,
+                "is_error": False,
+            },
+        ]
+        mock_repo.get_test_run_with_results = AsyncMock(side_effect=lambda tid: test_data.get(tid))
+        mock_repo.get_metric_samples = AsyncMock(side_effect=lambda tid: samples)
+
+        svc = ComparisonService(repository=mock_repo)
+        request = ComparisonRequest(analysis_mode="per_test", test_ids=[id1])
+        result = await svc.analyze(request)
+
+        latency = result.descriptive_stats["conn_mysql"].latency_ms
+        assert latency is not None
+        assert latency.count == 2
+        assert latency.mean == pytest.approx(20.0)
 
     @pytest.mark.asyncio
     async def test_per_test_not_found_raises(self, mock_repo):

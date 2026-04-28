@@ -154,7 +154,10 @@ class ComparisonService:
                 label_a = db_key_labels.get(db_a, db_a)
                 label_b = db_key_labels.get(db_b, db_b)
 
-                for metric, key in [("latency_ms", "latency_values"), ("throughput", "throughput_values")]:
+                for metric, key in [
+                    ("latency_ms", "latency_values"),
+                    ("throughput", "throughput_comparison_values"),
+                ]:
                     comparisons.append(compare_two_samples(
                         a=info_a.get(key, []),
                         b=info_b.get(key, []),
@@ -221,6 +224,7 @@ class ComparisonService:
             label=label,
             db_key=db_key,
             latency_mean=bundle.latency_ms.mean if bundle.latency_ms else None,
+            latency_p50=bundle.latency_ms.p50 if bundle.latency_ms else None,
             latency_p95=bundle.latency_ms.p95 if bundle.latency_ms else None,
             latency_p99=bundle.latency_ms.p99 if bundle.latency_ms else None,
             throughput_mean=bundle.throughput.mean if bundle.throughput else None,
@@ -490,7 +494,10 @@ class ComparisonService:
                 continue
             curr_samples = raw_samples_map.get(tid, {}).get(db_key, {})
             if prev_level_tid and prev_level_samples and curr_samples:
-                for metric, key in [("latency_ms", "latency_values"), ("throughput", "throughput_values")]:
+                for metric, key in [
+                    ("latency_ms", "latency_values"),
+                    ("throughput", "throughput_comparison_values"),
+                ]:
                     adjacent_tests.append(compare_two_samples(
                         a=prev_level_samples.get(key, []),
                         b=curr_samples.get(key, []),
@@ -636,6 +643,7 @@ class ComparisonService:
                         label=bar_label,
                         db_key=db_key,
                         latency_mean=bundle.latency_ms.mean if bundle.latency_ms else None,
+                        latency_p50=bundle.latency_ms.p50 if bundle.latency_ms else None,
                         latency_p95=bundle.latency_ms.p95 if bundle.latency_ms else None,
                         latency_p99=bundle.latency_ms.p99 if bundle.latency_ms else None,
                         throughput_mean=bundle.throughput.mean if bundle.throughput else None,
@@ -765,15 +773,14 @@ class ComparisonService:
             except Exception as exc:
                 print(f"[COMPARISON] Ошибка получения raw samples для {test_id}: {exc}")
 
-        filtered_raw_samples = self._filter_metric_samples(metric_samples, db_key)
-        filtered_raw_samples = self._filter_warmup_samples(filtered_raw_samples, test_data)
-        latency_values = self._extract_latency_values(filtered_raw_samples)
-        throughput_values = self._extract_throughput_values(filtered_raw_samples)
-
         aggregate_metrics = self._find_result_metrics(test_data, db_key)
         db_type = self._resolve_db_type(test_data, db_key, aggregate_metrics)
+        filtered_raw_samples = self._filter_metric_samples(metric_samples, db_key)
+        latency_values = self._extract_latency_values(filtered_raw_samples)
+        throughput_values = self._extract_aggregate_throughput_values(aggregate_metrics)
+        throughput_comparison_values = self._extract_throughput_values(filtered_raw_samples)
         latency_source = "metric_samples" if latency_values else None
-        throughput_source = "metric_samples" if throughput_values else None
+        throughput_source = "aggregated_metrics" if throughput_values else None
 
         if not latency_values or not throughput_values:
             series_points = await self._load_time_series(test_id, db_type, db_key)
@@ -785,12 +792,17 @@ class ComparisonService:
                 if latency_values:
                     latency_source = "time_series"
             if not throughput_values:
-                throughput_values = [
-                    p.get("throughput") for p in series_points
-                    if p.get("throughput") is not None
-                ]
+                throughput_values = throughput_comparison_values
+                if not throughput_values:
+                    throughput_values = [
+                        p.get("throughput") for p in series_points
+                        if p.get("throughput") is not None
+                    ]
                 if throughput_values:
-                    throughput_source = "time_series"
+                    throughput_source = "metric_samples" if filtered_raw_samples else "time_series"
+
+        if not throughput_comparison_values:
+            throughput_comparison_values = throughput_values
 
         if not latency_values and aggregate_metrics:
             latency_source = "aggregated_metrics"
@@ -800,6 +812,7 @@ class ComparisonService:
         return {
             "latency_values": latency_values,
             "throughput_values": throughput_values,
+            "throughput_comparison_values": throughput_comparison_values,
             "aggregate_metrics": aggregate_metrics,
             "latency_source": latency_source,
             "throughput_source": throughput_source,
@@ -808,62 +821,6 @@ class ComparisonService:
                 filtered_raw_samples, latency_values, throughput_values,
             ),
         }
-
-    @staticmethod
-    def _filter_warmup_samples(
-        samples: List[Dict[str, Any]], test_data: Dict[str, Any],
-    ) -> List[Dict[str, Any]]:
-        config = test_data.get("config", {}) or {}
-        warmup_seconds = 0
-        try:
-            warmup_seconds = float(config.get("warmup_time", 0) or 0)
-        except (TypeError, ValueError):
-            pass
-
-        if warmup_seconds <= 0 or not samples:
-            return samples
-
-        started_at_str = test_data.get("started_at")
-        if not started_at_str:
-            return samples
-
-        from datetime import datetime, timedelta, timezone
-
-        try:
-            if isinstance(started_at_str, datetime):
-                started_at = started_at_str
-            else:
-                started_at = datetime.fromisoformat(str(started_at_str).replace("Z", "+00:00"))
-        except (ValueError, TypeError):
-            return samples
-
-        cutoff = started_at + timedelta(seconds=warmup_seconds)
-
-        filtered = []
-        for sample in samples:
-            ts = sample.get("timestamp")
-            if ts is None:
-                filtered.append(sample)
-                continue
-            try:
-                if isinstance(ts, datetime):
-                    sample_ts = ts
-                elif isinstance(ts, str):
-                    sample_ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                else:
-                    filtered.append(sample)
-                    continue
-
-                if sample_ts.tzinfo is None:
-                    sample_ts = sample_ts.replace(tzinfo=timezone.utc)
-                if cutoff.tzinfo is None:
-                    cutoff = cutoff.replace(tzinfo=timezone.utc)
-
-                if sample_ts >= cutoff:
-                    filtered.append(sample)
-            except (ValueError, TypeError):
-                filtered.append(sample)
-        return filtered
 
     def _filter_metric_samples(self, metric_samples: List[Dict[str, Any]], db_key: str) -> List[Dict[str, Any]]:
         filtered = []
@@ -896,6 +853,21 @@ class ComparisonService:
             if v is not None:
                 values.append(v)
         return values
+
+    @staticmethod
+    def _extract_aggregate_throughput_values(metrics: Dict[str, Any]) -> List[float]:
+        """Получить итоговый TPS load-фазы из агрегированных метрик результата."""
+        if not metrics:
+            return []
+        for key in ("throughput", "tps", "completed_tps"):
+            value = metrics.get(key)
+            if value is None:
+                continue
+            try:
+                return [float(value)]
+            except (TypeError, ValueError):
+                continue
+        return []
 
     async def _load_time_series(
         self, test_id: str, db_type: str, db_key: str = "",
@@ -1093,12 +1065,12 @@ class ComparisonService:
     def _resolve_total_duration(self, metrics: Dict[str, Any]) -> Optional[float]:
         if not metrics:
             return None
-        if metrics.get("total_time_ms") is not None:
-            return float(metrics["total_time_ms"]) / 1000.0
         tps = metrics.get("tps") or metrics.get("throughput")
         successful = metrics.get("successful")
         if tps and successful and float(tps) > 0:
             return float(successful) / float(tps)
+        if metrics.get("total_time_ms") is not None:
+            return float(metrics["total_time_ms"]) / 1000.0
         return None
 
     # ------------------------------------------------------------------

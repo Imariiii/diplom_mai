@@ -36,6 +36,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { apiClient, type HistoryTestRun, type HistoryTestResult, type HistoryErrorReport } from "@/lib/api"
 import { useAppStore } from "@/lib/store"
 import { DB_NAMES, getDbColor, CHART_COLORS, METRIC_COLORS } from "@/lib/chart-colors"
+import { getVisibleSelfCheckWarnings } from "@/lib/self-check"
 import type { LogicalDatabaseWithConnections } from "@/lib/types"
 import { HistoryTimeSeriesTab } from "./history-time-series-tab"
 import {
@@ -58,11 +59,7 @@ const STATUS_CONFIG = {
 }
 
 function getResultSelfCheckWarnings(result: HistoryTestResult): string[] {
-  const warnings = result.metrics?.self_check?.warnings
-  if (!Array.isArray(warnings)) {
-    return []
-  }
-  return warnings.filter((warning): warning is string => typeof warning === "string" && warning.length > 0)
+  return getVisibleSelfCheckWarnings(result.metrics?.self_check)
 }
 
 // ==================== Основной компонент ====================

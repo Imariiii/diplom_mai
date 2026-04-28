@@ -33,19 +33,20 @@ def verify_littles_law(
             "warning": "Недостаточно данных для проверки закона Литтла: throughput или latency равны нулю",
         }
 
-    computed_n = throughput_rps * avg_latency_sec
-    ratio = computed_n / float(virtual_users)
-    is_consistent = abs(ratio - 1.0) <= tolerance
+    computed_sql_concurrency = throughput_rps * avg_latency_sec
+    ratio = computed_sql_concurrency / float(virtual_users)
+    is_consistent = ratio <= (1.0 + tolerance)
 
     return {
         "valid": is_consistent,
         "reason": None if is_consistent else "concurrency_mismatch",
-        "computed_concurrency": computed_n,
+        "computed_concurrency": computed_sql_concurrency,
+        "computed_sql_concurrency": computed_sql_concurrency,
         "expected_concurrency": virtual_users,
         "ratio": ratio,
         "tolerance": tolerance,
         "warning": None if is_consistent else (
-            f"Закон Литтла нарушен: вычислено N={computed_n:.2f}, ожидалось {virtual_users}"
+            f"Закон Литтла нарушен: вычислено N={computed_sql_concurrency:.2f}, ожидалось {virtual_users}"
         ),
     }
 

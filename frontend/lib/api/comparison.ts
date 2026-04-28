@@ -151,6 +151,7 @@ export interface BarChartPoint {
   label: string
   db_key: string
   latency_mean?: number | null
+  latency_p50?: number | null
   latency_p95?: number | null
   latency_p99?: number | null
   throughput_mean?: number | null
