@@ -14,7 +14,7 @@ LATEXMK_FLAGS = -xelatex -pdf -interaction=nonstopmode -shell-escape -synctex=1
 all: $(PDF)
 
 $(PDF): $(TEX)
-	$(LATEXMK) $(LATEXMK_FLAGS) $(TEX)
+	latexmk -xelatex -pdf -interaction=nonstopmode -shell-escape -f main.tex
 
 # Просмотр PDF (Linux: evince, можно заменить на ваш просмотрщик)
 view: $(PDF)
