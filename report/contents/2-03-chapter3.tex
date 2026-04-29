@@ -171,10 +171,6 @@ REST API системы разделено на восемь модулей ма
         \hline
         schema-profiles & GET /api/schema-profiles & Список профилей схемы \\
         \hline
-        schema-profiles & POST /api/schema-profiles & Создание профиля \\
-        \hline
-        schema-profiles & GET /.../\{id\}/bundles & конфигурации сценариев нагрузки профиля \\
-        \hline
     \end{tabularx}
 \end{table}
 
@@ -184,6 +180,10 @@ REST API системы разделено на восемь модулей ма
     \caption*{Продолжение таблицы \ref{tab:api_endpoints}}
     \label{tab:api_endpoints_continue}
     \begin{tabularx}{\textwidth}{|>{\RaggedRight}X|>{\RaggedRight}X|>{\RaggedRight}X|}
+        \hline
+        schema-profiles & POST /api/schema-profiles & Создание профиля \\
+        \hline
+        schema-profiles & GET /.../\{id\}/bundles & конфигурации сценариев нагрузки профиля \\
         \hline
         schema-profiles & POST /.../\{id\}/bundles/generate & Генерация конфигурации сценария нагрузки для профиля схемы \\
         \hline
