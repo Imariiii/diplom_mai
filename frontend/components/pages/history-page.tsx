@@ -16,7 +16,7 @@ import {
   AlertTriangle,
   GitCompare,
   Database,
-  Activity,
+  LayoutDashboard,
 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -35,21 +35,10 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { apiClient, type HistoryTestRun, type HistoryTestResult, type HistoryErrorReport } from "@/lib/api"
 import { useAppStore } from "@/lib/store"
-import { DB_NAMES, getDbColor, CHART_COLORS, METRIC_COLORS } from "@/lib/chart-colors"
+import { DB_NAMES, getDbColor } from "@/lib/chart-colors"
 import { getVisibleSelfCheckWarnings } from "@/lib/self-check"
 import type { LogicalDatabaseWithConnections } from "@/lib/types"
-import { HistoryTimeSeriesTab } from "./history-time-series-tab"
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-  Cell,
-} from "recharts"
+import { HistoryTestDashboard } from "./history-test-dashboard"
 
 const STATUS_CONFIG = {
   pending:   { label: "Ожидание",    icon: Clock,         color: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" },
@@ -166,8 +155,8 @@ export function HistoryPage() {
   }, [page])
 
   useEffect(() => {
-    setActiveDetailTab("results")
-  }, [selectedTest?.id])
+    setActiveDetailTab(selectedTest?.status === "completed" ? "dashboard" : "results")
+  }, [selectedTest?.id, selectedTest?.status])
 
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return "-"
@@ -362,8 +351,49 @@ export function HistoryPage() {
           </CardContent>
         </Card>
 
+        {resultsWithWarnings.length > 0 && (
+          <Alert className="border-amber-500/30 bg-amber-500/5">
+            <AlertTriangle className="h-4 w-4 text-amber-500" />
+            <AlertTitle>Предупреждения самопроверки</AlertTitle>
+            <AlertDescription className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Для части результатов система нашла возможные расхождения в согласованности метрик.
+              </p>
+              <div className="space-y-3">
+                {resultsWithWarnings.map(({ result, warnings }) => {
+                  const resultDbType = (result.metrics as any)?.dbms_type || result.db_type
+                  const resultDbName =
+                    (result.metrics as any)?.db_name
+                    || DB_NAMES[resultDbType]
+                    || result.db_type
+                  return (
+                    <div
+                      key={`warning-${result.id}`}
+                      className="rounded-md border border-amber-500/20 bg-background/60 p-3"
+                    >
+                      <p className="text-sm font-medium">
+                        {resultDbName}
+                        {result.query_id ? ` · ${result.query_id}` : ""}
+                      </p>
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+                        {warnings.map((warning) => (
+                          <li key={`${result.id}-${warning}`}>{warning}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )
+                })}
+              </div>
+            </AlertDescription>
+          </Alert>
+        )}
+
         <Tabs value={activeDetailTab} onValueChange={setActiveDetailTab} className="space-y-4">
           <TabsList>
+            <TabsTrigger value="dashboard" className="gap-1.5">
+              <LayoutDashboard className="h-3.5 w-3.5" />
+              Дашборд
+            </TabsTrigger>
             <TabsTrigger value="results">Результаты</TabsTrigger>
             <TabsTrigger value="errors" className="gap-1.5">
               Ошибки
@@ -373,51 +403,18 @@ export function HistoryPage() {
                 </Badge>
               )}
             </TabsTrigger>
-            <TabsTrigger value="charts">Графики</TabsTrigger>
-            <TabsTrigger value="monitoring" className="gap-1.5">
-              <Activity className="h-3.5 w-3.5" />
-              Мониторинг
-            </TabsTrigger>
             <TabsTrigger value="config">Конфигурация</TabsTrigger>
           </TabsList>
 
+          <TabsContent value="dashboard" className="space-y-4 focus-visible:outline-none">
+            <HistoryTestDashboard
+              key={selectedTest.id}
+              test={selectedTest}
+              virtualUsers={selectedTest.config?.virtual_users ?? 0}
+            />
+          </TabsContent>
+
           <TabsContent value="results">
-            {resultsWithWarnings.length > 0 && (
-              <Alert className="mb-4 border-amber-500/30 bg-amber-500/5">
-                <AlertTriangle className="h-4 w-4 text-amber-500" />
-                <AlertTitle>Предупреждения самопроверки</AlertTitle>
-                <AlertDescription className="space-y-3">
-                  <p className="text-sm text-muted-foreground">
-                    Для части результатов система нашла возможные расхождения в согласованности метрик.
-                  </p>
-                  <div className="space-y-3">
-                    {resultsWithWarnings.map(({ result, warnings }) => {
-                      const resultDbType = (result.metrics as any)?.dbms_type || result.db_type
-                      const resultDbName =
-                        (result.metrics as any)?.db_name
-                        || DB_NAMES[resultDbType]
-                        || result.db_type
-                      return (
-                        <div
-                          key={`warning-${result.id}`}
-                          className="rounded-md border border-amber-500/20 bg-background/60 p-3"
-                        >
-                          <p className="text-sm font-medium">
-                            {resultDbName}
-                            {result.query_id ? ` · ${result.query_id}` : ""}
-                          </p>
-                          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-                            {warnings.map((warning) => (
-                              <li key={`${result.id}-${warning}`}>{warning}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </AlertDescription>
-              </Alert>
-            )}
             <Card className="bg-card border-border">
               <CardContent className="p-0">
                 <Table>
@@ -534,83 +531,6 @@ export function HistoryPage() {
                 )}
               </CardContent>
             </Card>
-          </TabsContent>
-
-          <TabsContent value="charts">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Card className="bg-card border-border">
-                <CardHeader>
-                  <CardTitle>Время отклика</CardTitle>
-                  <CardDescription>Среднее время по СУБД</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="h-[300px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={selectedTest.results.map(r => ({
-                          name: (r.metrics as any)?.db_name || DB_NAMES[(r.metrics as any)?.dbms_type || r.db_type] || r.db_type,
-                          avg: r.metrics?.avg_time_ms ?? 0,
-                          p95: r.metrics?.p95_time_ms ?? 0,
-                        }))}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                        <XAxis dataKey="name" stroke={CHART_COLORS.axis} fontSize={12} tick={{ fill: CHART_COLORS.text }} />
-                        <YAxis stroke={CHART_COLORS.axis} fontSize={12} tick={{ fill: CHART_COLORS.text }} />
-                        <Tooltip
-                          contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }}
-                          itemStyle={{ color: "hsl(var(--foreground))" }}
-                          labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
-                        />
-                        <Legend wrapperStyle={{ color: CHART_COLORS.text, paddingTop: "10px" }} />
-                        <Bar dataKey="avg" name="Среднее" fill={METRIC_COLORS.avg}>
-                          {selectedTest.results.map((_, i) => <Cell key={i} fill={METRIC_COLORS.avg} />)}
-                        </Bar>
-                        <Bar dataKey="p95" name="P95" fill={METRIC_COLORS.p95}>
-                          {selectedTest.results.map((_, i) => <Cell key={i} fill={METRIC_COLORS.p95} />)}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="bg-card border-border">
-                <CardHeader>
-                  <CardTitle>Производительность (TPS)</CardTitle>
-                  <CardDescription>Транзакций в секунду</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="h-[300px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={selectedTest.results.map(r => ({
-                          name: (r.metrics as any)?.db_name || DB_NAMES[(r.metrics as any)?.dbms_type || r.db_type] || r.db_type,
-                          tps: r.metrics?.tps ?? 0,
-                        }))}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                        <XAxis dataKey="name" stroke={CHART_COLORS.axis} fontSize={12} tick={{ fill: CHART_COLORS.text }} />
-                        <YAxis stroke={CHART_COLORS.axis} fontSize={12} tick={{ fill: CHART_COLORS.text }} />
-                        <Tooltip
-                          contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }}
-                          itemStyle={{ color: "hsl(var(--foreground))" }}
-                          labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
-                        />
-                        <Bar dataKey="tps" name="TPS" fill={CHART_COLORS.success}>
-                          {selectedTest.results.map((_, i) => <Cell key={i} fill={CHART_COLORS.success} />)}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="monitoring">
-            {activeDetailTab === "monitoring" && (
-              <HistoryTimeSeriesTab testId={selectedTest.id} />
-            )}
           </TabsContent>
 
           <TabsContent value="config">
