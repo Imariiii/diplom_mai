@@ -7,8 +7,11 @@ import { apiClient } from "./client"
 
 export interface TestRequest {
   query_id?: string | null
+  custom_sql?: string | null
   db_types?: string[]
   connection_ids?: string[]
+  /** Снимок имён подключений после разрешения connection_ids (сохраняется на сервере для истории) */
+  connection_names_snapshot?: Record<string, string>
   bundle_id?: string
   resolved_bundle_id?: string
   resolved_bundle_name?: string
@@ -18,7 +21,9 @@ export interface TestRequest {
     id?: string
     name?: string
     scenario_template_id?: string
+    scenario_template_name?: string
     schema_profile_id?: string
+    schema_profile_name?: string
     queries?: Array<{ sql_template?: string; query_type?: string; weight?: number }>
     indexes?: Array<Record<string, unknown>>
   }

@@ -354,7 +354,25 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         active_tests[test_id]["finished_at"] = _now_utc()
         await streaming_callback.on_test_error("Не удалось определить тип БД")
         return
-    
+
+    # Дополнить config для истории и UI: типы СУБД и снимок имён подключений (в т.ч. для custom SQL)
+    if connection_names or connection_db_types:
+        enriched_config = dict(active_tests[test_id]["config"])
+        if connection_db_types:
+            unique_db_types = sorted({str(v) for v in connection_db_types.values() if v})
+            if unique_db_types:
+                enriched_config["db_types"] = unique_db_types
+        if connection_names:
+            enriched_config["connection_names_snapshot"] = {
+                str(k): str(v) for k, v in connection_names.items()
+            }
+        active_tests[test_id]["config"] = enriched_config
+        if HISTORY_ENABLED and test_repository:
+            try:
+                await test_repository.update_test_run_config(test_id, enriched_config)
+            except Exception as exc:
+                print(f"[HISTORY_DB] ⚠ Не удалось сохранить обогащённый config теста {test_id}: {exc}")
+
     print(f"[TEST] Запуск теста с db_keys={db_keys}, connection_names={connection_names}")
     print(
         f"[TEST] Параметры: итераций={request.iterations}, VU={request.virtual_users}, "

@@ -51,6 +51,100 @@ function getResultSelfCheckWarnings(result: HistoryTestResult): string[] {
   return getVisibleSelfCheckWarnings(result.metrics?.self_check)
 }
 
+/** Подпись для полей профиля/bundle в режиме пользовательского SQL */
+const CONFIG_CUSTOM_SQL_NA = "Не задаётся (пользовательский SQL)"
+
+function formatConfigNumber(value: number | undefined | null): string {
+  if (value === undefined || value === null || Number.isNaN(Number(value))) return "—"
+  return String(value)
+}
+
+function formatConfigBooleanRu(value: boolean | undefined | null): string {
+  if (value === undefined || value === null) return "—"
+  return value ? "Да" : "Нет"
+}
+
+function inferDbTypesFromResults(results: HistoryTestResult[] | undefined): string | null {
+  if (!results?.length) return null
+  const labels = new Set<string>()
+  for (const r of results) {
+    const m = r.metrics as Record<string, unknown> | undefined
+    const raw = (m?.dbms_type as string) || r.db_type
+    if (raw) labels.add(DB_NAMES[raw] || raw)
+  }
+  if (labels.size === 0) return null
+  return [...labels].join(", ")
+}
+
+function getHistoryDbTypesLabel(
+  test: HistoryTestRun & { results?: HistoryTestResult[] },
+  logicalDatabases: LogicalDatabaseWithConnections[],
+): string {
+  const cfg = test.config
+  if (!cfg) return "—"
+  if (cfg.db_types?.length) {
+    return cfg.db_types.map((t) => DB_NAMES[t] || t).join(", ")
+  }
+  const connIds = cfg.connection_ids
+  if (!connIds?.length) {
+    return inferDbTypesFromResults(test.results) || "—"
+  }
+  const ldId = test.logical_database_id || cfg.logical_database_id
+  const ld = ldId ? logicalDatabases.find((d) => d.id === ldId) : null
+  if (ld) {
+    const perConn = connIds
+      .map((id) => {
+        const c = ld.connections.find((item) => item.id === id)
+        return c?.dbms_type ? (DB_NAMES[c.dbms_type] || c.dbms_type) : null
+      })
+      .filter((v): v is string => Boolean(v))
+    if (perConn.length) return [...new Set(perConn)].join(", ")
+  }
+  return inferDbTypesFromResults(test.results) || "—"
+}
+
+function getHistoryProfileLabel(test: HistoryTestRun): string {
+  const cfg = test.config
+  if (!cfg) return "—"
+  if (cfg.scenario === "custom") return CONFIG_CUSTOM_SQL_NA
+  const snap = cfg.resolved_bundle_snapshot
+  return (
+    cfg.resolved_profile_name
+    || cfg.resolved_profile_id
+    || snap?.schema_profile_name
+    || snap?.schema_profile_id
+    || "—"
+  )
+}
+
+function getHistoryBundleLabel(test: HistoryTestRun): string {
+  const cfg = test.config
+  if (!cfg) return "—"
+  if (cfg.scenario === "custom") return CONFIG_CUSTOM_SQL_NA
+  const snap = cfg.resolved_bundle_snapshot
+  return (
+    cfg.resolved_bundle_name
+    || cfg.resolved_bundle_id
+    || cfg.bundle_id
+    || snap?.name
+    || snap?.id
+    || "—"
+  )
+}
+
+function getHistoryScenarioTemplateLabel(test: HistoryTestRun): string {
+  const cfg = test.config
+  if (!cfg) return "—"
+  if (cfg.scenario === "custom") return "—"
+  const snap = cfg.resolved_bundle_snapshot
+  return (
+    snap?.scenario_template_name
+    || snap?.scenario_template_id
+    || cfg.scenario
+    || "—"
+  )
+}
+
 // ==================== Основной компонент ====================
 
 export function HistoryPage() {
@@ -291,6 +385,7 @@ export function HistoryPage() {
 
   if (selectedTest) {
     const logicalDbName = getLogicalDbName(selectedTest.logical_database_id)
+    const selectedLogicalDbEntry = logicalDatabases.find((d) => d.id === selectedTest.logical_database_id)
     const connectionNames = getConnectionNamesLabel(selectedTest)
     const resultsWithWarnings = selectedTest.results
       .map((result) => ({
@@ -537,9 +632,13 @@ export function HistoryPage() {
             <Card className="bg-card border-border">
               <CardHeader>
                 <CardTitle>Конфигурация теста</CardTitle>
+                <CardDescription>
+                  Параметры запуска из сохранённой записи прогона
+                  {selectedTest.config?.test_name ? ` · ${selectedTest.config.test_name}` : ""}
+                </CardDescription>
               </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+              <CardContent className="space-y-6">
+                <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
                   <div>
                     <p className="text-muted-foreground">Логическая БД</p>
                     <p className="font-medium">{logicalDbName}</p>
@@ -550,37 +649,88 @@ export function HistoryPage() {
                   </div>
                   <div>
                     <p className="text-muted-foreground">СУБД</p>
-                    <p className="font-mono">{selectedTest.config?.db_types?.join(", ") || "-"}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Сценарий</p>
-                    <p className="font-mono">{selectedTest.config?.scenario || "-"}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Профиль</p>
                     <p className="font-mono break-words">
-                      {selectedTest.config?.resolved_profile_name || selectedTest.config?.resolved_profile_id || "-"}
+                      {getHistoryDbTypesLabel(selectedTest, logicalDatabases)}
                     </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Сценарий (режим)</p>
+                    <p className="font-mono">{selectedTest.config?.scenario || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Шаблон сценария</p>
+                    <p className="font-mono break-words">
+                      {getHistoryScenarioTemplateLabel(selectedTest)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Профиль схемы</p>
+                    <p className="font-mono break-words">{getHistoryProfileLabel(selectedTest)}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Bundle</p>
-                    <p className="font-mono break-words">
-                      {selectedTest.config?.resolved_bundle_name || selectedTest.config?.resolved_bundle_id || "-"}
-                    </p>
+                    <p className="font-mono break-words">{getHistoryBundleLabel(selectedTest)}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Итерации</p>
-                    <p className="font-mono">{selectedTest.config?.iterations || "-"}</p>
+                    <p className="font-mono">{formatConfigNumber(selectedTest.config?.iterations)}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Виртуальные пользователи</p>
-                    <p className="font-mono">{selectedTest.config?.virtual_users || "-"}</p>
+                    <p className="font-mono">{formatConfigNumber(selectedTest.config?.virtual_users)}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Прогрев (сек)</p>
-                    <p className="font-mono">{selectedTest.config?.warmup_time || "-"}</p>
+                    <p className="font-mono">{formatConfigNumber(selectedTest.config?.warmup_time)}</p>
                   </div>
+                  <div>
+                    <p className="text-muted-foreground">Индексы сценария</p>
+                    <p className="font-mono">{formatConfigBooleanRu(selectedTest.config?.use_indexes)}</p>
+                  </div>
+                  {selectedTest.config?.query_id && (
+                    <div>
+                      <p className="text-muted-foreground">Запрос (query_id)</p>
+                      <p className="font-mono break-words">{selectedTest.config.query_id}</p>
+                    </div>
+                  )}
+                  {selectedLogicalDbEntry?.schema_profile_name &&
+                    selectedTest.config?.scenario === "custom" && (
+                    <div className="sm:col-span-2 lg:col-span-3">
+                      <p className="text-muted-foreground">Профиль в каталоге (логическая БД)</p>
+                      <p className="font-mono break-words text-muted-foreground">
+                        {selectedLogicalDbEntry.schema_profile_name}
+                        <span className="ml-1 text-xs">
+                          (справочно: для custom SQL bundle не используется)
+                        </span>
+                      </p>
+                    </div>
+                  )}
                 </div>
+
+                {selectedTest.config?.custom_sql && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-foreground">Пользовательский SQL</p>
+                    <details className="rounded-lg border border-border bg-muted/30">
+                      <summary className="cursor-pointer px-3 py-2 text-sm text-muted-foreground">
+                        Показать текст запроса ({selectedTest.config.custom_sql.length} симв.)
+                      </summary>
+                      <pre className="max-h-64 overflow-auto border-t border-border p-3 text-xs font-mono whitespace-pre-wrap break-words">
+                        {selectedTest.config.custom_sql}
+                      </pre>
+                    </details>
+                  </div>
+                )}
+
+                {selectedTest.config?.connection_ids && selectedTest.config.connection_ids.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-foreground">Идентификаторы подключений</p>
+                    <ul className="list-inside list-disc space-y-1 font-mono text-xs text-muted-foreground break-all">
+                      {selectedTest.config.connection_ids.map((id) => (
+                        <li key={id}>{id}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
