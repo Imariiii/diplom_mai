@@ -33,14 +33,13 @@ export interface TestConfig {
 export interface TestRun {
   id: string
   name: string
-  status: "pending" | "running" | "completed" | "failed"
+  status: "pending" | "running" | "cancelling" | "cancelled" | "completed" | "failed"
   startTime: Date
   endTime?: Date
   config: TestConfig
   results?: TestResult[]
   summary?: {
     total_transactions?: number
-    overall_tps?: number
     total_duration?: number
   }
   error?: string | null

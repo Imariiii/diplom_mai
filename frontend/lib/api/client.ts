@@ -110,6 +110,12 @@ class ApiClient {
     return this.request(`/test/async/${testId}/results`)
   }
 
+  async cancelAsyncTest(testId: string): Promise<any> {
+    return this.request(`/test/async/${testId}/cancel`, {
+      method: 'POST',
+    })
+  }
+
   // ==================== История тестов ====================
 
   async isHistoryEnabled(): Promise<{ enabled: boolean }> {
@@ -157,11 +163,12 @@ class ApiClient {
 
   async getHistoryTestTimeSeries(
     testId: string,
-    params?: { db_type?: string; limit?: number },
+    params?: { db_type?: string; limit?: number; full?: boolean },
   ): Promise<{ test_id: string; points: any[]; count: number }> {
     const queryParams = new URLSearchParams()
     if (params?.db_type) queryParams.set('db_type', params.db_type)
     if (params?.limit) queryParams.set('limit', params.limit.toString())
+    if (params?.full) queryParams.set('full', 'true')
     const qs = queryParams.toString()
     return this.request(`/history/tests/${testId}/time-series${qs ? `?${qs}` : ''}`)
   }

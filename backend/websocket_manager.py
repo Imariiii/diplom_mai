@@ -327,6 +327,7 @@ class TestStreamingCallback:
                 await self.repository.add_time_series_point(
                     test_run_id=self.test_id,
                     db_type=db_type,
+                    connection_key=db_key,
                     timestamp=now,
                     response_time=response_time,
                     tps=tps,
@@ -392,7 +393,10 @@ class TestStreamingCallback:
         message = "Тестирование завершено"
         if summary:
             actual_duration = time.perf_counter() - self.start_time
-            message += f". Длительность: {actual_duration:.1f} сек, TPS: {summary.get('overall_tps', 0):.2f}"
+            total_transactions = summary.get('total_transactions')
+            message += f". Длительность: {actual_duration:.1f} сек"
+            if total_transactions is not None:
+                message += f", транзакций: {total_transactions}"
         await self.on_status_change("completed", message)
     
     async def on_backup_status(self, status: str, data: Dict[str, Any] = None):

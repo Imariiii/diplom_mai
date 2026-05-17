@@ -43,6 +43,8 @@ import { HistoryTestDashboard } from "./history-test-dashboard"
 const STATUS_CONFIG = {
   pending:   { label: "Ожидание",    icon: Clock,         color: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" },
   running:   { label: "Выполняется", icon: Loader2,       color: "bg-blue-500/10 text-blue-500 border-blue-500/20" },
+  cancelling:{ label: "Останавливается", icon: Loader2,   color: "bg-amber-500/10 text-amber-500 border-amber-500/20" },
+  cancelled: { label: "Отменён",     icon: XCircle,       color: "bg-slate-500/10 text-slate-500 border-slate-500/20" },
   completed: { label: "Завершён",    icon: CheckCircle,   color: "bg-green-500/10 text-green-500 border-green-500/20" },
   failed:    { label: "Ошибка",      icon: XCircle,       color: "bg-red-500/10 text-red-500 border-red-500/20" },
 }
@@ -421,7 +423,7 @@ export function HistoryPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div>
                 <p className="text-muted-foreground">База данных</p>
                 <p className="font-medium">{logicalDbName}</p>
@@ -437,10 +439,6 @@ export function HistoryPage() {
               <div>
                 <p className="text-muted-foreground">Транзакций</p>
                 <p className="font-mono">{selectedTest.summary?.total_transactions ?? "-"}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">TPS</p>
-                <p className="font-mono">{selectedTest.summary?.overall_tps?.toFixed(2) ?? "-"}</p>
               </div>
             </div>
           </CardContent>
@@ -880,7 +878,6 @@ export function HistoryPage() {
                   <TableHead>Начало</TableHead>
                   <TableHead>Длительность</TableHead>
                   <TableHead className="text-right">Транзакций</TableHead>
-                  <TableHead className="text-right">TPS</TableHead>
                   <TableHead className="text-right">Действия</TableHead>
                 </TableRow>
               </TableHeader>
@@ -940,9 +937,6 @@ export function HistoryPage() {
                       </TableCell>
                       <TableCell className="text-right font-mono">
                         {test.summary?.total_transactions ?? "-"}
-                      </TableCell>
-                      <TableCell className="text-right font-mono">
-                        {test.summary?.overall_tps?.toFixed(2) ?? "-"}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">

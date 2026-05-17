@@ -109,11 +109,11 @@ describe("useAppStore", () => {
       expect(useAppStore.getState().realtimeData).toEqual({});
     });
 
-    it("caps at 100 points per db", () => {
+    it("keeps full realtime history per db", () => {
       for (let i = 0; i < 110; i++) {
         useAppStore.getState().addRealtimeData("db1", { timestamp: i } as any);
       }
-      expect(useAppStore.getState().realtimeData["db1"].length).toBeLessThanOrEqual(100);
+      expect(useAppStore.getState().realtimeData["db1"].length).toBe(110);
     });
   });
 

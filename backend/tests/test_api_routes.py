@@ -93,6 +93,13 @@ class TestAsyncRunLogicalDatabaseGates:
         assert "требует проверки профиля" in resp.json()["detail"]
 
 
+class TestAsyncCancelRoutes:
+    @pytest.mark.asyncio
+    async def test_cancel_not_found(self, client):
+        resp = await client.post(f"/test/async/{uuid.uuid4()}/cancel")
+        assert resp.status_code == 404
+
+
 # ---------------------------------------------------------------------------
 # History routes
 # ---------------------------------------------------------------------------

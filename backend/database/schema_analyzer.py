@@ -447,6 +447,17 @@ class SchemaAnalyzer:
             or bool(identity)
         )
 
+    @staticmethod
+    def sync_foreign_keys_in(tables: Dict[str, TableInfo]) -> None:
+        """Заполнить foreign_keys_in на родительских таблицах по foreign_keys_out дочерних."""
+        for table in tables.values():
+            table.foreign_keys_in.clear()
+        for table in tables.values():
+            for fk in table.foreign_keys_out:
+                parent = tables.get(fk.to_table)
+                if parent:
+                    parent.foreign_keys_in.append(fk)
+
     def _classify_table(self, table: TableInfo, all_tables: Optional[Dict[str, "TableInfo"]] = None) -> List[str]:
         """Определить прикладные роли таблицы для шаблонов запросов."""
         capabilities: List[str] = []
@@ -490,12 +501,11 @@ class SchemaAnalyzer:
         has_fk_in = bool(table.foreign_keys_in)
         heuristic_fk_in = False
         if not has_fk_in and all_tables:
-            expected_fk_col = f"{table.name}_id"
-            for other_name, other_table in all_tables.items():
-                if other_name == table.name:
+            for other_table in all_tables.values():
+                if other_table.name == table.name:
                     continue
-                for col in other_table.columns:
-                    if col.name == expected_fk_col and col.category in {"integer", "numeric"}:
+                for fk in other_table.foreign_keys_out:
+                    if fk.to_table == table.name:
                         heuristic_fk_in = True
                         break
                 if heuristic_fk_in:

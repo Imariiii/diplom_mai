@@ -25,7 +25,7 @@ DEFAULT_SCENARIO_TYPES: List[str] = [
     "olap",
 ]
 
-SCENARIO_GENERATOR_VERSION = "logical-scenario-generator-v8"
+SCENARIO_GENERATOR_VERSION = "logical-scenario-generator-v9"
 
 SCENARIO_QUERY_LIMITS: Dict[str, int] = {
     "read_only": 6,
@@ -288,6 +288,7 @@ class ScenarioGenerator:
                     merged_table.unique_columns.add(column.name)
             common_tables[table_name] = merged_table
 
+        SchemaAnalyzer.sync_foreign_keys_in(common_tables)
         analyzer = SchemaAnalyzer.__new__(SchemaAnalyzer)
         for table in common_tables.values():
             table.capabilities = analyzer._classify_table(table, common_tables)
@@ -947,6 +948,17 @@ class ScenarioGenerator:
         """Отсечь таблицы, где универсальный INSERT рискует нарушить composite UNIQUE."""
         return any(len(columns) > 1 for columns in table.unique_constraints)
 
+    def _build_delete_not_exists_clauses(self, table: TableInfo) -> str:
+        """Собрать AND NOT EXISTS для входящих FK — удалять только независимые строки."""
+        clauses: List[str] = []
+        for fk in table.foreign_keys_in:
+            clauses.append(
+                f"NOT EXISTS (SELECT 1 FROM {self._identifier(fk.from_table)} ref "
+                f"WHERE ref.{self._identifier(fk.from_column)} = "
+                f"{self._identifier(table.name)}.{self._identifier(fk.to_column)})"
+            )
+        return " AND ".join(clauses)
+
     def _template_delete_by_pk(
         self,
         metadata: SchemaMetadata,
@@ -957,15 +969,24 @@ class ScenarioGenerator:
         if not pk_column:
             return None
         placeholder_name = f"{table.name}_{pk_column.name}"
+        where_parts = [
+            f"{self._identifier(pk_column.name)} = "
+            f"{self._placeholder(placeholder_name, pk_column.category)}",
+        ]
+        not_exists_clause = self._build_delete_not_exists_clauses(table)
+        if not_exists_clause:
+            where_parts.append(not_exists_clause)
         sql_template = (
             f"DELETE FROM {self._identifier(table.name)} "
-            f"WHERE {self._identifier(pk_column.name)} = "
-            f"{self._placeholder(placeholder_name, pk_column.category)}"
+            f"WHERE {' AND '.join(where_parts)}"
         )
         return self._build_query_payload(
             template=template,
             sql_template=sql_template,
-            description=f"{template.description} Таблица: {table.name}",
+            description=(
+                f"Удаление строки по primary key, только если на неё никто не ссылается. "
+                f"Таблица: {table.name}"
+            ),
             params=[self._random_from_table_param(placeholder_name, table.name, pk_column.name)],
         )
 

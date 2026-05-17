@@ -244,6 +244,7 @@ class TestRepository(BaseRepository):
         self,
         test_run_id: str,
         db_type: str,
+        connection_key: Optional[str],
         timestamp: datetime,
         response_time: Optional[float] = None,
         tps: Optional[float] = None,
@@ -262,6 +263,7 @@ class TestRepository(BaseRepository):
             point = TimeSeries(
                 test_run_id=uuid.UUID(test_run_id),
                 db_type=db_type,
+                connection_key=connection_key,
                 timestamp=timestamp,
                 response_time=response_time,
                 tps=tps,
@@ -300,18 +302,43 @@ class TestRepository(BaseRepository):
         self,
         test_run_id: str,
         db_type: Optional[str] = None,
-        limit: int = 1000
+        limit: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """Получить временной ряд для теста"""
         async with self.SessionLocal() as session:
-            query = select(TimeSeries).where(
-                TimeSeries.test_run_id == uuid.UUID(test_run_id)
-            ).order_by(TimeSeries.timestamp)
+            base_conditions = [TimeSeries.test_run_id == uuid.UUID(test_run_id)]
 
             if db_type:
-                query = query.where(TimeSeries.db_type == db_type)
+                base_conditions.append(TimeSeries.db_type == db_type)
 
-            query = query.limit(limit)
+            query = (
+                select(TimeSeries)
+                .where(*base_conditions)
+                .order_by(
+                    TimeSeries.connection_key,
+                    TimeSeries.db_type,
+                    TimeSeries.timestamp,
+                )
+            )
+
+            if limit is not None and limit > 0:
+                # Ограничение применяется на каждую серию connection_key|db_type,
+                # чтобы поздние СУБД не терялись при последовательных прогонах.
+                result = await session.execute(query)
+                points = result.scalars().all()
+                by_series: Dict[str, List[TimeSeries]] = {}
+                for point in points:
+                    series_key = point.connection_key or point.db_type
+                    if series_key not in by_series:
+                        by_series[series_key] = []
+                    by_series[series_key].append(point)
+
+                limited: List[TimeSeries] = []
+                for series_key in sorted(by_series.keys()):
+                    limited.extend(by_series[series_key][:limit])
+                limited.sort(key=lambda p: p.timestamp)
+                return [p.to_dict() for p in limited]
+
             result = await session.execute(query)
             points = result.scalars().all()
             return [p.to_dict() for p in points]

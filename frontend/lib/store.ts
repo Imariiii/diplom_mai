@@ -69,7 +69,7 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({
       realtimeData: {
         ...state.realtimeData,
-        [databaseId]: [...(state.realtimeData[databaseId] || []), point].slice(-100),
+        [databaseId]: [...(state.realtimeData[databaseId] || []), point],
       },
     })),
   clearRealtimeData: () => set({ realtimeData: {} }),

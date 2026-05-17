@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useMemo, useState, useCallback } from "react"
+import dynamic from "next/dynamic"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import {
@@ -9,21 +10,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { CHART_COLORS } from "@/lib/chart-colors"
 import { Maximize2 } from "lucide-react"
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-  AreaChart,
-  Area,
-  Brush,
-} from "recharts"
+
+const Plot = dynamic(() => import("react-plotly.js"), { ssr: false }) as any
 
 interface TimeSeriesChartProps {
   title: string
@@ -39,13 +28,6 @@ interface TimeSeriesChartProps {
   getDbType?: (dbKey: string) => string
 }
 
-const tooltipStyle = {
-  backgroundColor: "hsl(var(--card))",
-  border: "1px solid hsl(var(--border))",
-  borderRadius: "8px",
-  color: CHART_COLORS.text,
-}
-
 function ChartContent({
   data,
   databases,
@@ -55,7 +37,6 @@ function ChartContent({
   getDisplayName,
   resolveDbColor,
   height,
-  showBrush,
 }: {
   data: Record<string, unknown>[]
   databases: string[]
@@ -65,108 +46,70 @@ function ChartContent({
   getDisplayName: (dbId: string) => string
   resolveDbColor: (dbId: string) => string
   height: number | string
-  showBrush: boolean
 }) {
-  const resolvedDomain = yDomain || ["auto", "auto"]
-
-  const commonXAxis = (
-    <XAxis
-      dataKey="time"
-      stroke={CHART_COLORS.axis}
-      fontSize={12}
-      tick={{ fill: CHART_COLORS.text }}
-      interval="preserveStartEnd"
-    />
+  const xValues = useMemo(
+    () => data.map((point) => Number(point.elapsedSeconds || 0)),
+    [data],
   )
 
-  const formatValue = (v: number) => {
-    if (v == null || isNaN(v)) return "0"
-    if (Math.abs(v) >= 10000) return `${(v / 1000).toFixed(0)}k`
-    if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(1)}k`
-    if (Math.abs(v) >= 100) return v.toFixed(0)
-    if (Math.abs(v) >= 1) return v.toFixed(1)
-    return v.toFixed(2)
-  }
+  const traces = useMemo(() => {
+    return databases.map((dbId) => ({
+      type: "scattergl",
+      mode: "lines",
+      name: getDisplayName(dbId),
+      x: xValues,
+      y: data.map((point) => {
+        const value = point[`${dbId}_${metricKey}`]
+        return typeof value === "number" ? value : null
+      }),
+      line: { color: resolveDbColor(dbId), width: 2 },
+      connectgaps: true,
+      fill: chartType === "area" ? "tozeroy" : "none",
+      opacity: chartType === "area" ? 0.75 : 1,
+      hovertemplate: "%{fullData.name}<br>t=%{x}s<br>v=%{y:.2f}<extra></extra>",
+    }))
+  }, [chartType, data, databases, getDisplayName, metricKey, resolveDbColor, xValues])
 
-  const commonYAxis = (
-    <YAxis
-      stroke={CHART_COLORS.axis}
-      fontSize={11}
-      domain={resolvedDomain}
-      allowDataOverflow={false}
-      tick={{ fill: CHART_COLORS.text }}
-      width={55}
-      tickFormatter={formatValue}
-      tickCount={6}
-    />
-  )
-
-  const commonTooltip = (
-    <Tooltip
-      contentStyle={tooltipStyle}
-      labelStyle={{ color: CHART_COLORS.text }}
-      itemStyle={{ color: CHART_COLORS.text }}
-      formatter={(value: number) => formatValue(value)}
-    />
-  )
-
-  const brush = showBrush && data.length > 10 ? (
-    <Brush
-      dataKey="time"
-      height={28}
-      stroke="hsl(var(--primary))"
-      fill="hsl(var(--muted))"
-      tickFormatter={() => ""}
-    />
-  ) : null
+  const layout = useMemo(() => ({
+    autosize: true,
+    margin: { l: 55, r: 20, t: 12, b: 42 },
+    paper_bgcolor: "transparent",
+    plot_bgcolor: "transparent",
+    hovermode: "x unified",
+    dragmode: "pan",
+    legend: { orientation: "h", y: -0.18, x: 0, font: { size: 11 } },
+    xaxis: {
+      title: "Время от старта (mm:ss)",
+      tickmode: "auto",
+      gridcolor: "hsl(var(--border))",
+      zerolinecolor: "hsl(var(--border))",
+      tickformat: ",d",
+      tickprefix: "",
+      ticksuffix: "s",
+      tickfont: { size: 11 },
+    },
+    yaxis: {
+      autorange: yDomain ? false : true,
+      range: yDomain ? [yDomain[0], yDomain[1]] : undefined,
+      gridcolor: "hsl(var(--border))",
+      zerolinecolor: "hsl(var(--border))",
+      tickfont: { size: 11 },
+    },
+  }), [yDomain])
 
   return (
     <div style={{ height }}>
-      <ResponsiveContainer width="100%" height="100%">
-        {chartType === "area" ? (
-          <AreaChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-            {commonXAxis}
-            {commonYAxis}
-            {commonTooltip}
-            <Legend wrapperStyle={{ color: CHART_COLORS.text }} />
-            {databases.map((dbId) => (
-              <Area
-                key={dbId}
-                type="monotone"
-                dataKey={`${dbId}_${metricKey}`}
-                name={getDisplayName(dbId)}
-                stroke={resolveDbColor(dbId)}
-                fill={resolveDbColor(dbId)}
-                fillOpacity={0.2}
-                connectNulls
-              />
-            ))}
-            {brush}
-          </AreaChart>
-        ) : (
-          <LineChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-            {commonXAxis}
-            {commonYAxis}
-            {commonTooltip}
-            <Legend wrapperStyle={{ color: CHART_COLORS.text }} />
-            {databases.map((dbId) => (
-              <Line
-                key={dbId}
-                type="monotone"
-                dataKey={`${dbId}_${metricKey}`}
-                name={getDisplayName(dbId)}
-                stroke={resolveDbColor(dbId)}
-                strokeWidth={2}
-                dot={false}
-                connectNulls
-              />
-            ))}
-            {brush}
-          </LineChart>
-        )}
-      </ResponsiveContainer>
+      <Plot
+        data={traces}
+        layout={layout}
+        style={{ width: "100%", height: "100%" }}
+        config={{
+          responsive: true,
+          displaylogo: false,
+          scrollZoom: true,
+          modeBarButtonsToRemove: ["lasso2d", "select2d"],
+        }}
+      />
     </div>
   )
 }
@@ -193,7 +136,7 @@ export function TimeSeriesChart({
 
   const resolveDbColor = useCallback(
     (dbId: string) => (getDbType ? getDbColor(getDbType(dbId)) : getDbColor(dbId)),
-    [getDbType, getDbColor],
+    [getDbColor, getDbType],
   )
 
   return (
@@ -225,8 +168,7 @@ export function TimeSeriesChart({
             yDomain={yDomain}
             getDisplayName={getDisplayName}
             resolveDbColor={resolveDbColor}
-            height={300}
-            showBrush={false}
+            height={320}
           />
         </CardContent>
       </Card>
@@ -249,7 +191,6 @@ export function TimeSeriesChart({
               getDisplayName={getDisplayName}
               resolveDbColor={resolveDbColor}
               height="100%"
-              showBrush={true}
             />
           </div>
         </DialogContent>

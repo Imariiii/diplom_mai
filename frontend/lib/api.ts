@@ -75,6 +75,7 @@ export type {
 export {
   runAsyncTest,
   getAsyncTestResults,
+  cancelAsyncTest,
   isHistoryEnabled,
   getHistoryTests,
   getHistoryTest,

@@ -2,23 +2,25 @@
 API роуты для выполнения тестов
 """
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, BackgroundTasks, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException
 from typing import Dict, List, Optional
 import uuid
 import asyncio
 
 from backend.api.schemas import AsyncTestRequest
+from backend.core.summary_utils import sanitize_test_summary
 from backend.database.scenario_bundle_resolver import ScenarioBundleResolver
 from backend.database.scenario_bundle_validator import ScenarioBundleValidator
-from backend.load_tester.tester import LoadTester
-from backend.websocket_manager import manager, TestStreamingCallback
+from backend.load_tester.tester import LoadTester, TestCancelledError
+from backend.websocket_manager import manager, TestStreamingCallback, TestStatusUpdate
 
 router = APIRouter(prefix="/test", tags=["test"])
 
 
 BLOCKING_LOGICAL_PROFILE_STATUSES = {"draft", "needs_review", "incompatible"}
-TERMINAL_TEST_STATUSES = {"completed", "failed"}
+TERMINAL_TEST_STATUSES = {"completed", "failed", "cancelled"}
 ACTIVE_TEST_TTL = timedelta(hours=6)
+RUNTIME_ONLY_KEYS = {"_task", "_tester"}
 
 
 def _extract_raw_samples(stats: Dict) -> List[Dict]:
@@ -92,6 +94,11 @@ def _build_bundle_config_snapshot(bundle: Dict) -> Dict:
         "queries": bundle.get("queries", []),
         "indexes": bundle.get("indexes", []),
     }
+
+
+def _public_test_info(test_info: Dict) -> Dict:
+    """Вернуть сериализуемую информацию о тесте без runtime-полей."""
+    return {k: v for k, v in test_info.items() if k not in RUNTIME_ONLY_KEYS}
 
 
 async def _validate_logical_database_run_request(request: AsyncTestRequest, scenario: str) -> None:
@@ -202,7 +209,7 @@ async def _validate_logical_database_run_request(request: AsyncTestRequest, scen
 
 
 @router.post("/async")
-async def run_async_test(request: AsyncTestRequest, background_tasks: BackgroundTasks):
+async def run_async_test(request: AsyncTestRequest):
     """
     Асинхронный запуск теста с WebSocket обновлениями.
     Возвращает test_id для подписки на обновления.
@@ -258,12 +265,9 @@ async def run_async_test(request: AsyncTestRequest, background_tasks: Background
         except Exception as e:
             print(f"[HISTORY_DB] ❌ Ошибка создания записи в БД истории: {e}")
     
-    # Запускаем тест в фоне
-    background_tasks.add_task(
-        run_test_with_streaming,
-        test_id,
-        request
-    )
+    # Запускаем тест в фоне как asyncio Task для поддержки отмены
+    task = asyncio.create_task(run_test_with_streaming(test_id, request))
+    active_tests[test_id]["_task"] = task
     
     return {
         "test_id": test_id,
@@ -302,6 +306,10 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
     test_tester.set_streaming_callback(streaming_callback)
     test_tester.set_backup_callback(streaming_callback.on_backup_status)
     test_tester.auto_restore = settings.restore.auto_restore
+    if test_id in active_tests:
+        active_tests[test_id]["_tester"] = test_tester
+        if active_tests[test_id].get("status") == "cancelling":
+            test_tester.request_cancel()
     
     # Разрешаем connection_ids в качестве уникальных ключей подключения
     connection_ids = request.connection_ids
@@ -380,8 +388,14 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
     )
     
     try:
-        active_tests[test_id]["status"] = "running"
-        await streaming_callback.on_test_start()
+        if active_tests.get(test_id, {}).get("status") != "cancelling":
+            active_tests[test_id]["status"] = "running"
+            await streaming_callback.on_test_start()
+        else:
+            await streaming_callback.on_status_change(
+                "cancelling",
+                "Остановка теста: завершаем текущие операции…",
+            )
 
         dbms_metric_start_counters = {}
         for db_key in db_keys:
@@ -506,12 +520,11 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         
         summary = {
             'total_transactions': total_transactions,
-            'overall_tps': total_transactions / actual_duration if actual_duration > 0 else 0,
             'total_duration': actual_duration
         }
         print(
             f"[TEST] Тест {test_id} завершён за {actual_duration:.1f}с. "
-            f"Транзакций: {total_transactions}, TPS: {summary['overall_tps']:.1f}"
+            f"Транзакций: {total_transactions}"
         )
         
         if HISTORY_ENABLED and test_repository:
@@ -587,6 +600,27 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         
         await streaming_callback.on_test_complete(summary)
         
+    except TestCancelledError as e:
+        cancel_message = str(e) or "Тест отменён пользователем"
+        print(f"[TEST] Тест {test_id} отменён: {cancel_message}")
+        active_tests[test_id]["status"] = "cancelled"
+        active_tests[test_id]["error"] = cancel_message
+        active_tests[test_id]["finished_at"] = _now_utc()
+
+        await streaming_callback.on_status_change("cancelled", cancel_message)
+
+        if HISTORY_ENABLED and test_repository:
+            try:
+                finish_ts = start_ts + timedelta(seconds=(time.perf_counter() - start_time))
+                await test_repository.update_test_run_status(
+                    test_id,
+                    'cancelled',
+                    {"cancelled": True, "reason": cancel_message},
+                    started_at=start_ts,
+                    finished_at=finish_ts
+                )
+            except Exception:
+                pass
     except Exception as e:
         print(f"[TEST] Ошибка выполнения теста {test_id}: {e}")
         import traceback
@@ -612,6 +646,44 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                 pass
     finally:
         await test_tester.close()
+        if test_id in active_tests:
+            active_tests[test_id].pop("_task", None)
+            active_tests[test_id].pop("_tester", None)
+
+
+@router.post("/async/{test_id}/cancel")
+async def cancel_async_test(test_id: str):
+    """Запросить корректную отмену запущенного теста."""
+    active_tests = get_active_tests()
+    prune_active_tests(active_tests)
+    test_info = active_tests.get(test_id)
+    if not test_info:
+        raise HTTPException(status_code=404, detail=f"Тест {test_id} не найден")
+
+    status = test_info.get("status")
+    if status in TERMINAL_TEST_STATUSES:
+        raise HTTPException(status_code=409, detail=f"Тест уже завершён (status={status})")
+
+    if status != "cancelling":
+        test_info["status"] = "cancelling"
+        tester = test_info.get("_tester")
+        if tester:
+            tester.request_cancel()
+
+    await manager.send_status_update(
+        TestStatusUpdate(
+            test_id=test_id,
+            status="cancelling",
+            message="Остановка теста: завершаем текущие операции…",
+            progress=0.0,
+        )
+    )
+
+    return {
+        "test_id": test_id,
+        "status": "cancelling",
+        "message": "Запрос на остановку принят",
+    }
 
 
 @router.get("/async/{test_id}")
@@ -622,7 +694,7 @@ async def get_async_test_status(test_id: str):
     if test_id not in active_tests:
         raise HTTPException(status_code=404, detail=f"Тест {test_id} не найден")
     
-    return active_tests[test_id]
+    return _public_test_info(active_tests[test_id])
 
 
 @router.get("/async/{test_id}/results")
@@ -635,9 +707,14 @@ async def get_async_test_results(test_id: str):
     
     test_info = active_tests[test_id]
     if test_info["status"] != "completed":
+        message = test_info.get("error") or "Тест ещё не завершён"
+        if test_info["status"] == "cancelled":
+            message = test_info.get("error") or "Тест отменён пользователем"
+        elif test_info["status"] == "cancelling":
+            message = "Остановка теста: завершаем текущие операции…"
         return {
             "status": test_info["status"],
-            "message": test_info.get("error") or "Тест ещё не завершён",
+            "message": message,
             "error": test_info.get("error"),
             "connection_names": test_info.get("connection_names", {}),
             "connection_db_types": test_info.get("connection_db_types", {})
@@ -646,7 +723,7 @@ async def get_async_test_results(test_id: str):
     return {
         "status": "completed",
         "results": test_info.get("results", []),
-        "summary": test_info.get("summary", {}),
+        "summary": sanitize_test_summary(test_info.get("summary")) or {},
         "system_metrics": test_info.get("system_metrics", {}),
         "dbms_metrics": test_info.get("dbms_metrics", {}),
         "connection_names": test_info.get("connection_names", {}),

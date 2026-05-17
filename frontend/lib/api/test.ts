@@ -95,14 +95,13 @@ export interface FullTestResponse {
   summary?: {
     total_duration: number
     total_transactions: number
-    overall_tps: number
   }
 }
 
 export interface AsyncTestResponse {
   test_id: string
   name: string
-  status: 'pending' | 'running' | 'completed' | 'failed'
+  status: 'pending' | 'running' | 'cancelling' | 'cancelled' | 'completed' | 'failed'
   websocket_url: string
   message: string
 }
@@ -110,13 +109,12 @@ export interface AsyncTestResponse {
 export interface AsyncTestStatus {
   id: string
   name: string
-  status: 'pending' | 'running' | 'completed' | 'failed'
+  status: 'pending' | 'running' | 'cancelling' | 'cancelled' | 'completed' | 'failed'
   config: TestRequest
   created_at?: number
   results?: TestResult[]
   summary?: {
     total_transactions: number
-    overall_tps: number
     total_duration: number
   }
   error?: string
@@ -125,13 +123,12 @@ export interface AsyncTestStatus {
 export interface HistoryTestRun {
   id: string
   name: string
-  status: 'pending' | 'running' | 'completed' | 'failed'
+  status: 'pending' | 'running' | 'cancelling' | 'cancelled' | 'completed' | 'failed'
   started_at: string | null
   finished_at: string | null
   config: TestRequest
   summary: {
     total_transactions?: number
-    overall_tps?: number
     total_duration?: number
   } | null
   created_at: string | null
@@ -204,12 +201,20 @@ export async function runAsyncTest(request: TestRequest & { test_name?: string }
 export async function getAsyncTestResults(testId: string): Promise<{
   status: string
   results?: TestResult[]
-  summary?: { total_transactions: number; overall_tps: number; total_duration: number }
+  summary?: { total_transactions: number; total_duration: number }
   system_metrics?: Record<string, any>
   dbms_metrics?: Record<string, any>
   message?: string
 }> {
   return apiClient.getAsyncTestResults(testId)
+}
+
+export async function cancelAsyncTest(testId: string): Promise<{
+  test_id: string
+  status: 'cancelling'
+  message: string
+}> {
+  return apiClient.cancelAsyncTest(testId)
 }
 
 // ==================== История тестов ====================

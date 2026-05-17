@@ -46,3 +46,17 @@ def test_prune_active_tests_accepts_iso_timestamps():
 
     assert prune_active_tests(active_tests, now=now) == 1
     assert active_tests == {}
+
+
+def test_prune_active_tests_removes_cancelled_entries():
+    """Статус cancelled также считается terminal и чистится по TTL."""
+    now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    active_tests = {
+        "old-cancelled": {
+            "status": "cancelled",
+            "finished_at": (now - ACTIVE_TEST_TTL - timedelta(seconds=1)).isoformat(),
+        },
+    }
+
+    assert prune_active_tests(active_tests, now=now) == 1
+    assert active_tests == {}

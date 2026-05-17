@@ -38,7 +38,7 @@ interface StatusMessage {
   type: "status"
   data: {
     test_id: string
-    status: "pending" | "running" | "completed" | "failed"
+    status: "pending" | "running" | "cancelling" | "cancelled" | "completed" | "failed"
     message?: string
     progress: number
   }
@@ -187,7 +187,7 @@ export function useTestWebSocket({
           if (statusData.status === "running" && statusData.message) {
             setBackupStatus("")
           }
-          if (statusData.status === "completed" || statusData.status === "failed") {
+          if (statusData.status === "completed" || statusData.status === "failed" || statusData.status === "cancelled") {
             setBackupStatus("")
             stopTimer()
           }
@@ -270,7 +270,7 @@ export function useTestWebSocket({
         }
         
         // Автопереподключение только если тест ещё выполняется
-        if (autoReconnect && status === "running" && event.code !== 1000) {
+        if (autoReconnect && (status === "running" || status === "cancelling") && event.code !== 1000) {
           reconnectTimeoutRef.current = setTimeout(() => {
             console.log("[WS] Attempting reconnection...")
             connect()
@@ -335,4 +335,3 @@ export function useTestWebSocket({
     sendMessage,
   }
 }
-

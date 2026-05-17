@@ -22,6 +22,7 @@ interface HistoryTsPoint {
   id: number
   test_run_id: string
   db_type: string
+  connection_key?: string | null
   timestamp: string
   response_time: number | null
   tps: number | null
@@ -265,40 +266,48 @@ function buildRealtimeByConnection(
   formattedResults: DashboardResult[],
   points: HistoryTsPoint[],
 ): Record<string, TimeSeriesPoint[]> {
-  const byType: Record<string, HistoryTsPoint[]> = {}
+  const byKey: Record<string, HistoryTsPoint[]> = {}
   for (const p of points) {
-    if (!byType[p.db_type]) byType[p.db_type] = []
-    byType[p.db_type].push(p)
+    const key = p.connection_key || p.db_type
+    if (!byKey[key]) byKey[key] = []
+    byKey[key].push(p)
   }
-  for (const k of Object.keys(byType)) {
-    byType[k].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+  for (const key of Object.keys(byKey)) {
+    byKey[key].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
   }
 
   const out: Record<string, TimeSeriesPoint[]> = {}
   for (const r of formattedResults) {
-    const series = byType[r.databaseType] || []
+    const series = byKey[r.databaseId] || byKey[r.databaseType] || []
     out[r.databaseId] = series.map(rawHistoryPointToTimeSeries)
   }
   return out
 }
 
 function buildChartDataFromRealtime(realtimeData: Record<string, TimeSeriesPoint[]>): Record<string, unknown>[] {
-  return Object.entries(realtimeData).reduce<Record<string, unknown>[]>((acc, [dbId, pts]) => {
-    pts.forEach((point, index) => {
-      if (!acc[index]) {
-        acc[index] = { time: new Date(point.timestamp).toLocaleTimeString("ru") }
+  const byElapsed: Record<number, Record<string, unknown>> = {}
+  for (const [dbId, pts] of Object.entries(realtimeData)) {
+    if (!pts.length) continue
+    const startTs = pts[0].timestamp
+    for (const point of pts) {
+      const elapsedSeconds = Math.max(0, Math.round((point.timestamp - startTs) / 1000))
+      if (!byElapsed[elapsedSeconds]) {
+        byElapsed[elapsedSeconds] = { elapsedSeconds }
       }
-      acc[index][`${dbId}_responseTime`] = point.responseTime ?? 0
-      acc[index][`${dbId}_throughput`] = point.throughput ?? 0
-      acc[index][`${dbId}_tps`] = point.tps ?? 0
-      acc[index][`${dbId}_cpu`] = point.cpuUsage ?? 0
-      acc[index][`${dbId}_memory`] = point.memoryUsage ?? 0
-      acc[index][`${dbId}_diskIO`] = point.diskIOps ?? 0
-      acc[index][`${dbId}_connections`] = point.activeConnections ?? 0
-      acc[index][`${dbId}_errors`] = point.errorCount ?? 0
-    })
-    return acc
-  }, [])
+      byElapsed[elapsedSeconds][`${dbId}_responseTime`] = point.responseTime ?? 0
+      byElapsed[elapsedSeconds][`${dbId}_throughput`] = point.throughput ?? 0
+      byElapsed[elapsedSeconds][`${dbId}_tps`] = point.tps ?? 0
+      byElapsed[elapsedSeconds][`${dbId}_cpu`] = point.cpuUsage ?? 0
+      byElapsed[elapsedSeconds][`${dbId}_memory`] = point.memoryUsage ?? 0
+      byElapsed[elapsedSeconds][`${dbId}_diskIO`] = point.diskIOps ?? 0
+      byElapsed[elapsedSeconds][`${dbId}_connections`] = point.activeConnections ?? 0
+      byElapsed[elapsedSeconds][`${dbId}_errors`] = point.errorCount ?? 0
+    }
+  }
+
+  return Object.values(byElapsed).sort(
+    (a, b) => Number(a.elapsedSeconds || 0) - Number(b.elapsedSeconds || 0),
+  )
 }
 
 export function HistoryTestDashboard({
@@ -318,7 +327,7 @@ export function HistoryTestDashboard({
   useEffect(() => {
     let cancelled = false
     apiClient
-      .getHistoryTestTimeSeries(test.id, { limit: 500 })
+      .getHistoryTestTimeSeries(test.id, { full: true })
       .then((res) => {
         if (!cancelled) {
           setTsPoints((res.points || []) as HistoryTsPoint[])

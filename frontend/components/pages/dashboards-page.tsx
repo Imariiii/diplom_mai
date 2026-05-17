@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Database, Cpu, BarChart3, Lock, AlertTriangle, CheckCircle2, History, SlidersHorizontal, Loader2 } from "lucide-react"
+import { Database, Cpu, BarChart3, Lock, AlertTriangle, CheckCircle2, History, SlidersHorizontal, Loader2, Square } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -23,6 +23,7 @@ export function DashboardsPage() {
   const { currentTest, realtimeData, testConfig, setCurrentTest, addTestToHistory, clearRealtimeData, connectionNames, setConnectionNames, connectionDbTypes, setConnectionDbTypes, setCurrentPage, setComparisonSelection } = useAppStore()
   const [statusMessage, setStatusMessage] = useState<string>("")
   const [showProgressBar, setShowProgressBar] = useState(false)
+  const [cancelLoading, setCancelLoading] = useState(false)
 
   const formatFailureMessage = (message?: string | null) => {
     const cleaned = (message || "").replace(/^Ошибка:\s*/i, "").trim()
@@ -45,13 +46,13 @@ export function DashboardsPage() {
     onStatus: (data) => {
       setStatusMessage(data.message || "")
 
-      if (data.status === "completed" || data.status === "failed") {
+      if (data.status === "completed" || data.status === "failed" || data.status === "cancelled") {
         if (currentTest) {
           const updatedTest = {
             ...currentTest,
             status: data.status,
             endTime: new Date(),
-            error: data.status === "failed" ? formatFailureMessage(data.message) : currentTest.error,
+            error: data.status === "failed" ? formatFailureMessage(data.message) : (data.status === "cancelled" ? (data.message || "Тест отменён пользователем") : currentTest.error),
           }
 
           if (data.status === "completed") {
@@ -211,7 +212,7 @@ export function DashboardsPage() {
                 toast.success("Тестирование завершено!")
               }
             }).catch(console.error)
-          } else {
+          } else if (data.status === "failed") {
             setCurrentTest(updatedTest)
             apiClient.getAsyncTestResults(currentTest.id)
               .then((response) => {
@@ -237,6 +238,9 @@ export function DashboardsPage() {
                 setCurrentTest(updatedTest)
               })
             toast.error(formatFailureMessage(data.message))
+          } else {
+            setCurrentTest(updatedTest)
+            toast.warning(data.message || "Тест отменён пользователем")
           }
         }
       }
@@ -245,7 +249,7 @@ export function DashboardsPage() {
       toast.success("Подключено к real-time обновлениям")
     },
     onDisconnect: () => {
-      if (currentTest?.status === "running") {
+      if (currentTest?.status === "running" || currentTest?.status === "cancelling") {
         toast.warning("Соединение потеряно, переподключение...")
       }
     },
@@ -263,13 +267,36 @@ export function DashboardsPage() {
   // Показываем прогресс-бар во время теста и ещё 2 секунды после завершения,
   // чтобы пользователь успел увидеть финальные 100%
   useEffect(() => {
-    if (status === "running") {
+    if (status === "running" || status === "cancelling") {
       setShowProgressBar(true)
-    } else if (status === "completed" || status === "failed") {
+    } else if (status === "completed" || status === "failed" || status === "cancelled") {
       const t = setTimeout(() => setShowProgressBar(false), 2000)
       return () => clearTimeout(t)
     }
   }, [status])
+
+  const canCancel = currentTest?.status === "pending" || currentTest?.status === "running"
+  const isCancelling = currentTest?.status === "cancelling"
+
+  const handleCancelTest = async () => {
+    if (!currentTest?.id || (!canCancel && !isCancelling)) return
+    setCancelLoading(true)
+    try {
+      await apiClient.cancelAsyncTest(currentTest.id)
+      setCurrentTest({
+        ...currentTest,
+        status: "cancelling",
+        error: null,
+      })
+      setStatusMessage("Остановка теста: завершаем текущие операции…")
+      toast.info("Запрос на остановку принят")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Не удалось остановить тест"
+      toast.error(message)
+    } finally {
+      setCancelLoading(false)
+    }
+  }
 
   const getDbDisplayName = (dbId: string) => {
     return currentTest?.connection_names?.[dbId] || connectionNames[dbId] || DB_NAMES[dbId] || dbId
@@ -281,22 +308,28 @@ export function DashboardsPage() {
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
-  const chartData = Object.entries(realtimeData).reduce<Record<string, unknown>[]>((acc, [dbId, points]) => {
-    points.forEach((point, index) => {
-      if (!acc[index]) {
-        acc[index] = { time: new Date(point.timestamp).toLocaleTimeString("ru") }
+  const chartData = Object.entries(realtimeData).reduce<Record<number, Record<string, unknown>>>((acc, [dbId, points]) => {
+    if (!points.length) return acc
+    const startTs = points[0].timestamp
+    points.forEach((point) => {
+      const elapsedSeconds = Math.max(0, Math.round((point.timestamp - startTs) / 1000))
+      if (!acc[elapsedSeconds]) {
+        acc[elapsedSeconds] = { elapsedSeconds }
       }
-      acc[index][`${dbId}_responseTime`] = point.responseTime ?? 0
-      acc[index][`${dbId}_throughput`] = point.throughput ?? 0
-      acc[index][`${dbId}_tps`] = point.tps ?? 0
-      acc[index][`${dbId}_cpu`] = point.cpuUsage ?? 0
-      acc[index][`${dbId}_memory`] = point.memoryUsage ?? 0
-      acc[index][`${dbId}_diskIO`] = point.diskIOps ?? 0
-      acc[index][`${dbId}_connections`] = point.activeConnections ?? 0
-      acc[index][`${dbId}_errors`] = point.errorCount ?? 0
+      acc[elapsedSeconds][`${dbId}_responseTime`] = point.responseTime ?? 0
+      acc[elapsedSeconds][`${dbId}_throughput`] = point.throughput ?? 0
+      acc[elapsedSeconds][`${dbId}_tps`] = point.tps ?? 0
+      acc[elapsedSeconds][`${dbId}_cpu`] = point.cpuUsage ?? 0
+      acc[elapsedSeconds][`${dbId}_memory`] = point.memoryUsage ?? 0
+      acc[elapsedSeconds][`${dbId}_diskIO`] = point.diskIOps ?? 0
+      acc[elapsedSeconds][`${dbId}_connections`] = point.activeConnections ?? 0
+      acc[elapsedSeconds][`${dbId}_errors`] = point.errorCount ?? 0
     })
     return acc
-  }, [])
+  }, {})
+  const chartDataSorted = Object.values(chartData).sort(
+    (a, b) => Number(a.elapsedSeconds || 0) - Number(b.elapsedSeconds || 0),
+  )
 
   const getLatestMetric = (dbId: string, metric: string) => {
     const points = realtimeData[dbId]
@@ -339,7 +372,7 @@ export function DashboardsPage() {
           || result.databaseId
       ) || [])
 
-  const isTestFinished = currentTest?.status === "completed" || currentTest?.status === "failed"
+  const isTestFinished = currentTest?.status === "completed" || currentTest?.status === "failed" || currentTest?.status === "cancelled"
   const hasCompletedResults =
     currentTest?.status === "completed" &&
     Array.isArray(currentTest.results) &&
@@ -353,6 +386,9 @@ export function DashboardsPage() {
   )
   const failedMessage = currentTest?.status === "failed"
     ? formatFailureMessage(currentTest.error || statusMessage)
+    : null
+  const cancelledMessage = currentTest?.status === "cancelled"
+    ? (currentTest.error || statusMessage || "Тест отменён пользователем")
     : null
 
   if (!currentTest && Object.keys(realtimeData).length === 0) {
@@ -369,6 +405,21 @@ export function DashboardsPage() {
   return (
     <div className="p-6 space-y-6">
       <PageHeader isConnected={isConnected} currentTest={currentTest} />
+
+      {(canCancel || isCancelling) && (
+        <div className="flex justify-end">
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={handleCancelTest}
+            disabled={isCancelling || cancelLoading}
+            className="gap-2"
+          >
+            <Square className="h-4 w-4" />
+            {isCancelling || cancelLoading ? "Останавливаем..." : "Остановить тест"}
+          </Button>
+        </div>
+      )}
 
       {showProgressBar && (
         <TestProgressBar
@@ -400,6 +451,16 @@ export function DashboardsPage() {
               Метрики и графики пустые, потому что нагрузка остановлена на этапе подготовки или preflight-проверки.
               Исправьте указанную причину и запустите тест повторно.
             </p>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {cancelledMessage && (
+        <Alert>
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Тест отменён пользователем</AlertTitle>
+          <AlertDescription className="text-sm">
+            {cancelledMessage}
           </AlertDescription>
         </Alert>
       )}
@@ -500,7 +561,7 @@ export function DashboardsPage() {
         <TabsContent value="database">
           <DatabaseMetricsTab
             databases={chartDatabases}
-            chartData={chartData}
+            chartData={chartDataSorted}
             getResultForDb={findResultByDbKey}
             getLatestMetric={getLatestMetric}
             getDbDisplayName={getDbDisplayName}
@@ -514,7 +575,7 @@ export function DashboardsPage() {
           <TabsContent value="system">
             <SystemMetricsTab
               databases={chartDatabases}
-              chartData={chartData}
+              chartData={chartDataSorted}
               getDbType={getDbType}
               getDbDisplayName={getDbDisplayName}
             />

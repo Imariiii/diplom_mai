@@ -33,12 +33,16 @@ export function PageHeader({ isConnected, currentTest }: PageHeaderProps) {
           <Badge
             variant={
               currentTest.status === "running" ? "default" :
+              currentTest.status === "cancelling" ? "outline" :
               currentTest.status === "completed" ? "secondary" :
+              currentTest.status === "cancelled" ? "outline" :
               currentTest.status === "failed" ? "destructive" : "outline"
             }
           >
             {currentTest.status === "running" ? "Выполняется" :
+             currentTest.status === "cancelling" ? "Останавливается" :
              currentTest.status === "completed" ? "Завершён" :
+             currentTest.status === "cancelled" ? "Отменён" :
              currentTest.status === "failed" ? "Ошибка" : "Ожидание"}
           </Badge>
         )}

@@ -16,6 +16,10 @@ from backend.load_tester.index_manager import IndexManager
 from backend.load_tester.self_check import cross_validate_metrics, verify_littles_law
 
 
+class TestCancelledError(Exception):
+    """Тест отменён пользователем."""
+
+
 class LoadTester:
     """Класс для проведения нагрузочного тестирования"""
     
@@ -36,6 +40,7 @@ class LoadTester:
         self._backup_callback: Optional[Callable] = None
         self._is_streaming: bool = False
         self._streaming_interval: float = 1.0
+        self._cancel_requested: bool = False
         
         psutil.cpu_percent(interval=None)
     
@@ -59,6 +64,21 @@ class LoadTester:
     def set_status_callback(self, callback: Callable):
         """Установить callback для обновления статуса"""
         self._status_callback = callback
+
+    def request_cancel(self) -> None:
+        """Запросить корректную остановку теста."""
+        self._cancel_requested = True
+
+    def is_cancel_requested(self) -> bool:
+        """Проверить, запрошена ли остановка теста."""
+        return self._cancel_requested
+
+    def _raise_if_cancel_requested(self, phase: str = "") -> None:
+        """Прервать выполнение теста по запросу пользователя."""
+        if self._cancel_requested:
+            if phase:
+                raise TestCancelledError(f"Тест отменён пользователем ({phase})")
+            raise TestCancelledError("Тест отменён пользователем")
 
     def _build_random_value_cache_key(self, db_key: str, table: str, column: str) -> str:
         """Построить ключ кэша значений для random_from_table"""
@@ -144,6 +164,7 @@ class LoadTester:
             recent_failed = 0
             
             for i in range(iterations):
+                self._raise_if_cancel_requested("выполнение запросов")
                 result = await query_func()
                 results.append(result)
                 
@@ -198,6 +219,8 @@ class LoadTester:
         
         async def worker(worker_id: int):
             for _ in range(iterations):
+                if self._cancel_requested:
+                    return
                 result = await query_func()
                 async with results_lock:
                     results.append(result)
@@ -257,6 +280,7 @@ class LoadTester:
         emitter_task = asyncio.create_task(metrics_emitter()) if self._is_streaming else None
         
         await asyncio.gather(*tasks)
+        self._raise_if_cancel_requested("выполнение запросов")
         
         if emitter_task:
             emitter_task.cancel()
@@ -479,10 +503,12 @@ class LoadTester:
             await self._emit_status("running", f"Прогрев системы ({warmup_time} сек)...")
             for db_key in db_types:
                 for _ in range(min(3, iterations)):
+                    self._raise_if_cancel_requested("прогрев")
                     await self.execute_query(db_key, custom_sql, query_id)
                     await asyncio.sleep(0.05)
             remaining = warmup_time
             while remaining > 0:
+                self._raise_if_cancel_requested("прогрев")
                 await self._emit_status(
                     "running",
                     f"Прогрев системы, осталось {remaining} с…",
@@ -504,6 +530,7 @@ class LoadTester:
         prepare_start = 8.0 if warmup_time > 0 else 0.0
         prepare_end = prepare_start + 8.0
         for prep_idx, db_key in enumerate(db_types):
+            self._raise_if_cancel_requested("подготовка БД")
             print(f"Подготовка {db_key}...")
             _set_prog(prepare_start + (prep_idx / total_dbs) * (prepare_end - prepare_start))
             prepare_info = await self.prepare_database_for_test(
@@ -519,6 +546,7 @@ class LoadTester:
 
         try:
             for db_idx, db_key in enumerate(db_types):
+                self._raise_if_cancel_requested("выполнение пользовательского SQL")
                 db_prog_start = test_range_start + db_idx * test_slice
                 db_prog_end = test_range_start + (db_idx + 1) * test_slice
 
@@ -612,7 +640,7 @@ class LoadTester:
             for rest_idx, db_key in enumerate(restore_dbs):
                 _set_prog(92.0 + (rest_idx / n_restore) * 8.0 if n_restore > 0 else 92.0)
                 await self.restore_database_after_test(
-                    db_key, prepare_infos[db_key], self.auto_restore
+                    db_key, prepare_infos[db_key], (self.auto_restore or self._cancel_requested)
                 )
             _set_prog(100.0)
 
@@ -928,6 +956,7 @@ class LoadTester:
         )
 
         sql_queries = [q['sql_template'] for q in queries]
+        self._raise_if_cancel_requested("подготовка сценария")
 
         # Фаза: подготовка / backup (0-8% диапазона)
         _set_progress(0.0)
@@ -1017,6 +1046,7 @@ class LoadTester:
                     f"Прогрев сценария {scenario_name} ({warmup_time} сек)..."
                 )
                 for _ in range(warmup_iterations):
+                    self._raise_if_cancel_requested("прогрев сценария")
                     q = random.choice(weighted_queries)
                     await self.execute_scenario_query(
                         db_key,
@@ -1027,6 +1057,7 @@ class LoadTester:
                     await asyncio.sleep(0.1)
                 remaining = warmup_time
                 while remaining > 0:
+                    self._raise_if_cancel_requested("прогрев сценария")
                     await self._emit_status(
                         "running",
                         f"Прогрев сценария «{scenario_name}», осталось {remaining} с…",
@@ -1046,6 +1077,7 @@ class LoadTester:
                 f"Нагрузка: «{scenario_name}» — выполнение запросов "
                 f"({iterations} ит. × {virtual_users} VU)…",
             )
+            self._raise_if_cancel_requested("нагрузка")
             start_time = time.perf_counter()
 
             async def _make_scenario_query():
@@ -1203,6 +1235,7 @@ class LoadTester:
 
         # Запуск тестов для каждой БД с фазовым прогрессом
         for idx, db_key in enumerate(db_types):
+            self._raise_if_cancel_requested("запуск сценария")
             conn_name = self.db_connection.get_connection_name(db_key)
             print(f"Тестирование {db_key} ({conn_name}) со сценарием {scenario['name']}... ({idx + 1}/{n_dbs})")
             queries_in_scenario = scenario.get('queries', [])
@@ -1356,7 +1389,7 @@ class LoadTester:
                 "reason": "No restore needed or auto_restore disabled"
             }
 
-        if not auto_restore:
+        if not auto_restore and not self._cancel_requested:
             print(f"[DB] {conn_name}: восстановление пропущено (auto_restore=False)")
             return {
                 "restored": False,

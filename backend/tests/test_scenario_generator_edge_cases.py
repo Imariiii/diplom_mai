@@ -298,6 +298,94 @@ class TestScenarioGeneratorEdgeCases:
         assert "delete_safe" not in schema.tables["parent"].capabilities
         assert "delete_safe" in schema.tables["child"].capabilities
 
+    def test_sync_foreign_keys_in_populates_incoming_references(self):
+        parent = table(
+            "parent",
+            [col("id", "integer", pk=True, auto=True, default="identity", default_kind="identity")],
+            pk=["id"],
+        )
+        child = table(
+            "child",
+            [
+                col("id", "integer", pk=True, auto=True, default="identity", default_kind="identity"),
+                col("parent_id", "integer"),
+            ],
+            pk=["id"],
+            fks=[fk("child", "parent_id", "parent")],
+        )
+        table_map = {parent.name: parent, child.name: child}
+
+        SchemaAnalyzer.sync_foreign_keys_in(table_map)
+
+        assert len(parent.foreign_keys_in) == 1
+        assert parent.foreign_keys_in[0].from_table == "child"
+        assert child.foreign_keys_in == []
+
+    def test_common_metadata_merge_parent_not_delete_safe(self):
+        customers = table(
+            "olist_customers_dataset",
+            [col("customer_id", "string", pk=True)],
+            pk=["customer_id"],
+            row_count=1000,
+        )
+        orders = table(
+            "olist_orders_dataset",
+            [
+                col("order_id", "string", pk=True),
+                col("customer_id", "string"),
+            ],
+            pk=["order_id"],
+            row_count=5000,
+            fks=[fk("olist_orders_dataset", "customer_id", "olist_customers_dataset", "customer_id")],
+        )
+        reference = metadata(customers, orders)
+
+        common = ScenarioGenerator()._build_common_capability_metadata(
+            reference_metadata=reference,
+            all_metadata=[reference, reference],
+        )
+
+        assert common.tables["olist_customers_dataset"].foreign_keys_in
+        assert "delete_safe" not in common.tables["olist_customers_dataset"].capabilities
+        assert "delete_safe" in common.tables["olist_orders_dataset"].capabilities
+
+    def test_delete_template_includes_not_exists_when_referenced(self):
+        parent = table(
+            "parent",
+            [col("id", "integer", pk=True, auto=True, default="identity", default_kind="identity")],
+            pk=["id"],
+        )
+        child = table(
+            "child",
+            [
+                col("id", "integer", pk=True, auto=True, default="identity", default_kind="identity"),
+                col("parent_id", "integer"),
+            ],
+            pk=["id"],
+            fks=[fk("child", "parent_id", "parent")],
+        )
+        schema = metadata(parent, child)
+        generator = ScenarioGenerator()
+
+        query = generator._template_delete_by_pk(
+            schema,
+            schema.tables["parent"],
+            QUERY_TEMPLATES_BY_ID["delete_by_pk"],
+        )
+
+        assert query is not None
+        assert "NOT EXISTS" in query["sql_template"]
+        assert "FROM child ref" in query["sql_template"]
+        assert "никто не ссылается" in query["description"]
+
+        leaf_query = generator._template_delete_by_pk(
+            schema,
+            schema.tables["child"],
+            QUERY_TEMPLATES_BY_ID["delete_by_pk"],
+        )
+        assert leaf_query is not None
+        assert "NOT EXISTS" not in leaf_query["sql_template"]
+
     def test_mixed_scenario_still_contains_select_update_insert_when_safe(self):
         customer = table(
             "customer",
