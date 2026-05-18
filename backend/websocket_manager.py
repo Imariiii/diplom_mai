@@ -34,8 +34,11 @@ class TestMetricsUpdate:
     network_out: float = 0.0
     
     # Внутренние метрики СУБД
-    cache_hit_ratio: float = 0.0
-    buffer_pool_hit_ratio: float = 0.0
+    cache_hit_ratio: Optional[float] = None
+    buffer_pool_hit_ratio: Optional[float] = None
+    cache_hit_ratio_status: Optional[str] = None
+    cache_hit_ratio_note: Optional[str] = None
+    cache_hit_ratio_mode: Optional[str] = None
     lock_waits: int = 0
     deadlocks: int = 0
     
@@ -297,8 +300,11 @@ class TestStreamingCallback:
         disk_iops: float = 0,
         network_in: float = 0,
         network_out: float = 0,
-        cache_hit_ratio: float = 0,
-        buffer_pool_hit_ratio: float = 0,
+        cache_hit_ratio: Optional[float] = None,
+        buffer_pool_hit_ratio: Optional[float] = None,
+        cache_hit_ratio_status: Optional[str] = None,
+        cache_hit_ratio_note: Optional[str] = None,
+        cache_hit_ratio_mode: Optional[str] = None,
         lock_waits: int = 0,
         deadlocks: int = 0,
         db_name: str = "",
@@ -343,6 +349,9 @@ class TestStreamingCallback:
                 network_out=network_out,
                 cache_hit_ratio=cache_hit_ratio,
                 buffer_pool_hit_ratio=buffer_pool_hit_ratio,
+                cache_hit_ratio_status=cache_hit_ratio_status,
+                cache_hit_ratio_note=cache_hit_ratio_note,
+                cache_hit_ratio_mode=cache_hit_ratio_mode,
                 lock_waits=lock_waits,
                 deadlocks=deadlocks,
             )
@@ -365,10 +374,13 @@ class TestStreamingCallback:
         disk_iops: float,
         network_in: float,
         network_out: float,
-        cache_hit_ratio: float,
-        buffer_pool_hit_ratio: float,
-        lock_waits: int,
-        deadlocks: int,
+        cache_hit_ratio: Optional[float],
+        buffer_pool_hit_ratio: Optional[float],
+        cache_hit_ratio_status: Optional[str] = None,
+        cache_hit_ratio_note: Optional[str] = None,
+        cache_hit_ratio_mode: Optional[str] = None,
+        lock_waits: int = 0,
+        deadlocks: int = 0,
     ) -> None:
         """Отправить метрики в WebSocket и сохранить в историю."""
         update = TestMetricsUpdate(
@@ -390,6 +402,9 @@ class TestStreamingCallback:
             network_out=network_out,
             cache_hit_ratio=cache_hit_ratio,
             buffer_pool_hit_ratio=buffer_pool_hit_ratio,
+            cache_hit_ratio_status=cache_hit_ratio_status,
+            cache_hit_ratio_note=cache_hit_ratio_note,
+            cache_hit_ratio_mode=cache_hit_ratio_mode,
             lock_waits=lock_waits,
             deadlocks=deadlocks,
             progress=progress,

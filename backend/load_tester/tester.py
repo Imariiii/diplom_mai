@@ -11,9 +11,11 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import text
 from backend.database.connection import DatabaseConnection
 from backend.database.dialects import get_dialect
+from backend.database.dialects.cache_metrics import merge_running_cache_hit
 from backend.database.state_manager import DatabaseStateManager
 from backend.load_tester.index_manager import IndexManager
 from backend.load_tester.self_check import cross_validate_metrics, verify_littles_law
+from backend.load_tester.sql_workload_classifier import workload_context_from_test
 
 
 class TestCancelledError(Exception):
@@ -44,6 +46,9 @@ class LoadTester:
         self._dbms_metrics_cache: Dict[str, Dict[str, Any]] = {}
         self._dbms_metrics_cache_at: Dict[str, float] = {}
         self._dbms_metrics_cache_ttl: float = 5.0
+        self._measurement_start_counters: Dict[str, Dict[str, Any]] = {}
+        self._measurement_end_counters: Dict[str, Dict[str, Any]] = {}
+        self._workload_context: Dict[str, Any] = {}
         
         psutil.cpu_percent(interval=None)
     
@@ -135,7 +140,16 @@ class LoadTester:
                 db_name = self.db_connection.get_connection_name(db_key)
 
                 system_metrics = await self.get_system_metrics(db_key)
-                dbms_metrics = await self._get_cached_dbms_metrics(db_key)
+                measurement_start = self._measurement_start_counters.get(db_key)
+                dbms_metrics: Dict[str, Any] = {}
+                if measurement_start:
+                    current_counters = await self.get_dbms_metric_counters(db_key)
+                    merge_running_cache_hit(
+                        dbms_metrics,
+                        measurement_start,
+                        current_counters,
+                        workload_context=self._workload_context,
+                    )
 
                 await self._metrics_callback.on_metrics(
                     db_key=db_key,
@@ -151,8 +165,11 @@ class LoadTester:
                     disk_iops=system_metrics.get('disk_iops', 0),
                     network_in=system_metrics.get('network_in_mbps', 0),
                     network_out=system_metrics.get('network_out_mbps', 0),
-                    cache_hit_ratio=dbms_metrics.get('cache_hit_ratio', 0),
-                    buffer_pool_hit_ratio=dbms_metrics.get('buffer_pool_hit_ratio', 0),
+                    cache_hit_ratio=dbms_metrics.get('cache_hit_ratio'),
+                    buffer_pool_hit_ratio=dbms_metrics.get('buffer_pool_hit_ratio'),
+                    cache_hit_ratio_status=dbms_metrics.get('cache_hit_ratio_status'),
+                    cache_hit_ratio_note=dbms_metrics.get('cache_hit_ratio_note'),
+                    cache_hit_ratio_mode=dbms_metrics.get('cache_hit_ratio_mode'),
                     lock_waits=dbms_metrics.get('lock_waits', 0),
                     deadlocks=dbms_metrics.get('deadlocks', 0),
                     sample_timestamp=sample_timestamp,
@@ -546,6 +563,7 @@ class LoadTester:
             "sql": custom_sql,
             "description": "Пользовательский SQL-запрос",
         }
+        self.set_workload_context(**workload_context_from_test(custom_sql=custom_sql))
 
         total_dbs = len(db_types)
         if self._metrics_callback:
@@ -555,26 +573,28 @@ class LoadTester:
             if self._metrics_callback:
                 self._metrics_callback.set_progress(max(0.0, min(100.0, value)))
 
-        # Фаза: прогрев (0-8%)
+        # Фаза: прогрев (0-8%) — активная нагрузка тем же SQL, без учёта в итогах
         if warmup_time > 0:
             _set_prog(0.0)
-            print(f"Прогрев системы ({warmup_time} сек)...")
-            await self._emit_status("running", f"Прогрев системы ({warmup_time} сек)...")
-            for db_key in db_types:
-                for _ in range(min(3, iterations)):
-                    self._raise_if_cancel_requested("прогрев")
-                    await self.execute_query(db_key, custom_sql, query_id)
-                    await asyncio.sleep(0.05)
-            remaining = warmup_time
-            while remaining > 0:
+            print(f"Прогрев нагрузкой ({warmup_time} сек), запрос: custom_sql...")
+            await self._emit_status("running", f"Прогрев нагрузкой ({warmup_time} сек)...")
+            warmup_deadline = time.perf_counter() + warmup_time
+            db_round = 0
+            while time.perf_counter() < warmup_deadline:
                 self._raise_if_cancel_requested("прогрев")
-                await self._emit_status(
-                    "running",
-                    f"Прогрев системы, осталось {remaining} с…",
-                )
-                step = min(1, remaining)
-                await asyncio.sleep(step)
-                remaining -= step
+                db_key = db_types[db_round % len(db_types)]
+                db_round += 1
+                try:
+                    await self.execute_query(db_key, custom_sql, query_id)
+                except Exception:
+                    pass
+                remaining = max(0, int(warmup_deadline - time.perf_counter()))
+                if remaining % 2 == 0:
+                    await self._emit_status(
+                        "running",
+                        f"Прогрев нагрузкой, осталось ~{remaining} с…",
+                    )
+                await asyncio.sleep(0.01)
             _set_prog(8.0)
 
         await self._emit_status(
@@ -612,6 +632,7 @@ class LoadTester:
                 print(f"Тестирование {db_key} ({db_idx + 1}/{total_dbs})...")
                 await self._emit_status("running", f"Тестирование: пользовательский SQL ({db_idx + 1}/{total_dbs})")
                 _set_prog(db_prog_start)
+                await self.snapshot_measurement_start(db_key)
 
                 async def _make_query(dk=db_key):
                     return await self.execute_query(dk, custom_sql, query_id)
@@ -625,6 +646,7 @@ class LoadTester:
                     progress_start=db_prog_start,
                     progress_end=db_prog_end,
                 )
+                await self.snapshot_measurement_end(db_key)
                 end_time = time.perf_counter()
                 total_test_time = end_time - start_time
 
@@ -753,18 +775,38 @@ class LoadTester:
         except Exception as e:
             print(f"Ошибка получения метрик СУБД {db_key}: {e}")
 
-        return {
-            'cache_hit_ratio': 0,
-            'buffer_pool_hit_ratio': 0,
-            'lock_waits': 0,
-            'lock_waits_mode': 'current',
-            'deadlocks': 0,
-            'deadlocks_mode': 'current',
-            'active_connections': 0,
-            'table_sizes_mb': {},
-            'index_sizes_mb': {},
-            'total_db_size_mb': 0,
-        }
+        from backend.database.dialects.base import DEFAULT_DBMS_METRICS
+        return dict(DEFAULT_DBMS_METRICS)
+
+    async def snapshot_measurement_start(self, db_key: str) -> None:
+        """Зафиксировать счётчики кэша в начале измеряемой фазы (после прогрева)."""
+        self._measurement_end_counters.pop(db_key, None)
+        self._measurement_start_counters[db_key] = await self.get_dbms_metric_counters(db_key)
+
+    async def snapshot_measurement_end(self, db_key: str) -> None:
+        """Зафиксировать счётчики сразу после workload, до служебных запросов."""
+        self._measurement_end_counters[db_key] = await self.get_dbms_metric_counters(db_key)
+
+    def get_measurement_start_counters(self, db_key: str) -> Dict[str, Any]:
+        """Счётчики на начало измеряемой фазы для db_key."""
+        return dict(self._measurement_start_counters.get(db_key, {}))
+
+    def get_measurement_end_counters(self, db_key: str) -> Dict[str, Any]:
+        """Счётчики на конец измеряемой фазы (снимок сразу после workload)."""
+        return dict(self._measurement_end_counters.get(db_key, {}))
+
+    def set_workload_context(self, **kwargs: Any) -> None:
+        """Контекст нагрузки для hybrid cache evaluator."""
+        self._workload_context = dict(kwargs)
+
+    def get_workload_context(self) -> Dict[str, Any]:
+        return dict(self._workload_context)
+
+    def reset_measurement_counters(self) -> None:
+        """Сбросить сохранённые счётчики измерения."""
+        self._measurement_start_counters.clear()
+        self._measurement_end_counters.clear()
+        self._workload_context.clear()
 
     async def get_dbms_metric_counters(self, db_key: str) -> Dict:
         """Получить накопительные счётчики СУБД для расчёта delta за прогон."""
@@ -785,15 +827,21 @@ class LoadTester:
         start_counters: Dict[str, Any],
         end_counters: Dict[str, Any],
         runtime_stats: Optional[Dict[str, Any]] = None,
+        workload_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Сформировать финальные внутренние метрики СУБД для отчёта."""
         db_type = self.db_connection.get_dbms_type(db_key)
         dialect = get_dialect(db_type)
+        merged_runtime = dict(runtime_stats or {})
+        if workload_context:
+            merged_runtime["workload_context"] = workload_context
+        elif self._workload_context:
+            merged_runtime["workload_context"] = self._workload_context
         return dialect.build_final_dbms_metrics(
             latest_metrics=latest_metrics,
             start_counters=start_counters,
             end_counters=end_counters,
-            runtime_stats=runtime_stats,
+            runtime_stats=merged_runtime,
         )
     
     async def execute_scenario_query(
@@ -1030,6 +1078,10 @@ class LoadTester:
             for _ in range(weight):
                 weighted_queries.append(query)
 
+        self.set_workload_context(
+            **workload_context_from_test(scenario_queries=sql_queries)
+        )
+
         created_indexes: List[Dict[str, Any]] = []
         index_creation_result = None
         index_drop_result = None
@@ -1096,40 +1148,40 @@ class LoadTester:
 
             await self._prime_random_value_cache(db_key, queries)
 
-            # Фаза: прогрев (8-15% диапазона, если включён)
+            # Фаза: прогрев (8-15% диапазона) — непрерывная нагрузка запросами сценария
             if warmup_time > 0:
-                warmup_iterations = max(1, min(5, max(1, iterations // 10)))
-                print(f"[SCENARIO] Прогрев {conn_name}: {warmup_iterations} итер. + {warmup_time}s пауза...")
+                print(f"[SCENARIO] Прогрев {conn_name}: активная нагрузка {warmup_time}s...")
                 await self._emit_status(
                     "running",
                     f"Прогрев сценария {scenario_name} ({warmup_time} сек)..."
                 )
-                for _ in range(warmup_iterations):
+                warmup_deadline = time.perf_counter() + warmup_time
+                while time.perf_counter() < warmup_deadline:
                     self._raise_if_cancel_requested("прогрев сценария")
                     q = random.choice(weighted_queries)
-                    await self.execute_scenario_query(
-                        db_key,
-                        q['sql_template'],
-                        q.get('params', []),
-                        scenario_name
-                    )
-                    await asyncio.sleep(0.1)
-                remaining = warmup_time
-                while remaining > 0:
-                    self._raise_if_cancel_requested("прогрев сценария")
-                    await self._emit_status(
-                        "running",
-                        f"Прогрев сценария «{scenario_name}», осталось {remaining} с…",
-                    )
-                    step = min(1, remaining)
-                    await asyncio.sleep(step)
-                    remaining -= step
+                    try:
+                        await self.execute_scenario_query(
+                            db_key,
+                            q['sql_template'],
+                            q.get('params', []),
+                            scenario_name,
+                        )
+                    except Exception:
+                        pass
+                    remaining = max(0, int(warmup_deadline - time.perf_counter()))
+                    if remaining % 2 == 0:
+                        await self._emit_status(
+                            "running",
+                            f"Прогрев сценария «{scenario_name}», осталось ~{remaining} с…",
+                        )
+                    await asyncio.sleep(0.01)
                 print(f"[SCENARIO] Прогрев {conn_name} завершён")
                 _set_progress(0.15)
 
             # Фаза: нагрузочное тестирование (15-88% с прогревом, 8-88% без)
             testing_start_pct = 0.15 if warmup_time > 0 else 0.08
             _set_progress(testing_start_pct)
+            await self.snapshot_measurement_start(db_key)
             print(f"[SCENARIO] Запуск нагрузки {conn_name}: {iterations} итераций x {virtual_users} VU...")
             await self._emit_status(
                 "running",
@@ -1156,6 +1208,7 @@ class LoadTester:
                 progress_start=progress_start + _pslice * testing_start_pct,
                 progress_end=progress_start + _pslice * 0.88,
             )
+            await self.snapshot_measurement_end(db_key)
 
             end_time = time.perf_counter()
             total_test_time = end_time - start_time

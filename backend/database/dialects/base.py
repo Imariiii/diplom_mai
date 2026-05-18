@@ -6,10 +6,18 @@ from typing import Any, Dict, List, Optional, Set
 
 from sqlalchemy import text
 
+from backend.database.dialects.cache_metrics import apply_cache_hit_delta_to_metrics
+
 
 DEFAULT_DBMS_METRICS: Dict[str, Any] = {
-    "cache_hit_ratio": 0,
-    "buffer_pool_hit_ratio": 0,
+    "cache_hit_ratio": None,
+    "buffer_pool_hit_ratio": None,
+    "cache_hit_ratio_mode": None,
+    "buffer_pool_hit_ratio_mode": None,
+    "cache_hit_ratio_status": "unavailable",
+    "buffer_pool_hit_ratio_status": "unavailable",
+    "cache_hit_ratio_note": "Метрика кэша ещё не рассчитана.",
+    "buffer_pool_hit_ratio_note": "Метрика кэша ещё не рассчитана.",
     "lock_waits": 0,
     "lock_waits_mode": "current",
     "deadlocks": 0,
@@ -223,6 +231,15 @@ class DbmsDialect(ABC):
             metrics["deadlocks_mode"] = "delta"
         else:
             metrics["deadlocks_mode"] = "current"
+
+        from backend.database.dialects.cache_metrics import apply_hybrid_cache_to_metrics
+
+        workload_context = None
+        if runtime_stats:
+            workload_context = runtime_stats.get("workload_context")
+        apply_hybrid_cache_to_metrics(
+            metrics, start_counters, end_counters, workload_context=workload_context
+        )
 
         return metrics
 

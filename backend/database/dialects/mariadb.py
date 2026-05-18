@@ -75,14 +75,6 @@ class MariaDBDialect(MySQLDialect):
             except Exception:
                 return 0.0
 
-        buffer_pool_reads = await self._get_global_status_value(conn, "Innodb_buffer_pool_reads")
-        buffer_pool_read_requests = await self._get_global_status_value(conn, "Innodb_buffer_pool_read_requests")
-
-        if buffer_pool_read_requests > 0:
-            hit_ratio = (1 - (buffer_pool_reads / buffer_pool_read_requests)) * 100
-            metrics["buffer_pool_hit_ratio"] = max(0.0, min(100.0, hit_ratio))
-            metrics["cache_hit_ratio"] = metrics["buffer_pool_hit_ratio"]
-
         metrics["active_connections"] = int(await _safe_scalar("""
             SELECT COUNT(*) FROM information_schema.PROCESSLIST
         """))
@@ -116,6 +108,12 @@ class MariaDBDialect(MySQLDialect):
     async def collect_dbms_metric_counters(self, conn) -> Dict[str, Any]:
         """Собрать накопительные счётчики MariaDB для финального delta-расчёта."""
         return {
+            "innodb_buffer_pool_reads": int(
+                await self._get_global_status_value(conn, "Innodb_buffer_pool_reads")
+            ),
+            "innodb_buffer_pool_read_requests": int(
+                await self._get_global_status_value(conn, "Innodb_buffer_pool_read_requests")
+            ),
             "lock_waits_total": int(await self._get_global_status_value(conn, "Innodb_row_lock_waits")),
             "deadlocks_total": int(await self._get_global_status_value(conn, "Innodb_deadlocks")),
         }

@@ -327,6 +327,9 @@ class ResourceMetrics:
     disk_iops: Optional[float] = None
     cache_hit_ratio: Optional[float] = None
     buffer_pool_hit_ratio: Optional[float] = None
+    cache_hit_ratio_status: Optional[str] = None
+    cache_hit_ratio_note: Optional[str] = None
+    cache_hit_ratio_mode: Optional[str] = None
     lock_waits: Optional[int] = None
     deadlocks: Optional[int] = None
 

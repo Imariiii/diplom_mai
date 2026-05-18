@@ -95,8 +95,11 @@ export interface TransactionMetrics {
 
 // Внутренние метрики СУБД
 export interface DBMSInternalMetrics {
-  cacheHitRatio: number         // Коэффициент попаданий в кэш (%)
-  bufferPoolHitRatio: number    // Коэффициент попаданий в буферный пул (%)
+  cacheHitRatio: number | null  // Доля попаданий в кэш за прогон (%), null = Н/Д
+  bufferPoolHitRatio?: number | null
+  cacheHitRatioStatus?: "ok" | "no_activity" | "invalid_counter" | "unavailable" | "error"
+  cacheHitRatioNote?: string
+  cacheHitRatioMode?: "delta" | string
   lockWaits: number             // Количество ожиданий блокировок
   lockWaitsMode?: "current" | "delta" | "sampled_max"
   deadlocks: number             // Количество дедлоков
@@ -140,8 +143,11 @@ export interface TimeSeriesPoint {
   networkOut: number
   
   // Внутренние метрики СУБД
-  cacheHitRatio: number
-  bufferPoolHitRatio: number
+  cacheHitRatio?: number | null
+  bufferPoolHitRatio?: number | null
+  cacheHitRatioStatus?: "ok" | "no_activity" | "invalid_counter" | "unavailable" | "error"
+  cacheHitRatioNote?: string
+  cacheHitRatioMode?: string
   lockWaits: number
   deadlocks: number
 }

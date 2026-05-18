@@ -18,6 +18,7 @@ import { DatabaseMetricsTab } from "./dashboards/database-metrics-tab"
 import { SystemMetricsTab } from "./dashboards/system-metrics-tab"
 import { TransactionMetricsTab } from "./dashboards/transaction-metrics-tab"
 import { DbmsMetricsTab } from "./dashboards/dbms-metrics-tab"
+import { mapRawDbmsCacheFields } from "@/lib/dbms-cache-metrics"
 import {
   buildChartDataFromTimeSeries,
   CHART_TIMELINE_AXIS_TITLE,
@@ -180,9 +181,14 @@ export function DashboardsPage() {
                       errorCount: bucket.failed,
                       errorRate: totalTransactions > 0 ? (bucket.failed / totalTransactions) * 100 : 0,
                     },
-                    dbmsMetrics: dbmsMetricsData ? {
-                      cacheHitRatio: dbmsMetricsData.cache_hit_ratio || 0,
-                      bufferPoolHitRatio: dbmsMetricsData.buffer_pool_hit_ratio || 0,
+                    dbmsMetrics: dbmsMetricsData ? (() => {
+                      const cache = mapRawDbmsCacheFields(dbmsMetricsData as Record<string, unknown>)
+                      return {
+                      cacheHitRatio: cache.cacheHitRatio,
+                      bufferPoolHitRatio: cache.bufferPoolHitRatio ?? cache.cacheHitRatio,
+                      cacheHitRatioStatus: cache.cacheHitRatioStatus,
+                      cacheHitRatioNote: cache.cacheHitRatioNote,
+                      cacheHitRatioMode: cache.cacheHitRatioMode,
                       lockWaits: dbmsMetricsData.lock_waits || 0,
                       lockWaitsMode: dbmsMetricsData.lock_waits_mode,
                       deadlocks: dbmsMetricsData.deadlocks || 0,
@@ -190,7 +196,8 @@ export function DashboardsPage() {
                       tableSizesMB: dbmsMetricsData.table_sizes_mb || {},
                       indexSizesMB: dbmsMetricsData.index_sizes_mb || {},
                       totalDBSizeMB: dbmsMetricsData.total_db_size_mb || 0,
-                    } : undefined,
+                    }
+                    })() : undefined,
                     transactionMetrics: {
                       totalTransactions,
                       successfulTransactions: bucket.successful,

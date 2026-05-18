@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { apiClient } from "@/lib/api"
 import type { HistoryTestResult, HistoryTestRun } from "@/lib/api"
 import { DB_NAMES } from "@/lib/chart-colors"
+import { mapRawDbmsCacheFields } from "@/lib/dbms-cache-metrics"
 import { getVisibleSelfCheckWarnings } from "@/lib/self-check"
 import type { TestResult, TimeSeriesPoint } from "@/lib/types"
 import {
@@ -113,9 +114,13 @@ function mapSystemMetrics(raw: Record<string, number> | null | undefined): Dashb
 
 function mapDbmsMetrics(raw: Record<string, unknown> | null | undefined): DashboardResult["dbmsMetrics"] {
   if (!raw) return undefined
+  const cache = mapRawDbmsCacheFields(raw)
   return {
-    cacheHitRatio: Number(raw.cache_hit_ratio) || 0,
-    bufferPoolHitRatio: Number(raw.buffer_pool_hit_ratio) || 0,
+    cacheHitRatio: cache.cacheHitRatio,
+    bufferPoolHitRatio: cache.bufferPoolHitRatio ?? cache.cacheHitRatio,
+    cacheHitRatioStatus: cache.cacheHitRatioStatus,
+    cacheHitRatioNote: cache.cacheHitRatioNote,
+    cacheHitRatioMode: cache.cacheHitRatioMode,
     lockWaits: Number(raw.lock_waits) || 0,
     lockWaitsMode: raw.lock_waits_mode as "current" | "delta" | "sampled_max" | undefined,
     deadlocks: Number(raw.deadlocks) || 0,
@@ -197,7 +202,7 @@ function aggregateHistoryResults(results: HistoryTestResult[]): {
     if (row.system_metrics && !bucket.system_metrics) {
       bucket.system_metrics = row.system_metrics
     }
-    if (row.dbms_metrics && !bucket.dbms_metrics) {
+    if (row.dbms_metrics) {
       bucket.dbms_metrics = row.dbms_metrics as Record<string, unknown>
     }
     const dtype = (m.dbms_type as string) || row.db_type

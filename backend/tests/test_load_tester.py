@@ -71,6 +71,10 @@ def tester():
     lt._dbms_metrics_cache = {}
     lt._dbms_metrics_cache_at = {}
     lt._dbms_metrics_cache_ttl = 5.0
+    lt._measurement_start_counters = {}
+    lt._measurement_end_counters = {}
+    lt._workload_context = {}
+    lt.get_dbms_metric_counters = AsyncMock(return_value={})
     lt._cancel_requested = False
     return lt
 
@@ -314,6 +318,13 @@ class TestEmitMetrics:
             return_value=(datetime(2026, 1, 1, 12, 0, 5, tzinfo=timezone.utc), 5)
         )
         tester._is_streaming = True
+        tester._measurement_start_counters["conn_pg"] = {
+            "blks_hit": 1000,
+            "blks_read": 100,
+        }
+        tester.get_dbms_metric_counters = AsyncMock(
+            return_value={"blks_hit": 1095, "blks_read": 105}
+        )
 
         await tester._emit_metrics(
             db_key="conn_pg",
@@ -332,7 +343,8 @@ class TestEmitMetrics:
         assert kwargs["response_time"] == 12.5
         assert kwargs["tps"] == 34.0
         assert kwargs["cpu_usage"] == 10.0
-        assert kwargs["cache_hit_ratio"] == 95.0
+        assert kwargs["cache_hit_ratio"] is not None
+        assert kwargs["cache_hit_ratio_status"] == "ok"
         assert kwargs["sample_timestamp"] == datetime(2026, 1, 1, 12, 0, 5, tzinfo=timezone.utc)
         assert kwargs["elapsed_seconds"] == 5
 

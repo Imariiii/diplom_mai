@@ -294,19 +294,6 @@ class PostgreSQLDialect(DbmsDialect):
         metrics["index_sizes_mb"] = {}
 
         result = await conn.execute(text("""
-            SELECT
-                CASE WHEN blks_hit + blks_read = 0 THEN 0
-                ELSE round(100.0 * blks_hit / (blks_hit + blks_read), 2)
-                END as cache_hit_ratio
-            FROM pg_stat_database
-            WHERE datname = current_database()
-        """))
-        row = result.fetchone()
-        if row:
-            metrics["cache_hit_ratio"] = float(row[0] or 0)
-            metrics["buffer_pool_hit_ratio"] = float(row[0] or 0)
-
-        result = await conn.execute(text("""
             SELECT count(*)
             FROM pg_stat_activity
             WHERE datname = current_database()
@@ -345,14 +332,32 @@ class PostgreSQLDialect(DbmsDialect):
     async def collect_dbms_metric_counters(self, conn) -> Dict[str, Any]:
         """Собрать накопительные счётчики PostgreSQL для финального delta-расчёта."""
         result = await conn.execute(text("""
-            SELECT deadlocks
+            SELECT blks_hit, blks_read, deadlocks
             FROM pg_stat_database
             WHERE datname = current_database()
         """))
         row = result.fetchone()
-        return {
-            "deadlocks_total": int(row[0] or 0) if row else 0,
+        if not row:
+            return {"deadlocks_total": 0}
+
+        counters: Dict[str, Any] = {
+            "blks_hit": int(row[0] or 0),
+            "blks_read": int(row[1] or 0),
+            "deadlocks_total": int(row[2] or 0),
         }
+
+        statio_result = await conn.execute(text("""
+            SELECT
+                COALESCE(SUM(heap_blks_hit + idx_blks_hit + toast_blks_hit + tidx_blks_hit), 0),
+                COALESCE(SUM(heap_blks_read + idx_blks_read + toast_blks_read + tidx_blks_read), 0)
+            FROM pg_statio_user_tables
+        """))
+        statio_row = statio_result.fetchone()
+        if statio_row:
+            counters["statio_blks_hit"] = int(statio_row[0] or 0)
+            counters["statio_blks_read"] = int(statio_row[1] or 0)
+
+        return counters
 
     async def terminate_other_connections(self, conn, db_name: Optional[str]) -> int:
         result = await conn.execute(text("""

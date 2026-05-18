@@ -261,19 +261,6 @@ class MySQLDialect(DbmsDialect):
             except Exception:
                 return 0.0
 
-        metrics["buffer_pool_hit_ratio"] = await safe_scalar("""
-            SELECT
-                (1 - (Innodb_buffer_pool_reads / NULLIF(Innodb_buffer_pool_read_requests, 0))) * 100
-                as hit_ratio
-            FROM (
-                SELECT
-                    (SELECT VARIABLE_VALUE FROM performance_schema.global_status
-                     WHERE VARIABLE_NAME = 'Innodb_buffer_pool_reads') as Innodb_buffer_pool_reads,
-                    (SELECT VARIABLE_VALUE FROM performance_schema.global_status
-                     WHERE VARIABLE_NAME = 'Innodb_buffer_pool_read_requests') as Innodb_buffer_pool_read_requests
-            ) as stats
-        """)
-        metrics["cache_hit_ratio"] = metrics["buffer_pool_hit_ratio"]
         metrics["active_connections"] = int(await safe_scalar("""
             SELECT COUNT(*) FROM information_schema.PROCESSLIST
         """))
@@ -306,6 +293,12 @@ class MySQLDialect(DbmsDialect):
     async def collect_dbms_metric_counters(self, conn) -> Dict[str, Any]:
         """Собрать накопительные счётчики MySQL для финального delta-расчёта."""
         return {
+            "innodb_buffer_pool_reads": int(
+                await self._get_global_status_value(conn, "Innodb_buffer_pool_reads")
+            ),
+            "innodb_buffer_pool_read_requests": int(
+                await self._get_global_status_value(conn, "Innodb_buffer_pool_read_requests")
+            ),
             "lock_waits_total": int(await self._get_global_status_value(conn, "Innodb_row_lock_waits")),
             "deadlocks_total": int(await self._get_global_status_value(conn, "Innodb_deadlocks")),
         }

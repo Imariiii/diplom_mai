@@ -398,11 +398,21 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                 "Остановка теста: завершаем текущие операции…",
             )
 
-        dbms_metric_start_counters = {}
         for db_key in db_keys:
             streaming_callback.ensure_dbms_runtime_stats(db_key)
-            dbms_metric_start_counters[db_key] = await test_tester.get_dbms_metric_counters(db_key)
-        
+
+        enriched_run = dict(active_tests[test_id].get("config") or {})
+        enriched_run["cache_metric_mode"] = "delta"
+        enriched_run["cache_metric_model"] = "hybrid"
+        enriched_run["measurement_boundary_version"] = 2
+        enriched_run["warmup_mode"] = "active_workload"
+        active_tests[test_id]["config"] = enriched_run
+        if HISTORY_ENABLED and test_repository:
+            try:
+                await test_repository.update_test_run_config(test_id, enriched_run)
+            except Exception as exc:
+                print(f"[HISTORY_DB] ⚠ Не удалось сохранить cache_metric_mode: {exc}")
+
         scenario = request.scenario or "mixed_light"
 
         if scenario == "custom" and request.custom_sql:
@@ -496,17 +506,21 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
 
         system_metrics = {}
         dbms_metrics = {}
+        workload_context = test_tester.get_workload_context()
         for db_key in db_keys:
             try:
                 system_metrics[db_key] = await test_tester.get_system_metrics(db_key)
+                end_counters = test_tester.get_measurement_end_counters(db_key)
+                if not end_counters:
+                    end_counters = await test_tester.get_dbms_metric_counters(db_key)
                 latest_dbms_metrics = await test_tester.get_dbms_metrics(db_key)
-                dbms_metric_end_counters = await test_tester.get_dbms_metric_counters(db_key)
                 dbms_metrics[db_key] = test_tester.build_final_dbms_metrics(
                     db_key=db_key,
                     latest_metrics=latest_dbms_metrics,
-                    start_counters=dbms_metric_start_counters.get(db_key, {}),
-                    end_counters=dbms_metric_end_counters,
+                    start_counters=test_tester.get_measurement_start_counters(db_key),
+                    end_counters=end_counters,
                     runtime_stats=streaming_callback.get_dbms_runtime_stats(db_key),
+                    workload_context=workload_context,
                 )
             except Exception as e:
                 print(f"Ошибка сбора метрик для {db_key}: {e}")

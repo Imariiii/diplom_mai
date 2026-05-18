@@ -24,8 +24,11 @@ interface MetricsMessage {
     disk_iops: number
     network_in: number
     network_out: number
-    cache_hit_ratio: number
-    buffer_pool_hit_ratio: number
+    cache_hit_ratio?: number | null
+    buffer_pool_hit_ratio?: number | null
+    cache_hit_ratio_status?: string
+    cache_hit_ratio_note?: string
+    cache_hit_ratio_mode?: string
     lock_waits: number
     deadlocks: number
     progress: number
@@ -159,8 +162,11 @@ export function useTestWebSocket({
             diskIOps: metricsData.disk_iops,
             networkIn: metricsData.network_in,
             networkOut: metricsData.network_out,
-            cacheHitRatio: metricsData.cache_hit_ratio,
-            bufferPoolHitRatio: metricsData.buffer_pool_hit_ratio,
+            cacheHitRatio: metricsData.cache_hit_ratio ?? null,
+            bufferPoolHitRatio: metricsData.buffer_pool_hit_ratio ?? null,
+            cacheHitRatioStatus: metricsData.cache_hit_ratio_status,
+            cacheHitRatioNote: metricsData.cache_hit_ratio_note,
+            cacheHitRatioMode: metricsData.cache_hit_ratio_mode,
             lockWaits: metricsData.lock_waits,
             deadlocks: metricsData.deadlocks,
           }

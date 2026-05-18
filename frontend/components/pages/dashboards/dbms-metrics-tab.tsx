@@ -3,10 +3,9 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Database } from "lucide-react"
 import { DB_NAMES, getDbColor } from "@/lib/chart-colors"
+import { getCacheHitDisplay, type CacheHitDisplayInput } from "@/lib/dbms-cache-metrics"
 
-interface DbmsMetrics {
-  cacheHitRatio?: number
-  bufferPoolHitRatio?: number
+interface DbmsMetrics extends CacheHitDisplayInput {
   lockWaits?: number
   lockWaitsMode?: "current" | "delta" | "sampled_max"
   deadlocks?: number
@@ -20,9 +19,7 @@ interface TestResult {
   dbmsMetrics?: DbmsMetrics
 }
 
-interface RealtimeDataPoint {
-  cacheHitRatio?: number
-  bufferPoolHitRatio?: number
+interface RealtimeDataPoint extends CacheHitDisplayInput {
   lockWaits?: number
   deadlocks?: number
 }
@@ -41,6 +38,17 @@ export function DbmsMetricsTab({ databases, realtimeData, getResultForDb, getDbT
     if (!points || points.length === 0) return defaultValue
     const value = points[points.length - 1][metric as keyof RealtimeDataPoint]
     return typeof value === "number" ? value.toFixed(1) : defaultValue
+  }
+
+  const resolveCacheDisplay = (dbId: string, dbmsMetrics?: DbmsMetrics) => {
+    if (dbmsMetrics?.cacheHitRatioStatus || dbmsMetrics?.cacheHitRatio !== undefined) {
+      return getCacheHitDisplay(dbmsMetrics)
+    }
+    const points = realtimeData[dbId]
+    if (points && points.length > 0) {
+      return getCacheHitDisplay(points[points.length - 1])
+    }
+    return getCacheHitDisplay({})
   }
 
   const getLockWaitsLabel = (mode?: DbmsMetrics["lockWaitsMode"]) => {
@@ -62,6 +70,7 @@ export function DbmsMetricsTab({ databases, realtimeData, getResultForDb, getDbT
           const dbmsMetrics = result?.dbmsMetrics
           const dbType = getDbType ? getDbType(dbId) : dbId
           const displayName = getDbDisplayName ? getDbDisplayName(dbId) : (DB_NAMES[dbType] || dbType)
+          const cacheDisplay = resolveCacheDisplay(dbId, dbmsMetrics)
 
           return (
             <Card key={dbId} className="bg-card border-border">
@@ -73,17 +82,15 @@ export function DbmsMetricsTab({ databases, realtimeData, getResultForDb, getDbT
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="p-3 bg-muted rounded-lg">
-                    <div className="text-sm text-muted-foreground">Cache Hit Ratio</div>
-                    <div className="text-2xl font-mono text-foreground">
-                      {dbmsMetrics?.cacheHitRatio?.toFixed(1) || getRealtimeDbmsMetric(dbId, "cacheHitRatio")}%
-                    </div>
-                  </div>
-                  <div className="p-3 bg-muted rounded-lg">
-                    <div className="text-sm text-muted-foreground">Buffer Pool Hit</div>
-                    <div className="text-2xl font-mono text-foreground">
-                      {dbmsMetrics?.bufferPoolHitRatio?.toFixed(1) || getRealtimeDbmsMetric(dbId, "bufferPoolHitRatio")}%
-                    </div>
+                  <div className="p-3 bg-muted rounded-lg col-span-2" title={cacheDisplay.title}>
+                    <div className="text-sm text-muted-foreground">Доля попаданий в кэш за прогон</div>
+                    <div className="text-2xl font-mono text-foreground">{cacheDisplay.valueText}</div>
+                    <div className="text-xs text-muted-foreground mt-1">{cacheDisplay.subtitle}</div>
+                    {cacheDisplay.details ? (
+                      <div className="text-xs text-muted-foreground mt-2 whitespace-pre-line border-t border-border pt-2">
+                        {cacheDisplay.details}
+                      </div>
+                    ) : null}
                   </div>
                   <div className="p-3 bg-muted rounded-lg">
                     <div className="text-sm text-muted-foreground">{getLockWaitsLabel(dbmsMetrics?.lockWaitsMode)}</div>
