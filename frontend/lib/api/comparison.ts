@@ -172,7 +172,7 @@ export interface BoxPlotPoint {
 export interface ThroughputSeriesPoint {
   timestamp?: string | null
   throughput?: number | null
-  tps?: number | null
+  attempt_rate?: number | null
   response_time?: number | null
   error_count?: number | null
 }

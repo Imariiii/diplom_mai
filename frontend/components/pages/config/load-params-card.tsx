@@ -216,10 +216,10 @@ export function LoadParamsCard({
 
         <ParamRow
           label="Время прогрева"
-          hint="Период перед сбором метрик — позволяет JIT/кешам «разогреться»"
+          hint="Нагрузка тем же SQL и числом VU перед измерением: пул соединений, планы, buffer pool. Не входит в итоговые метрики."
           value={warmupTime}
           unit=" сек"
-          sliderMax={30}
+          sliderMax={300}
           min={0}
           step={1}
           presets={WARMUP_PRESETS}

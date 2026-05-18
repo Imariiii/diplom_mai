@@ -1,5 +1,11 @@
 """
-Модуль для проведения нагрузочного тестирования
+Модуль для проведения нагрузочного тестирования.
+
+Единица нагрузки — одна SQL-операция (один execute + commit), не многошаговая ACID-транзакция.
+
+Метрики пропускной способности:
+- throughput — успешных операций в секунду (итог прогона, сравнение, окна по успехам);
+- attempt_rate — всех попыток в секунду, успех + ошибка (realtime и итоговая интенсивность).
 """
 import time
 import asyncio
@@ -16,6 +22,7 @@ from backend.database.state_manager import DatabaseStateManager
 from backend.load_tester.index_manager import IndexManager
 from backend.load_tester.self_check import cross_validate_metrics, verify_littles_law
 from backend.load_tester.sql_workload_classifier import workload_context_from_test
+from backend.load_tester.warmup import compute_ramp_hold_seconds
 
 
 class TestCancelledError(Exception):
@@ -49,6 +56,7 @@ class LoadTester:
         self._measurement_start_counters: Dict[str, Dict[str, Any]] = {}
         self._measurement_end_counters: Dict[str, Dict[str, Any]] = {}
         self._workload_context: Dict[str, Any] = {}
+        self._warmup_stats_per_db: Dict[str, Dict[str, Any]] = {}
         
         psutil.cpu_percent(interval=None)
     
@@ -123,12 +131,12 @@ class LoadTester:
         self,
         db_key: str,
         response_time: float,
-        tps: float,
+        attempt_rate: float,
         successful: int,
         failed: int,
         window_end_perf: Optional[float] = None,
     ):
-        """Отправить метрики через callback"""
+        """Отправить realtime-метрики через callback (attempt_rate — попыток/с за окно)."""
         if self._metrics_callback and self._is_streaming:
             try:
                 if window_end_perf is None:
@@ -156,7 +164,7 @@ class LoadTester:
                     db_type=db_type,
                     db_name=db_name,
                     response_time=response_time,
-                    tps=tps,
+                    attempt_rate=attempt_rate,
                     successful=successful,
                     failed=failed,
                     cpu_usage=system_metrics.get('cpu_usage', 0),
@@ -186,6 +194,156 @@ class LoadTester:
             except Exception as e:
                 print(f"Ошибка отправки статуса: {e}")
     
+    def reset_warmup_stats(self) -> None:
+        """Сбросить статистику прогрева по БД."""
+        self._warmup_stats_per_db.clear()
+
+    def get_warmup_stats_per_db(self) -> Dict[str, Dict[str, Any]]:
+        """Статистика прогрева по каждой БД (для metadata прогона)."""
+        return dict(self._warmup_stats_per_db)
+
+    async def run_warmup_phase(
+        self,
+        db_key: str,
+        warmup_time: int,
+        virtual_users: int,
+        query_func: Callable,
+        status_label: str = "прогрев",
+        progress_start: Optional[float] = None,
+        progress_end: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """
+        Прогрев нагрузкой с тем же числом VU, что и измерение; не пишет метрики в отчёт.
+
+        При warmup_time >= 3 с: короткий ramp-up (до 15% времени), затем hold на полной concurrency.
+        """
+        empty_stats = {
+            "warmup_attempted_requests": 0,
+            "warmup_failed_requests": 0,
+            "warmup_successful_requests": 0,
+            "warmup_completed": True,
+        }
+        if warmup_time <= 0:
+            self._warmup_stats_per_db[db_key] = empty_stats
+            return empty_stats
+
+        ramp_seconds, hold_seconds, profile = compute_ramp_hold_seconds(warmup_time)
+        deadline = time.perf_counter() + warmup_time
+        ramp_deadline = time.perf_counter() + ramp_seconds if ramp_seconds > 0 else time.perf_counter()
+
+        attempted = 0
+        failed = 0
+        successful = 0
+        error_samples: List[str] = []
+        stats_lock = asyncio.Lock()
+
+        await self._emit_status(
+            "running",
+            f"Прогрев ({warmup_time} с, {virtual_users} VU"
+            + (f", ramp {ramp_seconds} с" if ramp_seconds else "")
+            + f"): {status_label}…",
+        )
+
+        if virtual_users > 1:
+            await self.db_connection.ensure_pool_size(db_key, virtual_users)
+
+        async def _record_result(result: Dict[str, Any]) -> None:
+            nonlocal attempted, failed, successful
+            async with stats_lock:
+                attempted += 1
+                if result.get("error"):
+                    failed += 1
+                    msg = str(result["error"])
+                    if len(error_samples) < 3 and msg not in error_samples:
+                        error_samples.append(msg[:200])
+                else:
+                    successful += 1
+
+        async def _single_worker_loop(worker_id: int = 0) -> None:
+            while time.perf_counter() < deadline:
+                self._raise_if_cancel_requested(status_label)
+                now = time.perf_counter()
+                if ramp_seconds > 0 and now < ramp_deadline and virtual_users > 1:
+                    elapsed = ramp_seconds - (ramp_deadline - now)
+                    active_vus = max(
+                        1,
+                        min(virtual_users, int(virtual_users * elapsed / ramp_seconds) + 1),
+                    )
+                    if worker_id >= active_vus:
+                        await asyncio.sleep(0.01)
+                        continue
+                try:
+                    result = await query_func()
+                    await _record_result(result)
+                except Exception as exc:
+                    await _record_result({"error": str(exc)})
+                await asyncio.sleep(0.001)
+
+        start_perf = time.perf_counter()
+
+        if virtual_users <= 1:
+            await _single_worker_loop(0)
+        else:
+            tasks = [asyncio.create_task(_single_worker_loop(w)) for w in range(virtual_users)]
+            progress_task = None
+
+            async def _warmup_progress() -> None:
+                while time.perf_counter() < deadline:
+                    if progress_start is not None and progress_end is not None and self._metrics_callback:
+                        frac = min(
+                            1.0,
+                            (time.perf_counter() - start_perf) / max(warmup_time, 0.001),
+                        )
+                        self._metrics_callback.set_progress(
+                            progress_start + frac * (progress_end - progress_start)
+                        )
+                    remaining = max(0, int(deadline - time.perf_counter()))
+                    if remaining % 2 == 0:
+                        await self._emit_status(
+                            "running",
+                            f"Прогрев, осталось ~{remaining} с…",
+                        )
+                    await asyncio.sleep(0.5)
+
+            if progress_start is not None and progress_end is not None:
+                progress_task = asyncio.create_task(_warmup_progress())
+            try:
+                await asyncio.gather(*tasks)
+            finally:
+                if progress_task:
+                    progress_task.cancel()
+                    try:
+                        await progress_task
+                    except asyncio.CancelledError:
+                        pass
+
+        warmup_completed = attempted > 0 and (failed < attempted)
+        if attempted > 0 and failed >= attempted:
+            await self._emit_status(
+                "running",
+                f"Предупреждение: прогрев почти полностью с ошибками ({failed}/{attempted})",
+            )
+        elif attempted == 0:
+            await self._emit_status(
+                "running",
+                "Предупреждение: за время прогрева не выполнено ни одного запроса",
+            )
+
+        stats = {
+            "warmup_attempted_requests": attempted,
+            "warmup_failed_requests": failed,
+            "warmup_successful_requests": successful,
+            "warmup_completed": warmup_completed,
+            "warmup_profile": profile,
+            "warmup_ramp_seconds": ramp_seconds,
+            "warmup_hold_seconds": hold_seconds,
+            "warmup_errors_sample": error_samples,
+        }
+        self._warmup_stats_per_db[db_key] = stats
+        if progress_end is not None and self._metrics_callback:
+            self._metrics_callback.set_progress(progress_end)
+        return stats
+
     async def _run_workers(
         self,
         db_key: str,
@@ -194,6 +352,7 @@ class LoadTester:
         query_func: Callable,
         progress_start: Optional[float] = None,
         progress_end: Optional[float] = None,
+        emit_metrics: bool = True,
     ) -> List[Dict]:
         """
         Запуск виртуальных пользователей для параллельного выполнения запросов.
@@ -238,14 +397,21 @@ class LoadTester:
                     )
 
                 current_time = time.perf_counter()
-                if self._is_streaming and (current_time - last_emit_time) >= self._streaming_interval:
-                    if recent_times:
-                        avg_response_time = statistics.mean(recent_times)
-                        tps = (recent_successful + recent_failed) / (current_time - last_emit_time)
+                if (
+                    emit_metrics
+                    and self._is_streaming
+                    and (current_time - last_emit_time) >= self._streaming_interval
+                ):
+                    interval = current_time - last_emit_time
+                    if interval > 0 and (recent_successful or recent_failed):
+                        avg_response_time = (
+                            statistics.mean(recent_times) if recent_times else 0.0
+                        )
+                        window_attempt_rate = (recent_successful + recent_failed) / interval
                         await self._emit_metrics(
                             db_key=db_key,
                             response_time=avg_response_time,
-                            tps=tps,
+                            attempt_rate=window_attempt_rate,
                             successful=recent_successful,
                             failed=recent_failed,
                             window_end_perf=current_time,
@@ -257,19 +423,21 @@ class LoadTester:
                 
                 await asyncio.sleep(0.01)
 
-            if self._is_streaming:
+            if emit_metrics and self._is_streaming:
                 final_time = time.perf_counter()
                 interval = final_time - last_emit_time
-                if recent_times or recent_successful or recent_failed:
+                if recent_successful or recent_failed:
                     avg_response_time = (
                         statistics.mean(recent_times) if recent_times else 0.0
                     )
                     total_in_window = recent_successful + recent_failed
-                    final_tps = total_in_window / interval if interval > 0 else float(total_in_window)
+                    final_attempt_rate = (
+                        total_in_window / interval if interval > 0 else float(total_in_window)
+                    )
                     await self._emit_metrics(
                         db_key=db_key,
                         response_time=avg_response_time,
-                        tps=final_tps,
+                        attempt_rate=final_attempt_rate,
                         successful=recent_successful,
                         failed=recent_failed,
                         window_end_perf=final_time,
@@ -317,12 +485,21 @@ class LoadTester:
                     async with results_lock:
                         now = time.perf_counter()
                         interval = now - metrics_state['last_emit_time']
-                        if metrics_state['recent_times']:
+                        if metrics_state['recent_successful'] or metrics_state['recent_failed']:
                             snapshot = {
-                                'avg_rt': statistics.mean(metrics_state['recent_times']),
+                                'avg_rt': (
+                                    statistics.mean(metrics_state['recent_times'])
+                                    if metrics_state['recent_times']
+                                    else 0.0
+                                ),
                                 'successful': metrics_state['recent_successful'],
                                 'failed': metrics_state['recent_failed'],
-                                'tps': (metrics_state['recent_successful'] + metrics_state['recent_failed']) / interval if interval > 0 else 0,
+                                'attempt_rate': (
+                                    (metrics_state['recent_successful'] + metrics_state['recent_failed'])
+                                    / interval
+                                    if interval > 0
+                                    else 0.0
+                                ),
                             }
                         completed_now = metrics_state['total_completed']
                         metrics_state['recent_times'] = []
@@ -340,7 +517,7 @@ class LoadTester:
                         await self._emit_metrics(
                             db_key=db_key,
                             response_time=snapshot['avg_rt'],
-                            tps=snapshot['tps'],
+                            attempt_rate=snapshot['attempt_rate'],
                             successful=snapshot['successful'],
                             failed=snapshot['failed'],
                             window_end_perf=now,
@@ -352,7 +529,11 @@ class LoadTester:
         for w in range(virtual_users):
             tasks.append(asyncio.create_task(worker(w)))
         
-        emitter_task = asyncio.create_task(metrics_emitter()) if self._is_streaming else None
+        emitter_task = (
+            asyncio.create_task(metrics_emitter())
+            if emit_metrics and self._is_streaming
+            else None
+        )
         
         await asyncio.gather(*tasks)
         self._raise_if_cancel_requested("выполнение запросов")
@@ -366,14 +547,22 @@ class LoadTester:
 
             now = time.perf_counter()
             interval = now - metrics_state['last_emit_time']
-            if metrics_state['recent_times'] or metrics_state['recent_successful'] or metrics_state['recent_failed']:
-                avg_rt = statistics.mean(metrics_state['recent_times']) if metrics_state['recent_times'] else 0
+            if emit_metrics and (
+                metrics_state['recent_successful'] or metrics_state['recent_failed']
+            ):
+                avg_rt = (
+                    statistics.mean(metrics_state['recent_times'])
+                    if metrics_state['recent_times']
+                    else 0.0
+                )
                 total_completed = metrics_state['recent_successful'] + metrics_state['recent_failed']
-                final_tps = total_completed / interval if interval > 0 else total_completed
+                final_attempt_rate = (
+                    total_completed / interval if interval > 0 else float(total_completed)
+                )
                 await self._emit_metrics(
                     db_key=db_key,
                     response_time=avg_rt,
-                    tps=final_tps,
+                    attempt_rate=final_attempt_rate,
                     successful=metrics_state['recent_successful'],
                     failed=metrics_state['recent_failed'],
                     window_end_perf=now,
@@ -402,11 +591,13 @@ class LoadTester:
         """Сформировать блок самопроверки для рассчитанных метрик."""
         avg_time_ms = stats.get('avg_time_all_ms') or stats.get('avg_time_ms') or 0
         virtual_users = stats.get('virtual_users') or 0
-        throughput = stats.get('completed_tps') or stats.get('throughput') or 0
+        throughput = stats.get('throughput')
+        if throughput is None:
+            throughput = stats.get('tps', 0)
         littles_law = verify_littles_law(
             virtual_users=int(virtual_users),
             avg_latency_sec=float(avg_time_ms) / 1000.0,
-            throughput_rps=float(throughput),
+            throughput_rps=float(throughput or 0),
         )
         warnings = cross_validate_metrics(stats)
         if littles_law.get('warning'):
@@ -459,7 +650,7 @@ class LoadTester:
                 'timestamp': timestamp,
                 'latency_ms': result.get('execution_time_ms'),
                 'throughput': None,
-                'tps': None,
+                'attempt_rate': None,
                 'is_error': result.get('error') is not None,
                 'error_message': result.get('error'),
             })
@@ -480,26 +671,30 @@ class LoadTester:
         db_key: str,
         query_id: Optional[str],
     ) -> List[Dict[str, Any]]:
-        """Aggregate request results into 1-second throughput windows."""
+        """Агрегировать результаты в 1-секундные окна: throughput — успехи/с, attempt_rate — попыток/с."""
         if not timestamps:
             return []
 
-        buckets: Dict[int, List[float]] = {}
+        buckets_success_latencies: Dict[int, List[float]] = {}
+        buckets_attempts: Dict[int, int] = {}
         epoch_base = int(min(timestamps).timestamp())
         for ts, result in zip(timestamps, results):
             bucket = int(ts.timestamp()) - epoch_base
-            latency = result.get('execution_time_ms')
-            if latency is not None:
-                buckets.setdefault(bucket, []).append(latency)
+            buckets_attempts[bucket] = buckets_attempts.get(bucket, 0) + 1
+            if result.get('error') is None:
+                latency = result.get('execution_time_ms')
+                if latency is not None:
+                    buckets_success_latencies.setdefault(bucket, []).append(latency)
 
-        if not buckets:
+        if not buckets_attempts:
             return []
 
         window_samples = []
-        for bucket_offset in sorted(buckets):
-            latencies = buckets[bucket_offset]
-            count = len(latencies)
-            avg_latency = sum(latencies) / count if count else 0
+        for bucket_offset in sorted(buckets_attempts):
+            attempt_count = buckets_attempts[bucket_offset]
+            latencies = buckets_success_latencies.get(bucket_offset, [])
+            success_count = len(latencies)
+            avg_latency = sum(latencies) / success_count if success_count else 0.0
             bucket_ts = datetime.fromtimestamp(
                 epoch_base + bucket_offset, tz=timezone.utc
             )
@@ -510,8 +705,8 @@ class LoadTester:
                 'sample_type': 'throughput_window',
                 'timestamp': bucket_ts,
                 'latency_ms': avg_latency,
-                'throughput': float(count),
-                'tps': float(count),
+                'throughput': float(success_count),
+                'attempt_rate': float(attempt_count),
                 'is_error': False,
                 'error_message': None,
             })
@@ -564,6 +759,7 @@ class LoadTester:
             "description": "Пользовательский SQL-запрос",
         }
         self.set_workload_context(**workload_context_from_test(custom_sql=custom_sql))
+        self.reset_warmup_stats()
 
         total_dbs = len(db_types)
         if self._metrics_callback:
@@ -573,30 +769,6 @@ class LoadTester:
             if self._metrics_callback:
                 self._metrics_callback.set_progress(max(0.0, min(100.0, value)))
 
-        # Фаза: прогрев (0-8%) — активная нагрузка тем же SQL, без учёта в итогах
-        if warmup_time > 0:
-            _set_prog(0.0)
-            print(f"Прогрев нагрузкой ({warmup_time} сек), запрос: custom_sql...")
-            await self._emit_status("running", f"Прогрев нагрузкой ({warmup_time} сек)...")
-            warmup_deadline = time.perf_counter() + warmup_time
-            db_round = 0
-            while time.perf_counter() < warmup_deadline:
-                self._raise_if_cancel_requested("прогрев")
-                db_key = db_types[db_round % len(db_types)]
-                db_round += 1
-                try:
-                    await self.execute_query(db_key, custom_sql, query_id)
-                except Exception:
-                    pass
-                remaining = max(0, int(warmup_deadline - time.perf_counter()))
-                if remaining % 2 == 0:
-                    await self._emit_status(
-                        "running",
-                        f"Прогрев нагрузкой, осталось ~{remaining} с…",
-                    )
-                await asyncio.sleep(0.01)
-            _set_prog(8.0)
-
         await self._emit_status(
             "running",
             "Подготовка баз данных к нагрузочному тесту…",
@@ -605,9 +777,9 @@ class LoadTester:
         results: Dict[str, Dict] = {}
         prepare_infos: Dict[str, Dict] = {}
 
-        # Фаза: подготовка / backup всех БД (0-8% или продолжение после прогрева)
-        prepare_start = 8.0 if warmup_time > 0 else 0.0
-        prepare_end = prepare_start + 8.0
+        # Фаза: подготовка / backup всех БД (0-8%)
+        prepare_start = 0.0
+        prepare_end = 8.0
         for prep_idx, db_key in enumerate(db_types):
             self._raise_if_cancel_requested("подготовка БД")
             print(f"Подготовка {db_key}...")
@@ -632,10 +804,24 @@ class LoadTester:
                 print(f"Тестирование {db_key} ({db_idx + 1}/{total_dbs})...")
                 await self._emit_status("running", f"Тестирование: пользовательский SQL ({db_idx + 1}/{total_dbs})")
                 _set_prog(db_prog_start)
-                await self.snapshot_measurement_start(db_key)
 
                 async def _make_query(dk=db_key):
                     return await self.execute_query(dk, custom_sql, query_id)
+
+                if warmup_time > 0:
+                    warmup_prog_end = db_prog_start + (db_prog_end - db_prog_start) * 0.12
+                    await self.run_warmup_phase(
+                        db_key=db_key,
+                        warmup_time=warmup_time,
+                        virtual_users=virtual_users,
+                        query_func=_make_query,
+                        status_label=f"custom SQL ({db_key})",
+                        progress_start=db_prog_start,
+                        progress_end=warmup_prog_end,
+                    )
+                    db_prog_start = warmup_prog_end
+
+                await self.snapshot_measurement_start(db_key)
 
                 start_time = time.perf_counter()
                 run_results = await self._run_workers(
@@ -681,8 +867,7 @@ class LoadTester:
                         "total_time_ms": sum(execution_times),
                         "std_dev_ms": statistics.stdev(execution_times) if len(execution_times) > 1 else 0,
                         "avg_time_all_ms": statistics.mean(all_execution_times) if all_execution_times else 0,
-                        "completed_tps": len(run_results) / total_test_time if total_test_time > 0 else 0,
-                        "tps": successful / total_test_time if total_test_time > 0 else 0,
+                        "attempt_rate": len(run_results) / total_test_time if total_test_time > 0 else 0,
                         "throughput": successful / total_test_time if total_test_time > 0 else 0,
                         "active_connections": virtual_users,
                         "error_count": failed,
@@ -700,10 +885,9 @@ class LoadTester:
                         "successful": 0,
                         "failed": len(run_results),
                         "error": "Все запросы завершились с ошибкой",
-                        "tps": 0,
                         "throughput": 0,
+                        "attempt_rate": len(run_results) / total_test_time if total_test_time > 0 else 0,
                         "avg_time_all_ms": statistics.mean(all_execution_times) if all_execution_times else 0,
-                        "completed_tps": len(run_results) / total_test_time if total_test_time > 0 else 0,
                         "active_connections": virtual_users,
                         "error_count": len(run_results),
                         "error_rate": 100,
@@ -1148,35 +1332,30 @@ class LoadTester:
 
             await self._prime_random_value_cache(db_key, queries)
 
-            # Фаза: прогрев (8-15% диапазона) — непрерывная нагрузка запросами сценария
-            if warmup_time > 0:
-                print(f"[SCENARIO] Прогрев {conn_name}: активная нагрузка {warmup_time}s...")
-                await self._emit_status(
-                    "running",
-                    f"Прогрев сценария {scenario_name} ({warmup_time} сек)..."
+            async def _warmup_scenario_query():
+                q = random.choice(weighted_queries)
+                return await self.execute_scenario_query(
+                    db_key,
+                    q['sql_template'],
+                    q.get('params', []),
+                    scenario_name,
                 )
-                warmup_deadline = time.perf_counter() + warmup_time
-                while time.perf_counter() < warmup_deadline:
-                    self._raise_if_cancel_requested("прогрев сценария")
-                    q = random.choice(weighted_queries)
-                    try:
-                        await self.execute_scenario_query(
-                            db_key,
-                            q['sql_template'],
-                            q.get('params', []),
-                            scenario_name,
-                        )
-                    except Exception:
-                        pass
-                    remaining = max(0, int(warmup_deadline - time.perf_counter()))
-                    if remaining % 2 == 0:
-                        await self._emit_status(
-                            "running",
-                            f"Прогрев сценария «{scenario_name}», осталось ~{remaining} с…",
-                        )
-                    await asyncio.sleep(0.01)
+
+            # Фаза: прогрев (после prepare/indexes, до measurement)
+            if warmup_time > 0:
+                print(f"[SCENARIO] Прогрев {conn_name}: активная нагрузка {warmup_time}s, VU={virtual_users}...")
+                warmup_end_pct = 0.15
+                await self.run_warmup_phase(
+                    db_key=db_key,
+                    warmup_time=warmup_time,
+                    virtual_users=virtual_users,
+                    query_func=_warmup_scenario_query,
+                    status_label=f"сценарий «{scenario_name}»",
+                    progress_start=progress_start + _pslice * 0.08,
+                    progress_end=progress_start + _pslice * warmup_end_pct,
+                )
                 print(f"[SCENARIO] Прогрев {conn_name} завершён")
-                _set_progress(0.15)
+                _set_progress(warmup_end_pct)
 
             # Фаза: нагрузочное тестирование (15-88% с прогревом, 8-88% без)
             testing_start_pct = 0.15 if warmup_time > 0 else 0.08
@@ -1289,8 +1468,7 @@ class LoadTester:
             'total_time_ms': sum(execution_times) if execution_times else 0,
             'std_dev_ms': statistics.stdev(execution_times) if len(execution_times) > 1 else 0,
             'avg_time_all_ms': statistics.mean(all_execution_times) if all_execution_times else 0,
-            'completed_tps': len(results) / total_test_time if total_test_time > 0 else 0,
-            'tps': successful_count / total_test_time if total_test_time > 0 else 0,
+            'attempt_rate': len(results) / total_test_time if total_test_time > 0 else 0,
             'throughput': successful_count / total_test_time if total_test_time > 0 else 0,
             'error_rate': (failed_count / len(results)) * 100 if len(results) > 0 else 0,
             'restore_info': {
@@ -1315,7 +1493,7 @@ class LoadTester:
         print(
             f"[SCENARIO] ✓ {conn_name}: успешно={successful_count}, ошиб.={failed_count}, "
             f"avg={stats['avg_time_ms']:.1f}ms, p95={stats['p95_time_ms']:.1f}ms, "
-            f"TPS={stats['tps']:.1f}"
+            f"throughput={stats['throughput']:.1f} req/s"
         )
         return stats
 
@@ -1343,6 +1521,7 @@ class LoadTester:
         if self._metrics_callback:
             await self._metrics_callback.on_test_start()
 
+        self.reset_warmup_stats()
         n_dbs = len(db_types)
 
         # Запуск тестов для каждой БД с фазовым прогрессом
@@ -1380,10 +1559,10 @@ class LoadTester:
             failed = stats.get('failed', 0)
             total = successful + failed
             avg_ms = stats.get('avg_time_ms', 0)
-            tps = stats.get('tps', 0)
+            throughput = stats.get('throughput', stats.get('tps', 0))
             print(
                 f"[TEST] ✓ {conn_name}: {successful}/{total} успешно, "
-                f"avg={avg_ms:.1f}ms, TPS={tps:.1f}"
+                f"avg={avg_ms:.1f}ms, throughput={throughput:.1f} req/s"
             )
 
             all_results.append({

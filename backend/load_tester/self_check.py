@@ -118,11 +118,16 @@ def cross_validate_metrics(stats: Dict[str, Any]) -> List[str]:
         warnings.append("std_dev_ms не может быть отрицательным")
 
     throughput = _optional_float(stats, "throughput")
+    if throughput is None:
+        throughput = _optional_float(stats, "tps")
     if successful > 0 and throughput is not None and throughput <= 0:
         warnings.append("throughput должен быть положительным при наличии успешных запросов")
 
-    tps = _optional_float(stats, "tps")
-    if successful > 0 and tps is not None and tps <= 0:
-        warnings.append("tps должен быть положительным при наличии успешных запросов")
+    attempt_rate = _optional_float(stats, "attempt_rate")
+    if attempt_rate is None:
+        attempt_rate = _optional_float(stats, "completed_tps")
+    actual_total = successful + failed
+    if actual_total > 0 and attempt_rate is not None and attempt_rate <= 0:
+        warnings.append("attempt_rate должен быть положительным при наличии попыток")
 
     return warnings

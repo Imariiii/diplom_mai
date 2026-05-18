@@ -19,7 +19,11 @@ import {
   CHART_TIMELINE_AXIS_TITLE,
   type ChartTimelineMode,
 } from "@/lib/time-series-chart-data"
-import { ChartTimelineModeToggle } from "./dashboards/shared/chart-timeline-mode-toggle"
+import {
+  pickAggregateAttemptRate,
+  pickAggregateThroughput,
+  timeSeriesAttemptRate,
+} from "@/lib/throughput-metrics"
 import { DatabaseMetricsTab } from "./dashboards/database-metrics-tab"
 import { SystemMetricsTab } from "./dashboards/system-metrics-tab"
 import { TransactionMetricsTab } from "./dashboards/transaction-metrics-tab"
@@ -57,8 +61,8 @@ type DashboardResult = {
     p99ResponseTime: number
     minResponseTime: number
     maxResponseTime: number
-    tps: number
     throughput: number
+    attemptRate?: number
     activeConnections: number
     errorCount: number
     errorRate: number
@@ -143,8 +147,8 @@ function aggregateHistoryResults(results: HistoryTestResult[]): {
     p99Times: number[]
     minTimes: number[]
     maxTimes: number[]
-    tpsValues: number[]
     throughputValues: number[]
+    attemptRateValues: number[]
     activeConnections: number[]
     successful: number
     failed: number
@@ -171,8 +175,8 @@ function aggregateHistoryResults(results: HistoryTestResult[]): {
         p99Times: [],
         minTimes: [],
         maxTimes: [],
-        tpsValues: [],
         throughputValues: [],
+        attemptRateValues: [],
         activeConnections: [],
         successful: 0,
         failed: 0,
@@ -188,8 +192,10 @@ function aggregateHistoryResults(results: HistoryTestResult[]): {
     if (typeof m.p99_time_ms === "number") bucket.p99Times.push(m.p99_time_ms)
     if (typeof m.min_time_ms === "number") bucket.minTimes.push(m.min_time_ms)
     if (typeof m.max_time_ms === "number") bucket.maxTimes.push(m.max_time_ms)
-    if (typeof m.tps === "number") bucket.tpsValues.push(m.tps)
-    if (typeof m.throughput === "number") bucket.throughputValues.push(m.throughput)
+    const tp = pickAggregateThroughput(m)
+    if (tp !== undefined) bucket.throughputValues.push(tp)
+    const ar = pickAggregateAttemptRate(m)
+    if (ar !== undefined) bucket.attemptRateValues.push(ar)
     if (typeof m.active_connections === "number") bucket.activeConnections.push(m.active_connections)
     bucket.successful += m.successful || 0
     bucket.failed += m.failed || 0
@@ -230,8 +236,10 @@ function aggregateHistoryResults(results: HistoryTestResult[]): {
         p99ResponseTime: average(bucket.p99Times),
         minResponseTime: bucket.minTimes.length ? Math.min(...bucket.minTimes) : 0,
         maxResponseTime: bucket.maxTimes.length ? Math.max(...bucket.maxTimes) : 0,
-        tps: average(bucket.tpsValues),
         throughput: average(bucket.throughputValues),
+        attemptRate: bucket.attemptRateValues.length
+          ? average(bucket.attemptRateValues)
+          : undefined,
         activeConnections: bucket.activeConnections.length
           ? Math.round(average(bucket.activeConnections))
           : 0,
@@ -256,8 +264,7 @@ function rawHistoryPointToTimeSeries(p: HistoryTsPoint): TimeSeriesPoint {
   return {
     timestamp: new Date(p.timestamp).getTime(),
     responseTime: p.response_time ?? 0,
-    throughput: p.throughput ?? 0,
-    tps: p.tps ?? 0,
+    attemptRate: timeSeriesAttemptRate(p),
     activeConnections: p.active_connections ?? 0,
     errorCount: p.error_count ?? 0,
     cpuUsage: p.cpu_usage ?? 0,
@@ -370,8 +377,8 @@ export function HistoryTestDashboard({
         p99ResponseTime: r.metrics.p99ResponseTime,
         minResponseTime: r.metrics.minResponseTime,
         maxResponseTime: r.metrics.maxResponseTime,
-        tps: r.metrics.tps,
         throughput: r.metrics.throughput,
+        attemptRate: r.metrics.attemptRate,
         activeConnections: r.metrics.activeConnections,
         errorCount: r.metrics.errorCount,
         errorRate: r.metrics.errorRate,
@@ -417,12 +424,6 @@ export function HistoryTestDashboard({
 
   return (
     <Tabs defaultValue="database" className="space-y-4">
-      {chartDatabases.length > 1 && (
-        <ChartTimelineModeToggle
-          value={chartTimelineMode}
-          onChange={setChartTimelineMode}
-        />
-      )}
       <TabsList className="bg-muted">
         <TabsTrigger value="database" className="text-foreground data-[state=active]:text-foreground">
           <Database className="h-4 w-4 mr-2" />
@@ -457,6 +458,8 @@ export function HistoryTestDashboard({
           virtualUsers={virtualUsers}
           showCharts={isTestFinished}
           chartXAxisTitle={chartXAxisTitle}
+          chartTimelineMode={chartTimelineMode}
+          onChartTimelineModeChange={setChartTimelineMode}
         />
       </TabsContent>
 
@@ -468,6 +471,8 @@ export function HistoryTestDashboard({
             getDbType={getDbType}
             getDbDisplayName={getDbDisplayName}
             chartXAxisTitle={chartXAxisTitle}
+            chartTimelineMode={chartTimelineMode}
+            onChartTimelineModeChange={setChartTimelineMode}
           />
         </TabsContent>
       )}

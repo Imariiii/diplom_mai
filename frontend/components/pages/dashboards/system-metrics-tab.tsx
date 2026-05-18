@@ -1,7 +1,9 @@
 "use client"
 
-import { Cpu, HardDrive, Zap } from "lucide-react"
+import { Cpu, HardDrive } from "lucide-react"
 import { DB_NAMES, getDbColor } from "@/lib/chart-colors"
+import type { ChartTimelineMode } from "@/lib/time-series-chart-data"
+import { ChartTimelineModeToggle } from "./shared/chart-timeline-mode-toggle"
 import { TimeSeriesChart } from "./shared/time-series-chart"
 
 interface SystemMetricsTabProps {
@@ -10,9 +12,11 @@ interface SystemMetricsTabProps {
   getDbType?: (dbKey: string) => string
   getDbDisplayName?: (dbKey: string) => string
   chartXAxisTitle?: string
+  chartTimelineMode?: ChartTimelineMode
+  onChartTimelineModeChange?: (mode: ChartTimelineMode) => void
 }
 
-export function SystemMetricsTab({ databases, chartData, getDbType, getDbDisplayName, chartXAxisTitle }: SystemMetricsTabProps) {
+export function SystemMetricsTab({ databases, chartData, getDbType, getDbDisplayName, chartXAxisTitle, chartTimelineMode, onChartTimelineModeChange }: SystemMetricsTabProps) {
   const resolveDbColor = (dbId: string) => {
     if (getDbType) {
       return getDbColor(getDbType(dbId))
@@ -26,6 +30,12 @@ export function SystemMetricsTab({ databases, chartData, getDbType, getDbDisplay
 
   return (
     <div className="space-y-6">
+      {databases.length > 1 && chartTimelineMode && onChartTimelineModeChange && (
+        <ChartTimelineModeToggle
+          value={chartTimelineMode}
+          onChange={onChartTimelineModeChange}
+        />
+      )}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <TimeSeriesChart
           title="Загрузка CPU (%)"
@@ -63,19 +73,6 @@ export function SystemMetricsTab({ databases, chartData, getDbType, getDbDisplay
           dbNames={DB_NAMES}
           getDbColor={resolveDbColor}
           metricKey="diskIO"
-          chartType="area"
-          customDbNames={customDbNames}
-          getDbType={getDbType}
-          xAxisTitle={chartXAxisTitle}
-        />
-        <TimeSeriesChart
-          title="Пропускная способность (req/s)"
-          icon={<Zap className="h-5 w-5 text-primary" />}
-          data={chartData}
-          databases={databases}
-          dbNames={DB_NAMES}
-          getDbColor={resolveDbColor}
-          metricKey="throughput"
           chartType="area"
           customDbNames={customDbNames}
           getDbType={getDbType}

@@ -12,6 +12,7 @@ from backend.core.summary_utils import sanitize_test_summary
 from backend.database.scenario_bundle_resolver import ScenarioBundleResolver
 from backend.database.scenario_bundle_validator import ScenarioBundleValidator
 from backend.load_tester.tester import LoadTester, TestCancelledError
+from backend.load_tester.warmup import build_warmup_metadata, merge_warmup_run_stats
 from backend.websocket_manager import manager, TestStreamingCallback, TestStatusUpdate
 
 router = APIRouter(prefix="/test", tags=["test"])
@@ -405,7 +406,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         enriched_run["cache_metric_mode"] = "delta"
         enriched_run["cache_metric_model"] = "hybrid"
         enriched_run["measurement_boundary_version"] = 2
-        enriched_run["warmup_mode"] = "active_workload"
+        enriched_run.update(build_warmup_metadata(request.warmup_time))
         active_tests[test_id]["config"] = enriched_run
         if HISTORY_ENABLED and test_repository:
             try:
@@ -498,6 +499,18 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
             active_tests[test_id]["finished_at"] = _now_utc()
             await streaming_callback.on_test_error(error_msg)
             return
+
+        warmup_stats = test_tester.get_warmup_stats_per_db()
+        enriched_after_run = merge_warmup_run_stats(
+            dict(active_tests[test_id].get("config") or {}),
+            warmup_stats,
+        )
+        active_tests[test_id]["config"] = enriched_after_run
+        if HISTORY_ENABLED and test_repository:
+            try:
+                await test_repository.update_test_run_config(test_id, enriched_after_run)
+            except Exception as exc:
+                print(f"[HISTORY_DB] ⚠ Не удалось сохранить warmup metadata: {exc}")
 
         await streaming_callback.on_status_change(
             "running",

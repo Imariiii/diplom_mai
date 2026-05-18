@@ -144,14 +144,15 @@ class TestThroughputSamplePriority:
         )
         assert svc._extract_throughput_values(samples) == [100.0, 120.0]
 
-    def test_extract_falls_back_to_realtime(self):
+    def test_extract_ignores_realtime_without_batch_windows(self):
+        """Realtime-сэмплы несут attempt_rate; сравнение throughput — только throughput_window."""
         svc = self._service()
         samples = _make_throughput_samples(
             "conn_pg",
             batch_values=[],
             realtime_values=[80.0, 82.0, 85.0],
         )
-        assert svc._extract_throughput_values(samples) == [80.0, 82.0, 85.0]
+        assert svc._extract_throughput_values(samples) == []
 
     @pytest.mark.asyncio
     async def test_build_series_from_metric_samples_uses_priority_source(self):
@@ -491,3 +492,18 @@ class TestSeriesAnalyze:
         for db_key, summary in result.per_db.items():
             assert summary.db_key == db_key
             assert summary.degradation is not None
+
+    @pytest.mark.asyncio
+    async def test_comparability_flags_different_warmup_profiles(self, mock_repo):
+        id1, id2 = uuid.uuid4(), uuid.uuid4()
+        t1 = _make_test_data(id1, "A", db_keys=["conn_pg"])
+        t2 = _make_test_data(id2, "B", db_keys=["conn_pg"])
+        t1["config"]["warmup_profile"] = "steady"
+        t2["config"]["warmup_profile"] = "ramp_then_hold"
+        test_data = {str(id1): t1, str(id2): t2}
+        mock_repo.get_test_run_with_results = AsyncMock(side_effect=lambda tid: test_data.get(tid))
+        mock_repo.get_metric_samples = AsyncMock(return_value=[])
+
+        svc = ComparisonService(repository=mock_repo)
+        report = svc._build_comparability_report([t1, t2])
+        assert any("профил" in r.lower() for r in report.reasons)

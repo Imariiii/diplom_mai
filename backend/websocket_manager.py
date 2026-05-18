@@ -18,10 +18,9 @@ class TestMetricsUpdate:
     db_name: str = ""  # Имя подключения для отображения в UI
     timestamp: str = ""
     
-    # Метрики производительности
+    # Метрики производительности (realtime: attempt_rate — попыток SQL/с за окно)
     response_time: float = 0.0
-    tps: float = 0.0
-    throughput: float = 0.0
+    attempt_rate: float = 0.0
     active_connections: int = 0
     error_count: int = 0
     
@@ -291,7 +290,7 @@ class TestStreamingCallback:
         db_key: str,
         db_type: str,
         response_time: float,
-        tps: float,
+        attempt_rate: float,
         successful: int,
         failed: int,
         cpu_usage: float = 0,
@@ -338,7 +337,7 @@ class TestStreamingCallback:
                 elapsed=elapsed,
                 progress=progress,
                 response_time=response_time,
-                tps=tps,
+                attempt_rate=attempt_rate,
                 successful=successful,
                 failed=failed,
                 cpu_usage=cpu_usage,
@@ -365,7 +364,7 @@ class TestStreamingCallback:
         elapsed: int,
         progress: float,
         response_time: float,
-        tps: float,
+        attempt_rate: float,
         successful: int,
         failed: int,
         cpu_usage: float,
@@ -390,8 +389,7 @@ class TestStreamingCallback:
             db_name=db_name or db_type,
             timestamp=now.isoformat(),
             response_time=response_time,
-            tps=tps,
-            throughput=tps,
+            attempt_rate=attempt_rate,
             active_connections=successful + failed,
             error_count=failed,
             cpu_usage=cpu_usage,
@@ -426,8 +424,7 @@ class TestStreamingCallback:
                     connection_key=db_key,
                     timestamp=now,
                     response_time=response_time,
-                    tps=tps,
-                    throughput=tps,
+                    attempt_rate=attempt_rate,
                     active_connections=successful + failed,
                     error_count=failed,
                     cpu_usage=cpu_usage,
@@ -445,8 +442,8 @@ class TestStreamingCallback:
                     'sample_type': 'throughput_realtime',
                     'timestamp': now,
                     'latency_ms': response_time,
-                    'throughput': tps,
-                    'tps': tps,
+                    'throughput': None,
+                    'attempt_rate': attempt_rate,
                     'is_error': failed > 0,
                     'error_message': None,
                 })

@@ -24,8 +24,10 @@ import {
   CHART_TIMELINE_AXIS_TITLE,
   type ChartTimelineMode,
 } from "@/lib/time-series-chart-data"
-import { ChartTimelineModeToggle } from "./dashboards/shared/chart-timeline-mode-toggle"
-
+import {
+  pickAggregateAttemptRate,
+  pickAggregateThroughput,
+} from "@/lib/throughput-metrics"
 export function DashboardsPage() {
   const { currentTest, realtimeData, testConfig, setCurrentTest, addTestToHistory, clearRealtimeData, connectionNames, setConnectionNames, connectionDbTypes, setConnectionDbTypes, setCurrentPage, setComparisonSelection } = useAppStore()
   const [statusMessage, setStatusMessage] = useState<string>("")
@@ -79,8 +81,8 @@ export function DashboardsPage() {
                   p99Times: number[]
                   minTimes: number[]
                   maxTimes: number[]
-                  tpsValues: number[]
                   throughputValues: number[]
+                  attemptRateValues: number[]
                   activeConnections: number[]
                   successful: number
                   failed: number
@@ -97,7 +99,7 @@ export function DashboardsPage() {
                       if (!aggregateByDb[dbKey]) {
                         aggregateByDb[dbKey] = {
                           avgTimes: [], p50Times: [], p95Times: [], p99Times: [],
-                          minTimes: [], maxTimes: [], tpsValues: [], throughputValues: [],
+                          minTimes: [], maxTimes: [], throughputValues: [], attemptRateValues: [],
                           activeConnections: [], successful: 0, failed: 0, selfCheckWarnings: [],
                         }
                       }
@@ -108,8 +110,10 @@ export function DashboardsPage() {
                       if (typeof stats.p99_time_ms === "number") bucket.p99Times.push(stats.p99_time_ms)
                       if (typeof stats.min_time_ms === "number") bucket.minTimes.push(stats.min_time_ms)
                       if (typeof stats.max_time_ms === "number") bucket.maxTimes.push(stats.max_time_ms)
-                      if (typeof stats.tps === "number") bucket.tpsValues.push(stats.tps)
-                      if (typeof stats.throughput === "number") bucket.throughputValues.push(stats.throughput)
+                      const tp = pickAggregateThroughput(stats)
+                      if (tp !== undefined) bucket.throughputValues.push(tp)
+                      const ar = pickAggregateAttemptRate(stats)
+                      if (ar !== undefined) bucket.attemptRateValues.push(ar)
                       if (typeof stats.active_connections === "number") bucket.activeConnections.push(stats.active_connections)
                       bucket.successful += stats.successful || 0
                       bucket.failed += stats.failed || 0
@@ -126,7 +130,7 @@ export function DashboardsPage() {
                     if (!aggregateByDb[dbKey]) {
                       aggregateByDb[dbKey] = {
                         avgTimes: [], p50Times: [], p95Times: [], p99Times: [],
-                        minTimes: [], maxTimes: [], tpsValues: [], throughputValues: [],
+                        minTimes: [], maxTimes: [], throughputValues: [], attemptRateValues: [],
                           activeConnections: [], successful: 0, failed: 0, selfCheckWarnings: [],
                       }
                     }
@@ -137,8 +141,10 @@ export function DashboardsPage() {
                     if (typeof stats.p99_time_ms === "number") bucket.p99Times.push(stats.p99_time_ms)
                     if (typeof stats.min_time_ms === "number") bucket.minTimes.push(stats.min_time_ms)
                     if (typeof stats.max_time_ms === "number") bucket.maxTimes.push(stats.max_time_ms)
-                    if (typeof stats.tps === "number") bucket.tpsValues.push(stats.tps)
-                    if (typeof stats.throughput === "number") bucket.throughputValues.push(stats.throughput)
+                    const tpRow = pickAggregateThroughput(stats)
+                    if (tpRow !== undefined) bucket.throughputValues.push(tpRow)
+                    const arRow = pickAggregateAttemptRate(stats)
+                    if (arRow !== undefined) bucket.attemptRateValues.push(arRow)
                     if (typeof stats.active_connections === "number") bucket.activeConnections.push(stats.active_connections)
                     bucket.successful += stats.successful || 0
                     bucket.failed += stats.failed || 0
@@ -173,8 +179,10 @@ export function DashboardsPage() {
                       p99ResponseTime: average(bucket.p99Times),
                       minResponseTime: bucket.minTimes.length ? Math.min(...bucket.minTimes) : 0,
                       maxResponseTime: bucket.maxTimes.length ? Math.max(...bucket.maxTimes) : 0,
-                      tps: average(bucket.tpsValues),
                       throughput: average(bucket.throughputValues),
+                      attemptRate: bucket.attemptRateValues.length
+                        ? average(bucket.attemptRateValues)
+                        : undefined,
                       activeConnections: bucket.activeConnections.length
                         ? Math.round(average(bucket.activeConnections))
                         : testConfig.virtualUsers,
@@ -532,12 +540,6 @@ export function DashboardsPage() {
       )}
 
       <Tabs defaultValue="database" className="space-y-4">
-        {chartDatabases.length > 1 && (
-          <ChartTimelineModeToggle
-            value={chartTimelineMode}
-            onChange={setChartTimelineMode}
-          />
-        )}
         <TabsList className="bg-muted">
           <TabsTrigger value="database" className="text-foreground data-[state=active]:text-foreground">
             <Database className="h-4 w-4 mr-2" />
@@ -572,6 +574,8 @@ export function DashboardsPage() {
             virtualUsers={testConfig.virtualUsers}
             showCharts={isTestFinished}
             chartXAxisTitle={chartXAxisTitle}
+            chartTimelineMode={chartTimelineMode}
+            onChartTimelineModeChange={setChartTimelineMode}
           />
         </TabsContent>
 
@@ -583,6 +587,8 @@ export function DashboardsPage() {
               getDbType={getDbType}
               getDbDisplayName={getDbDisplayName}
               chartXAxisTitle={chartXAxisTitle}
+              chartTimelineMode={chartTimelineMode}
+              onChartTimelineModeChange={setChartTimelineMode}
             />
           </TabsContent>
         )}

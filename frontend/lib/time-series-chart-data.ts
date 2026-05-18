@@ -76,8 +76,7 @@ export function buildChartDataFromTimeSeries(
     ) {
       const gapRow: ChartRow = { elapsedSeconds: prevElapsed + gapThreshold / 2 }
       gapRow[`${dbId}_responseTime`] = null
-      gapRow[`${dbId}_throughput`] = null
-      gapRow[`${dbId}_tps`] = null
+      gapRow[`${dbId}_attemptRate`] = null
       gapRow[`${dbId}_cpu`] = null
       gapRow[`${dbId}_memory`] = null
       gapRow[`${dbId}_diskIO`] = null
@@ -95,8 +94,7 @@ export function buildChartDataFromTimeSeries(
     }
 
     row[`${dbId}_responseTime`] = point.responseTime ?? 0
-    row[`${dbId}_throughput`] = point.throughput ?? 0
-    row[`${dbId}_tps`] = point.tps ?? 0
+    row[`${dbId}_attemptRate`] = point.attemptRate ?? 0
     row[`${dbId}_cpu`] = point.cpuUsage ?? 0
     row[`${dbId}_memory`] = point.memoryUsage ?? 0
     row[`${dbId}_diskIO`] = point.diskIOps ?? 0

@@ -247,7 +247,7 @@ class TestRepository(BaseRepository):
         connection_key: Optional[str],
         timestamp: datetime,
         response_time: Optional[float] = None,
-        tps: Optional[float] = None,
+        attempt_rate: Optional[float] = None,
         throughput: Optional[float] = None,
         active_connections: Optional[int] = None,
         error_count: int = 0,
@@ -258,16 +258,17 @@ class TestRepository(BaseRepository):
         network_in: Optional[float] = None,
         network_out: Optional[float] = None
     ) -> TimeSeries:
-        """Добавить точку временного ряда"""
+        """Добавить точку временного ряда (live: attempt_rate хранится в колонке throughput)."""
         async with self.SessionLocal() as session:
+            stored_throughput = throughput if throughput is not None else attempt_rate
             point = TimeSeries(
                 test_run_id=uuid.UUID(test_run_id),
                 db_type=db_type,
                 connection_key=connection_key,
                 timestamp=timestamp,
                 response_time=response_time,
-                tps=tps,
-                throughput=throughput,
+                tps=None,
+                throughput=stored_throughput,
                 active_connections=active_connections,
                 error_count=error_count,
                 cpu_usage=cpu_usage,
@@ -365,7 +366,7 @@ class TestRepository(BaseRepository):
                     timestamp=sample_data.get('timestamp'),
                     latency_ms=sample_data.get('latency_ms'),
                     throughput=sample_data.get('throughput'),
-                    tps=sample_data.get('tps'),
+                    tps=sample_data.get('attempt_rate', sample_data.get('tps')),
                     is_error='t' if sample_data.get('is_error') else 'f',
                     error_message=sample_data.get('error_message'),
                 )

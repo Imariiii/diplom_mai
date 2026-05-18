@@ -61,9 +61,9 @@ export interface DatabaseMetrics {
   minResponseTime: number       // Минимальное время
   maxResponseTime: number       // Максимальное время
   
-  // Производительность
-  tps: number                   // Транзакций в секунду (TPS)
-  throughput: number            // Пропускная способность (req/s)
+  // Производительность (одна SQL-операция = один запрос + commit)
+  throughput: number            // Успешных запросов в секунду
+  attemptRate?: number          // Всех попыток в секунду (успех + ошибка), итог прогона
   
   // Соединения
   activeConnections: number     // Активные соединения
@@ -129,8 +129,8 @@ export interface TimeSeriesPoint {
   
   // Метрики базы данных
   responseTime: number
-  throughput: number
-  tps: number
+  /** Live: попыток SQL/с за окно (~1 с). */
+  attemptRate: number
   activeConnections: number
   errorCount: number
   

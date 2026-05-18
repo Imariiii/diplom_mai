@@ -74,7 +74,16 @@ def tester():
     lt._measurement_start_counters = {}
     lt._measurement_end_counters = {}
     lt._workload_context = {}
+    lt._warmup_stats_per_db = {}
     lt.get_dbms_metric_counters = AsyncMock(return_value={})
+    lt.run_warmup_phase = AsyncMock(
+        return_value={
+            "warmup_attempted_requests": 0,
+            "warmup_failed_requests": 0,
+            "warmup_successful_requests": 0,
+            "warmup_completed": True,
+        }
+    )
     lt._cancel_requested = False
     return lt
 
@@ -123,8 +132,9 @@ class TestBuildMetricSamples:
         assert [sample["is_error"] for sample in latency_samples] == [False, False, False, False, True]
 
         assert len(throughput_samples) == 3
-        assert [sample["throughput"] for sample in throughput_samples] == [2.0, 1.0, 2.0]
-        assert [sample["latency_ms"] for sample in throughput_samples] == [15.0, 30.0, 45.0]
+        assert [sample["throughput"] for sample in throughput_samples] == [2.0, 1.0, 1.0]
+        assert [sample["attempt_rate"] for sample in throughput_samples] == [2.0, 1.0, 2.0]
+        assert [sample["latency_ms"] for sample in throughput_samples] == [15.0, 30.0, 40.0]
         assert [sample["timestamp"] for sample in throughput_samples] == [
             base_ts,
             base_ts + timedelta(seconds=1),
@@ -204,9 +214,9 @@ class TestRunCustomSqlTest:
         )
 
         stats = results[0]["comparison"]["conn_pg"]
-        assert stats["tps"] == pytest.approx(2.0)
         assert stats["throughput"] == pytest.approx(2.0)
-        assert stats["completed_tps"] == pytest.approx(2.0)
+        assert stats["attempt_rate"] == pytest.approx(2.0)
+        assert "tps" not in stats
 
 
 class TestExecuteQuery:
@@ -329,7 +339,7 @@ class TestEmitMetrics:
         await tester._emit_metrics(
             db_key="conn_pg",
             response_time=12.5,
-            tps=34.0,
+            attempt_rate=34.0,
             successful=10,
             failed=1,
             window_end_perf=5.0,
@@ -341,7 +351,7 @@ class TestEmitMetrics:
         assert kwargs["db_type"] == "postgresql"
         assert kwargs["db_name"] == "PostgreSQL"
         assert kwargs["response_time"] == 12.5
-        assert kwargs["tps"] == 34.0
+        assert kwargs["attempt_rate"] == 34.0
         assert kwargs["cpu_usage"] == 10.0
         assert kwargs["cache_hit_ratio"] is not None
         assert kwargs["cache_hit_ratio_status"] == "ok"
@@ -368,7 +378,7 @@ class TestEmitMetrics:
         await tester._emit_metrics(
             db_key="conn_pg",
             response_time=10.0,
-            tps=20.0,
+            attempt_rate=20.0,
             successful=5,
             failed=0,
         )
@@ -385,7 +395,7 @@ class TestSelfCheckIntegration:
             "avg_time_ms": 51.53,
             "throughput": 383.8,
             "avg_time_all_ms": 52.36,
-            "completed_tps": 480.6,
+            "attempt_rate": 480.6,
             "iterations": 151,
             "error_rate": 19.98,
         }
@@ -460,7 +470,7 @@ class TestStreamingCallbackSampleTime:
             db_type="postgresql",
             db_name="PostgreSQL",
             response_time=15.0,
-            tps=50.0,
+            attempt_rate=50.0,
             successful=5,
             failed=1,
             sample_timestamp=explicit_ts,
@@ -501,10 +511,12 @@ class TestRealtimeThroughputSamples:
             db_type="postgresql",
             db_name="PostgreSQL",
             response_time=15.0,
-            tps=50.0,
+            attempt_rate=50.0,
             successful=5,
             failed=1,
         )
 
         assert len(callback.metric_samples_buffer) == 1
         assert callback.metric_samples_buffer[0]["sample_type"] == "throughput_realtime"
+        assert callback.metric_samples_buffer[0]["attempt_rate"] == 50.0
+        assert callback.metric_samples_buffer[0]["throughput"] is None

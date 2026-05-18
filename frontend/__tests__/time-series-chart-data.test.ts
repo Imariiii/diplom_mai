@@ -10,8 +10,7 @@ function makePoint(timestamp: number, responseTime = 10): TimeSeriesPoint {
   return {
     timestamp,
     responseTime,
-    throughput: 1,
-    tps: 1,
+    attemptRate: 1,
     activeConnections: 1,
     errorCount: 0,
     cpuUsage: 0,

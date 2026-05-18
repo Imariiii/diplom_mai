@@ -519,7 +519,7 @@ export function HistoryPage() {
                       <TableHead className="text-right">P50 (мс)</TableHead>
                       <TableHead className="text-right">P95 (мс)</TableHead>
                       <TableHead className="text-right">P99 (мс)</TableHead>
-                      <TableHead className="text-right">TPS</TableHead>
+                      <TableHead className="text-right">Запросов/с</TableHead>
                       <TableHead className="text-right">Успешных</TableHead>
                       <TableHead className="text-right">Ошибок</TableHead>
                     </TableRow>
@@ -537,7 +537,9 @@ export function HistoryPage() {
                         <TableCell className="text-right font-mono">{result.metrics?.p50_time_ms?.toFixed(2) ?? "-"}</TableCell>
                         <TableCell className="text-right font-mono">{result.metrics?.p95_time_ms?.toFixed(2) ?? "-"}</TableCell>
                         <TableCell className="text-right font-mono">{result.metrics?.p99_time_ms?.toFixed(2) ?? "-"}</TableCell>
-                        <TableCell className="text-right font-mono">{result.metrics?.tps?.toFixed(2) ?? "-"}</TableCell>
+                        <TableCell className="text-right font-mono">
+                          {(result.metrics?.throughput ?? result.metrics?.tps)?.toFixed(2) ?? "-"}
+                        </TableCell>
                         <TableCell className="text-right font-mono">{result.metrics?.successful ?? "-"}</TableCell>
                         <TableCell className="text-right font-mono">{result.metrics?.failed ?? "-"}</TableCell>
                       </TableRow>

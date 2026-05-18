@@ -14,8 +14,7 @@ interface MetricsMessage {
     db_name?: string
     timestamp: string
     response_time: number
-    tps: number
-    throughput: number
+    attempt_rate: number
     active_connections: number
     error_count: number
     cpu_usage: number
@@ -152,8 +151,7 @@ export function useTestWebSocket({
           const point: TimeSeriesPoint = {
             timestamp: new Date(metricsData.timestamp).getTime(),
             responseTime: metricsData.response_time,
-            throughput: metricsData.throughput,
-            tps: metricsData.tps,
+            attemptRate: metricsData.attempt_rate ?? 0,
             activeConnections: metricsData.active_connections,
             errorCount: metricsData.error_count,
             cpuUsage: metricsData.cpu_usage,

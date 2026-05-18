@@ -3,6 +3,8 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Database, Clock, Gauge, Users, AlertTriangle } from "lucide-react"
 import { DB_NAMES, getDbColor } from "@/lib/chart-colors"
+import type { ChartTimelineMode } from "@/lib/time-series-chart-data"
+import { ChartTimelineModeToggle } from "./shared/chart-timeline-mode-toggle"
 import { TimeSeriesChart } from "./shared/time-series-chart"
 
 interface TestResult {
@@ -20,10 +22,11 @@ interface TestResult {
     p99ResponseTime?: number
     minResponseTime?: number
     maxResponseTime?: number
-    tps?: number
     throughput?: number
+    attemptRate?: number
     activeConnections?: number
     errorCount?: number
+    errorRate?: number
   }
 }
 
@@ -38,9 +41,11 @@ interface DatabaseMetricsTabProps {
   customDbNames?: Record<string, string>
   showCharts?: boolean
   chartXAxisTitle?: string
+  chartTimelineMode?: ChartTimelineMode
+  onChartTimelineModeChange?: (mode: ChartTimelineMode) => void
 }
 
-export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLatestMetric, getDbDisplayName, getDbType, virtualUsers, customDbNames, showCharts = true, chartXAxisTitle }: DatabaseMetricsTabProps) {
+export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLatestMetric, getDbDisplayName, getDbType, virtualUsers, customDbNames, showCharts = true, chartXAxisTitle, chartTimelineMode, onChartTimelineModeChange }: DatabaseMetricsTabProps) {
   const formatMetric = (value?: number, digits: number = 2) => {
     return typeof value === "number" ? value.toFixed(digits) : undefined
   }
@@ -65,8 +70,24 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
                   <span className="font-mono text-foreground">{formatMetric(result?.metrics?.avgResponseTime) ?? getLatestMetric(dbId, "responseTime")} ms</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">TPS</span>
-                  <span className="font-mono text-foreground">{formatMetric(result?.metrics?.tps, 0) ?? getLatestMetric(dbId, "tps")} tx/s</span>
+                  <span className="text-muted-foreground">Запросов/с (успешные)</span>
+                  <span className="font-mono text-foreground">
+                    {formatMetric(result?.metrics?.throughput, 0) ?? "—"}
+                  </span>
+                </div>
+                {((result?.metrics?.errorCount ?? 0) > 0 || (result?.metrics?.errorRate ?? 0) > 0) && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Попыток/с (итог)</span>
+                    <span className="font-mono text-foreground">
+                      {formatMetric(result?.metrics?.attemptRate, 0) ?? "—"}
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Попыток/с (live)</span>
+                  <span className="font-mono text-foreground">
+                    {getLatestMetric(dbId, "attemptRate")}
+                  </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Соединения</span>
@@ -156,6 +177,13 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
         </Card>
       )}
 
+      {showCharts && databases.length > 1 && chartTimelineMode && onChartTimelineModeChange && (
+        <ChartTimelineModeToggle
+          value={chartTimelineMode}
+          onChange={onChartTimelineModeChange}
+        />
+      )}
+
       {showCharts && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <TimeSeriesChart
@@ -172,13 +200,13 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
             xAxisTitle={chartXAxisTitle}
           />
           <TimeSeriesChart
-            title="TPS (транзакций/сек)"
+            title="Попыток SQL/с (live)"
             icon={<Gauge className="h-5 w-5 text-primary" />}
             data={chartData}
             databases={databases}
             dbNames={DB_NAMES}
             getDbColor={getDbColor}
-            metricKey="tps"
+            metricKey="attemptRate"
             chartType="area"
             customDbNames={Object.fromEntries(databases.map(db => [db, getDbDisplayName(db)]))}
             getDbType={getDbType}

@@ -389,6 +389,30 @@ class ComparisonService:
         wu_set = set(s.get("warmup_time") for s in sigs)
         same_load_params = len(vu_set) <= 1 and len(it_set) <= 1 and len(wu_set) <= 1
 
+        warmup_mode_set = set()
+        warmup_profile_set = set()
+        warmup_concurrency_set = set()
+        for t in tests:
+            cfg = t.get("config", {}) or {}
+            if cfg.get("warmup_mode"):
+                warmup_mode_set.add(cfg.get("warmup_mode"))
+            if cfg.get("warmup_profile"):
+                warmup_profile_set.add(cfg.get("warmup_profile"))
+            if cfg.get("warmup_concurrency_mode"):
+                warmup_concurrency_set.add(cfg.get("warmup_concurrency_mode"))
+        if len(warmup_mode_set) > 1:
+            reasons.append(
+                f"Различные режимы прогрева: {', '.join(sorted(str(x) for x in warmup_mode_set))}"
+            )
+        if len(warmup_profile_set) > 1:
+            reasons.append(
+                f"Различные профили прогрева: {', '.join(sorted(str(x) for x in warmup_profile_set))}"
+            )
+        if len(warmup_concurrency_set) > 1:
+            reasons.append(
+                "Различная concurrency прогрева (warmup_concurrency_mode)"
+            )
+
         is_valid = same_scenario and same_query_ids and len(bundle_ids) <= 1 and len(logical_db_ids) <= 1
 
         return ComparabilityReport(
@@ -728,6 +752,9 @@ class ComparisonService:
             "iterations": config.get("iterations"),
             "virtual_users": config.get("virtual_users"),
             "warmup_time": config.get("warmup_time"),
+            "warmup_mode": config.get("warmup_mode"),
+            "warmup_profile": config.get("warmup_profile"),
+            "warmup_concurrency_mode": config.get("warmup_concurrency_mode"),
             "db_types": tuple(sorted(config.get("db_types", []) or [])),
             "bundle_id": config.get("resolved_bundle_id") or config.get("bundle_id"),
             "profile_id": config.get("resolved_profile_id") or config.get("schema_profile_id"),
@@ -849,17 +876,21 @@ class ComparisonService:
     def _extract_throughput_values(self, metric_samples: List[Dict[str, Any]]) -> List[float]:
         values = []
         for p in self._select_throughput_samples(metric_samples):
-            v = p.get("throughput") or p.get("tps")
+            if p.get("sample_type") == "throughput_realtime":
+                continue
+            v = p.get("throughput")
+            if v is None:
+                v = p.get("tps")
             if v is not None:
                 values.append(v)
         return values
 
     @staticmethod
     def _extract_aggregate_throughput_values(metrics: Dict[str, Any]) -> List[float]:
-        """Получить итоговый TPS load-фазы из агрегированных метрик результата."""
+        """Получить итоговую пропускную способность (успешные запросы/с) из агрегата прогона."""
         if not metrics:
             return []
-        for key in ("throughput", "tps", "completed_tps"):
+        for key in ("throughput", "tps"):
             value = metrics.get(key)
             if value is None:
                 continue

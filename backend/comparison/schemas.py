@@ -222,11 +222,11 @@ class BoxPlotPoint(BaseModel):
 
 
 class ThroughputSeriesPoint(BaseModel):
-    """Точка временного ряда throughput"""
+    """Точка временного ряда пропускной способности"""
 
     timestamp: Optional[str] = None
     throughput: Optional[float] = None
-    tps: Optional[float] = None
+    attempt_rate: Optional[float] = None
     response_time: Optional[float] = None
     error_count: Optional[int] = None
 
