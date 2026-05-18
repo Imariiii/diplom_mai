@@ -30,6 +30,7 @@ from backend.database.state_manager import DatabaseStateManager
 from backend.load_tester.index_manager import IndexManager
 from backend.load_tester.self_check import cross_validate_metrics, verify_littles_law
 from backend.load_tester.sql_workload_classifier import workload_context_from_test
+from backend.load_tester.system_metrics import SystemMetricsSampler
 from backend.load_tester.warmup import compute_ramp_hold_seconds
 
 
@@ -65,6 +66,8 @@ class LoadTester:
         self._measurement_end_counters: Dict[str, Dict[str, Any]] = {}
         self._workload_context: Dict[str, Any] = {}
         self._warmup_stats_per_db: Dict[str, Dict[str, Any]] = {}
+        self._system_metrics_sampler = SystemMetricsSampler()
+        self._last_emit_interval_sec: float = 1.0
         
         psutil.cpu_percent(interval=None)
     
@@ -143,6 +146,8 @@ class LoadTester:
         successful: int,
         failed: int,
         window_end_perf: Optional[float] = None,
+        throughput: Optional[float] = None,
+        interval_sec: Optional[float] = None,
     ):
         """Отправить realtime-метрики через callback (attempt_rate — запросов/с за окно)."""
         if self._metrics_callback and self._is_streaming:
@@ -155,7 +160,15 @@ class LoadTester:
                 db_type = self.db_connection.get_dbms_type(db_key)
                 db_name = self.db_connection.get_connection_name(db_key)
 
-                system_metrics = await self.get_system_metrics(db_key)
+                emit_interval = interval_sec if interval_sec is not None else self._last_emit_interval_sec
+                if emit_interval <= 0:
+                    emit_interval = self._streaming_interval
+                self._last_emit_interval_sec = emit_interval
+                system_metrics = self._sample_system_metrics(emit_interval)
+                if throughput is None:
+                    throughput = (
+                        successful / emit_interval if emit_interval > 0 and successful > 0 else 0.0
+                    )
                 measurement_start = self._measurement_start_counters.get(db_key)
                 dbms_metrics: Dict[str, Any] = {}
                 if measurement_start:
@@ -166,6 +179,9 @@ class LoadTester:
                         current_counters,
                         workload_context=self._workload_context,
                     )
+                    latest_dbms_metrics = await self._get_cached_dbms_metrics(db_key)
+                    dbms_metrics["buffer_size_mb"] = latest_dbms_metrics.get("buffer_size_mb", 0)
+                    dbms_metrics["buffer_size_label"] = latest_dbms_metrics.get("buffer_size_label")
 
                 await self._metrics_callback.on_metrics(
                     db_key=db_key,
@@ -173,6 +189,7 @@ class LoadTester:
                     db_name=db_name,
                     response_time=response_time,
                     attempt_rate=attempt_rate,
+                    throughput=throughput,
                     successful=successful,
                     failed=failed,
                     cpu_usage=system_metrics.get('cpu_usage', 0),
@@ -181,11 +198,18 @@ class LoadTester:
                     disk_iops=system_metrics.get('disk_iops', 0),
                     network_in=system_metrics.get('network_in_mbps', 0),
                     network_out=system_metrics.get('network_out_mbps', 0),
+                    disk_ops_per_sec=system_metrics.get('disk_ops_per_sec', 0),
+                    disk_read_mib_per_sec=system_metrics.get('disk_read_mib_per_sec', 0),
+                    disk_write_mib_per_sec=system_metrics.get('disk_write_mib_per_sec', 0),
+                    network_in_mib_per_sec=system_metrics.get('network_in_mib_per_sec', 0),
+                    network_out_mib_per_sec=system_metrics.get('network_out_mib_per_sec', 0),
                     cache_hit_ratio=dbms_metrics.get('cache_hit_ratio'),
                     buffer_pool_hit_ratio=dbms_metrics.get('buffer_pool_hit_ratio'),
                     cache_hit_ratio_status=dbms_metrics.get('cache_hit_ratio_status'),
                     cache_hit_ratio_note=dbms_metrics.get('cache_hit_ratio_note'),
                     cache_hit_ratio_mode=dbms_metrics.get('cache_hit_ratio_mode'),
+                    buffer_size_mb=dbms_metrics.get('buffer_size_mb', 0),
+                    buffer_size_label=dbms_metrics.get('buffer_size_label'),
                     lock_waits=dbms_metrics.get('lock_waits', 0),
                     deadlocks=dbms_metrics.get('deadlocks', 0),
                     sample_timestamp=sample_timestamp,
@@ -494,20 +518,23 @@ class LoadTester:
                         now = time.perf_counter()
                         interval = now - metrics_state['last_emit_time']
                         if metrics_state['recent_successful'] or metrics_state['recent_failed']:
+                            successful = metrics_state['recent_successful']
+                            failed = metrics_state['recent_failed']
                             snapshot = {
                                 'avg_rt': (
                                     statistics.mean(metrics_state['recent_times'])
                                     if metrics_state['recent_times']
                                     else 0.0
                                 ),
-                                'successful': metrics_state['recent_successful'],
-                                'failed': metrics_state['recent_failed'],
+                                'successful': successful,
+                                'failed': failed,
                                 'attempt_rate': (
-                                    (metrics_state['recent_successful'] + metrics_state['recent_failed'])
-                                    / interval
-                                    if interval > 0
-                                    else 0.0
+                                    (successful + failed) / interval if interval > 0 else 0.0
                                 ),
+                                'throughput': (
+                                    successful / interval if interval > 0 else 0.0
+                                ),
+                                'interval_sec': interval,
                             }
                         completed_now = metrics_state['total_completed']
                         metrics_state['recent_times'] = []
@@ -526,9 +553,11 @@ class LoadTester:
                             db_key=db_key,
                             response_time=snapshot['avg_rt'],
                             attempt_rate=snapshot['attempt_rate'],
+                            throughput=snapshot['throughput'],
                             successful=snapshot['successful'],
                             failed=snapshot['failed'],
                             window_end_perf=now,
+                            interval_sec=snapshot['interval_sec'],
                         )
             except asyncio.CancelledError:
                 return
@@ -563,17 +592,22 @@ class LoadTester:
                     if metrics_state['recent_times']
                     else 0.0
                 )
-                total_completed = metrics_state['recent_successful'] + metrics_state['recent_failed']
+                successful = metrics_state['recent_successful']
+                failed = metrics_state['recent_failed']
+                total_completed = successful + failed
                 final_attempt_rate = (
                     total_completed / interval if interval > 0 else float(total_completed)
                 )
+                final_throughput = successful / interval if interval > 0 else float(successful)
                 await self._emit_metrics(
                     db_key=db_key,
                     response_time=avg_rt,
                     attempt_rate=final_attempt_rate,
-                    successful=metrics_state['recent_successful'],
-                    failed=metrics_state['recent_failed'],
+                    throughput=final_throughput,
+                    successful=successful,
+                    failed=failed,
                     window_end_perf=now,
+                    interval_sec=interval,
                 )
         
         return results
@@ -925,24 +959,10 @@ class LoadTester:
             }
         ]
 
-    async def get_system_metrics(self, db_key: str) -> Dict:
-        """Получить системные метрики"""
+    def _sample_system_metrics(self, interval_sec: float) -> Dict[str, Any]:
+        """Снимок системных метрик с rate за interval_sec."""
         try:
-            cpu_usage = psutil.cpu_percent(interval=None)
-            memory = psutil.virtual_memory()
-            disk_io = psutil.disk_io_counters()
-            network_io = psutil.net_io_counters()
-            
-            return {
-                'cpu_usage': cpu_usage,
-                'memory_usage_mb': memory.used / (1024 * 1024),
-                'memory_usage_percent': memory.percent,
-                'disk_iops': disk_io.read_count + disk_io.write_count if disk_io else 0,
-                'disk_read_mbps': disk_io.read_bytes / (1024 * 1024) if disk_io else 0,
-                'disk_write_mbps': disk_io.write_bytes / (1024 * 1024) if disk_io else 0,
-                'network_in_mbps': network_io.bytes_recv / (1024 * 1024) if network_io else 0,
-                'network_out_mbps': network_io.bytes_sent / (1024 * 1024) if network_io else 0,
-            }
+            return self._system_metrics_sampler.sample(interval_sec)
         except Exception as e:
             print(f"Ошибка получения системных метрик: {e}")
             return {
@@ -954,7 +974,17 @@ class LoadTester:
                 'disk_write_mbps': 0,
                 'network_in_mbps': 0,
                 'network_out_mbps': 0,
+                'disk_ops_per_sec': 0,
+                'disk_read_mib_per_sec': 0,
+                'disk_write_mib_per_sec': 0,
+                'network_in_mib_per_sec': 0,
+                'network_out_mib_per_sec': 0,
             }
+
+    async def get_system_metrics(self, db_key: str) -> Dict:
+        """Итоговый снимок системных метрик (instant + cumulative legacy)."""
+        _ = db_key
+        return self._sample_system_metrics(self._streaming_interval)
     
     async def get_dbms_metrics(self, db_key: str) -> Dict:
         """Получить внутренние метрики СУБД"""
@@ -974,6 +1004,7 @@ class LoadTester:
         """Зафиксировать счётчики кэша в начале измеряемой фазы (после прогрева)."""
         self._measurement_end_counters.pop(db_key, None)
         self._measurement_start_counters[db_key] = await self.get_dbms_metric_counters(db_key)
+        self._system_metrics_sampler.reset()
 
     async def snapshot_measurement_end(self, db_key: str) -> None:
         """Зафиксировать счётчики сразу после workload, до служебных запросов."""

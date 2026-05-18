@@ -62,9 +62,26 @@ export function formatCardAttemptRate(options: {
   return liveAttemptRate.trim() !== "" ? liveAttemptRate : "—"
 }
 
-/** «Успешных запросов/с» в карточке — только итоговый throughput после завершения теста. */
-export function formatCardSuccessfulThroughput(throughput?: number): string {
-  return typeof throughput === "number" ? throughput.toFixed(0) : "—"
+/** «Успешных запросов/с»: live во время теста, итог после завершения. */
+export function formatCardSuccessfulThroughput(options: {
+  isTestFinished: boolean
+  throughput?: number
+  liveThroughput?: string
+}): string {
+  const { isTestFinished, throughput, liveThroughput } = options
+  if (isTestFinished) {
+    return typeof throughput === "number" ? throughput.toFixed(0) : "—"
+  }
+  return liveThroughput && liveThroughput.trim() !== "" ? liveThroughput : "—"
+}
+
+/** Успешных операций/с для точки time_series (колонка tps). */
+export function timeSeriesSuccessfulThroughput(raw: {
+  tps?: number | null
+  throughput?: number | null
+}): number {
+  const value = raw.tps
+  return typeof value === "number" ? value : 0
 }
 
 export type WorkloadMode = "query" | "transaction"

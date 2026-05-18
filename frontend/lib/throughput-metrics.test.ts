@@ -51,12 +51,31 @@ describe("formatCardAttemptRate", () => {
 })
 
 describe("formatCardSuccessfulThroughput", () => {
-  it("formats successful throughput as integer", () => {
-    expect(formatCardSuccessfulThroughput(793)).toBe("793")
+  it("formats successful throughput as integer when finished", () => {
+    expect(
+      formatCardSuccessfulThroughput({
+        isTestFinished: true,
+        throughput: 793,
+        liveThroughput: "800",
+      }),
+    ).toBe("793")
+  })
+
+  it("shows live throughput while running", () => {
+    expect(
+      formatCardSuccessfulThroughput({
+        isTestFinished: false,
+        liveThroughput: "812.5",
+      }),
+    ).toBe("812.5")
   })
 
   it("shows dash when throughput missing", () => {
-    expect(formatCardSuccessfulThroughput(undefined)).toBe("—")
+    expect(
+      formatCardSuccessfulThroughput({
+        isTestFinished: true,
+      }),
+    ).toBe("—")
   })
 })
 

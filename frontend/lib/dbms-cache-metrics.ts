@@ -38,6 +38,24 @@ export function formatCacheHitPercent(value: number | null | undefined): string 
   return `${Number(value).toFixed(1)}%`
 }
 
+export function getBufferSizeLabel(dbType?: string | null, explicitLabel?: string | null): string {
+  if (explicitLabel) return explicitLabel
+  if (dbType === "postgresql") return "shared_buffers"
+  if (dbType === "mysql" || dbType === "mariadb") return "InnoDB buffer pool"
+  return "Буфер данных"
+}
+
+export function formatDbmsBufferSize(valueMb?: number | null): string {
+  const numeric = Number(valueMb)
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return "—"
+  }
+  if (numeric >= 1024) {
+    return `${(numeric / 1024).toFixed(2)} GB`
+  }
+  return `${numeric.toFixed(0)} MB`
+}
+
 function buildDetailsTitle(input: CacheHitDisplayInput): string | undefined {
   const parts: string[] = []
   if (input.cacheHitRatioNote) {

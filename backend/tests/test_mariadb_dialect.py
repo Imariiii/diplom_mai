@@ -33,12 +33,17 @@ async def test_collect_dbms_metrics_does_not_set_lifetime_cache_ratio():
         "Innodb_buffer_pool_read_requests": 10000.0,
         "Innodb_row_lock_waits": 7.0,
         "Innodb_deadlocks": 2.0,
+        "innodb_buffer_pool_size": 1073741824.0,
     }
 
     async def execute_side_effect(stmt, params=None):
         sql = str(stmt)
 
         if "SHOW GLOBAL STATUS LIKE" in sql:
+            name = sql.split("LIKE '", 1)[1].split("'", 1)[0]
+            return _Result(one=(name, str(status_values[name])))
+
+        if "SHOW GLOBAL VARIABLES LIKE" in sql:
             name = sql.split("LIKE '", 1)[1].split("'", 1)[0]
             return _Result(one=(name, str(status_values[name])))
 
@@ -60,6 +65,8 @@ async def test_collect_dbms_metrics_does_not_set_lifetime_cache_ratio():
     assert metrics["cache_hit_ratio"] is None
     assert metrics["active_connections"] == 11
     assert metrics["table_sizes_mb"]["orders"] == 12.5
+    assert metrics["buffer_size_mb"] == 1024.0
+    assert metrics["buffer_size_label"] == "InnoDB buffer pool"
 
 
 @pytest.mark.asyncio

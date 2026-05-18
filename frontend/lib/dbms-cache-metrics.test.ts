@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { getCacheHitDisplay, mapRawDbmsCacheFields } from "./dbms-cache-metrics"
+import {
+  formatDbmsBufferSize,
+  getBufferSizeLabel,
+  getCacheHitDisplay,
+  mapRawDbmsCacheFields,
+} from "./dbms-cache-metrics"
 
 describe("dbms-cache-metrics hybrid", () => {
   it("shows percent when display status ok", () => {
@@ -19,5 +24,12 @@ describe("dbms-cache-metrics hybrid", () => {
     const d = getCacheHitDisplay(mapped)
     expect(d.valueText).toBe("Н/Д")
     expect(d.details).toContain("Raw engine-level")
+  })
+
+  it("formats dbms-specific buffer size labels", () => {
+    expect(getBufferSizeLabel("postgresql")).toBe("shared_buffers")
+    expect(getBufferSizeLabel("mysql")).toBe("InnoDB buffer pool")
+    expect(getBufferSizeLabel("mariadb")).toBe("InnoDB buffer pool")
+    expect(formatDbmsBufferSize(1536)).toBe("1.50 GB")
   })
 })

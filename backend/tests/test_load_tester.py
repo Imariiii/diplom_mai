@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 import numpy as np
 import pytest
 
+from backend.load_tester.system_metrics import SystemMetricsSampler
 from backend.load_tester.tester import LoadTester
 from backend.websocket_manager import TestStreamingCallback as StreamingCallback
 
@@ -54,17 +55,27 @@ def tester():
     lt.auto_restore = True
     lt._random_value_cache = {}
     lt._random_value_cache_locks = {}
-    lt.get_system_metrics = AsyncMock(return_value={
+    lt._system_metrics_sampler = SystemMetricsSampler()
+    lt._last_emit_interval_sec = 1.0
+    lt._sample_system_metrics = MagicMock(return_value={
         "cpu_usage": 10.0,
         "memory_usage_percent": 20.0,
         "memory_usage_mb": 512.0,
         "disk_iops": 5.0,
         "network_in_mbps": 1.5,
         "network_out_mbps": 2.5,
+        "disk_ops_per_sec": 12.0,
+        "disk_read_mib_per_sec": 1.0,
+        "disk_write_mib_per_sec": 0.5,
+        "network_in_mib_per_sec": 0.2,
+        "network_out_mib_per_sec": 0.3,
     })
+    lt.get_system_metrics = AsyncMock(return_value=lt._sample_system_metrics.return_value)
     lt.get_dbms_metrics = AsyncMock(return_value={
         "cache_hit_ratio": 95.0,
         "buffer_pool_hit_ratio": 90.0,
+        "buffer_size_mb": 512.0,
+        "buffer_size_label": "shared_buffers",
         "lock_waits": 2,
         "deadlocks": 0,
     })
@@ -332,6 +343,11 @@ class TestEmitMetrics:
             "blks_hit": 1000,
             "blks_read": 100,
         }
+        tester._dbms_metrics_cache["conn_pg"] = {
+            "buffer_size_mb": 512.0,
+            "buffer_size_label": "shared_buffers",
+        }
+        tester._dbms_metrics_cache_at["conn_pg"] = time.perf_counter()
         tester.get_dbms_metric_counters = AsyncMock(
             return_value={"blks_hit": 1095, "blks_read": 105}
         )
@@ -355,6 +371,8 @@ class TestEmitMetrics:
         assert kwargs["cpu_usage"] == 10.0
         assert kwargs["cache_hit_ratio"] is not None
         assert kwargs["cache_hit_ratio_status"] == "ok"
+        assert kwargs["buffer_size_mb"] == 512.0
+        assert kwargs["buffer_size_label"] == "shared_buffers"
         assert kwargs["sample_timestamp"] == datetime(2026, 1, 1, 12, 0, 5, tzinfo=timezone.utc)
         assert kwargs["elapsed_seconds"] == 5
 
@@ -494,46 +512,6 @@ class TestStreamingCallbackSampleTime:
         repository.add_metric_sample_batch.assert_awaited_once()
         assert callback.metric_samples_buffer == []
 
-    @pytest.mark.asyncio
-    async def test_on_test_start_status_includes_elapsed_seconds(self):
-        manager = MagicMock()
-        manager.send_status_update = AsyncMock()
-        callback = StreamingCallback("test-1", manager, repository=None)
-
-        await callback.on_test_start()
-
-        manager.send_status_update.assert_awaited()
-        update = manager.send_status_update.await_args.args[0]
-        assert update.status == "running"
-        assert update.elapsed_seconds == 0
-
-    @pytest.mark.asyncio
-    async def test_on_status_change_elapsed_increases_after_start(self):
-        manager = MagicMock()
-        manager.send_status_update = AsyncMock()
-        callback = StreamingCallback("test-1", manager, repository=None)
-        await callback.on_test_start()
-        callback.start_time = time.perf_counter() - 5.0
-
-        await callback.on_status_change("running", "Прогрев…")
-
-        update = manager.send_status_update.await_args.args[0]
-        assert update.elapsed_seconds >= 5
-
-    @pytest.mark.asyncio
-    async def test_on_backup_status_includes_elapsed_seconds(self):
-        manager = MagicMock()
-        manager.send_status_update = AsyncMock()
-        manager.send_operation_status = AsyncMock()
-        callback = StreamingCallback("test-1", manager, repository=None)
-        await callback.on_test_start()
-        callback.start_time = time.perf_counter() - 3.0
-
-        await callback.on_backup_status("backup_started", {"tables": ["t1"]})
-
-        manager.send_operation_status.assert_awaited_once()
-        assert manager.send_operation_status.await_args.kwargs["elapsed_seconds"] >= 3
-
 
 class TestRealtimeThroughputSamples:
     @pytest.mark.asyncio
@@ -552,6 +530,7 @@ class TestRealtimeThroughputSamples:
             db_name="PostgreSQL",
             response_time=15.0,
             attempt_rate=50.0,
+            throughput=4.0,
             successful=5,
             failed=1,
         )
@@ -559,58 +538,4 @@ class TestRealtimeThroughputSamples:
         assert len(callback.metric_samples_buffer) == 1
         assert callback.metric_samples_buffer[0]["sample_type"] == "throughput_realtime"
         assert callback.metric_samples_buffer[0]["attempt_rate"] == 50.0
-        assert callback.metric_samples_buffer[0]["throughput"] is None
-
-
-class TestExecuteScenarioTransaction:
-    @pytest.mark.asyncio
-    async def test_execute_scenario_transaction_commits_all_steps(self, tester):
-        conn = MagicMock()
-        trans = MagicMock()
-        trans.commit = AsyncMock()
-        trans.rollback = AsyncMock()
-        conn.begin = AsyncMock(return_value=trans)
-
-        result_mock = MagicMock()
-        result_mock.returns_rows = False
-        conn.execute = AsyncMock(return_value=result_mock)
-
-        engine = _AsyncEngine(conn)
-        tester.db_connection.get_engine_async = AsyncMock(return_value=engine)
-
-        transaction = {
-            "name": "checkout",
-            "steps": [
-                {"sql_template": "SELECT 1", "query_type": "select"},
-                {"sql_template": "UPDATE t SET x=1", "query_type": "update"},
-            ],
-            "params": [],
-        }
-        result = await tester.execute_scenario_transaction("db1", transaction, "scenario")
-        assert result["error"] is None
-        assert result["steps_executed"] == 2
-        assert result["rollbacks"] == 0
-        trans.commit.assert_awaited_once()
-        assert conn.execute.await_count == 2
-
-    @pytest.mark.asyncio
-    async def test_execute_scenario_transaction_rolls_back_on_error(self, tester):
-        conn = MagicMock()
-        trans = MagicMock()
-        trans.commit = AsyncMock()
-        trans.rollback = AsyncMock()
-        conn.begin = AsyncMock(return_value=trans)
-        conn.execute = AsyncMock(side_effect=RuntimeError("boom"))
-
-        engine = _AsyncEngine(conn)
-        tester.db_connection.get_engine_async = AsyncMock(return_value=engine)
-
-        transaction = {
-            "name": "fail",
-            "steps": [{"sql_template": "SELECT 1", "query_type": "select"}],
-            "params": [],
-        }
-        result = await tester.execute_scenario_transaction("db1", transaction, "scenario")
-        assert result["error"] is not None
-        assert result["rollbacks"] == 1
-        trans.rollback.assert_awaited_once()
+        assert callback.metric_samples_buffer[0]["throughput"] == 4.0

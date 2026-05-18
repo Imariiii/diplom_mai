@@ -23,6 +23,8 @@ DEFAULT_DBMS_METRICS: Dict[str, Any] = {
     "deadlocks": 0,
     "deadlocks_mode": "current",
     "active_connections": 0,
+    "buffer_size_mb": 0,
+    "buffer_size_label": None,
     "table_sizes_mb": {},
     "index_sizes_mb": {},
     "total_db_size_mb": 0,

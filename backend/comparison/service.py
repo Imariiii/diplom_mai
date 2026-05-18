@@ -936,15 +936,17 @@ class ComparisonService:
         return batch if batch else realtime
 
     def _extract_throughput_values(self, metric_samples: List[Dict[str, Any]]) -> List[float]:
+        """Успешных операций/с: throughput в sample, fallback tps."""
         values = []
         for p in self._select_throughput_samples(metric_samples):
-            if p.get("sample_type") == "throughput_realtime":
-                continue
             v = p.get("throughput")
             if v is None:
                 v = p.get("tps")
             if v is not None:
-                values.append(v)
+                try:
+                    values.append(float(v))
+                except (TypeError, ValueError):
+                    continue
         return values
 
     @staticmethod

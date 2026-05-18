@@ -3,15 +3,24 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Database } from "lucide-react"
 import { DB_NAMES, getDbColor } from "@/lib/chart-colors"
-import { getCacheHitDisplay, type CacheHitDisplayInput } from "@/lib/dbms-cache-metrics"
+import {
+  formatDbmsBufferSize,
+  getBufferSizeLabel,
+  getCacheHitDisplay,
+  type CacheHitDisplayInput,
+} from "@/lib/dbms-cache-metrics"
 
 interface DbmsMetrics extends CacheHitDisplayInput {
+  bufferPoolHitRatio?: number | null
+  bufferSizeMB?: number
+  bufferSizeLabel?: string
   lockWaits?: number
   lockWaitsMode?: "current" | "delta" | "sampled_max"
   deadlocks?: number
   deadlocksMode?: "current" | "delta" | "sampled_max"
   totalDBSizeMB?: number
   tableSizesMB?: Record<string, number>
+  indexSizesMB?: Record<string, number>
 }
 
 interface TestResult {
@@ -20,6 +29,8 @@ interface TestResult {
 }
 
 interface RealtimeDataPoint extends CacheHitDisplayInput {
+  bufferSizeMB?: number
+  bufferSizeLabel?: string
   lockWaits?: number
   deadlocks?: number
 }
@@ -62,6 +73,11 @@ export function DbmsMetricsTab({ databases, realtimeData, getResultForDb, getDbT
     return "Дедлоки"
   }
 
+  const getLatestRealtimePoint = (dbId: string) => {
+    const points = realtimeData[dbId]
+    return points && points.length > 0 ? points[points.length - 1] : undefined
+  }
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -71,6 +87,12 @@ export function DbmsMetricsTab({ databases, realtimeData, getResultForDb, getDbT
           const dbType = getDbType ? getDbType(dbId) : dbId
           const displayName = getDbDisplayName ? getDbDisplayName(dbId) : (DB_NAMES[dbType] || dbType)
           const cacheDisplay = resolveCacheDisplay(dbId, dbmsMetrics)
+          const latestPoint = getLatestRealtimePoint(dbId)
+          const bufferSizeLabel = getBufferSizeLabel(
+            dbType,
+            dbmsMetrics?.bufferSizeLabel ?? latestPoint?.bufferSizeLabel,
+          )
+          const bufferSizeValue = dbmsMetrics?.bufferSizeMB ?? latestPoint?.bufferSizeMB
 
           return (
             <Card key={dbId} className="bg-card border-border">
@@ -91,6 +113,12 @@ export function DbmsMetricsTab({ databases, realtimeData, getResultForDb, getDbT
                         {cacheDisplay.details}
                       </div>
                     ) : null}
+                    {dbmsMetrics?.bufferPoolHitRatio != null &&
+                      dbmsMetrics.bufferPoolHitRatio !== dbmsMetrics.cacheHitRatio && (
+                      <div className="text-xs text-muted-foreground mt-2">
+                        InnoDB buffer pool: {dbmsMetrics.bufferPoolHitRatio.toFixed(1)}%
+                      </div>
+                    )}
                   </div>
                   <div className="p-3 bg-muted rounded-lg">
                     <div className="text-sm text-muted-foreground">{getLockWaitsLabel(dbmsMetrics?.lockWaitsMode)}</div>
@@ -107,11 +135,36 @@ export function DbmsMetricsTab({ databases, realtimeData, getResultForDb, getDbT
                 </div>
 
                 <div className="pt-4 border-t border-border">
+                  <div className="text-sm text-muted-foreground mb-2">
+                    {bufferSizeLabel}
+                  </div>
+                  <div className="text-xl font-mono text-foreground">
+                    {formatDbmsBufferSize(bufferSizeValue)}
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-border">
                   <div className="text-sm text-muted-foreground mb-2">Размер БД</div>
                   <div className="text-xl font-mono text-foreground">
                     {dbmsMetrics?.totalDBSizeMB?.toFixed(2) || "—"} MB
                   </div>
                 </div>
+
+                {dbmsMetrics?.indexSizesMB && Object.keys(dbmsMetrics.indexSizesMB).length > 0 && (
+                  <div className="pt-4 border-t border-border">
+                    <div className="text-sm text-muted-foreground mb-2">Размеры индексов (топ-5)</div>
+                    <div className="space-y-1">
+                      {Object.entries(dbmsMetrics.indexSizesMB)
+                        .slice(0, 5)
+                        .map(([name, size]) => (
+                          <div key={name} className="flex justify-between text-sm">
+                            <span className="text-muted-foreground truncate mr-2">{name}</span>
+                            <span className="font-mono text-foreground">{size.toFixed(2)} MB</span>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
 
                 {dbmsMetrics?.tableSizesMB && Object.keys(dbmsMetrics.tableSizesMB).length > 0 && (
                   <div className="pt-4 border-t border-border">

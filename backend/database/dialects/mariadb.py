@@ -56,6 +56,34 @@ class MariaDBDialect(MySQLDialect):
         except Exception:
             return 0.0
 
+    async def _get_global_variable_value(self, conn, variable_name: str) -> float:
+        """Получить числовое значение config-переменной MariaDB."""
+        try:
+            result = await conn.execute(
+                text(f"SHOW GLOBAL VARIABLES LIKE '{variable_name}'")
+            )
+            row = result.fetchone()
+            if row and len(row) > 1:
+                return float(row[1] or 0)
+        except Exception:
+            pass
+
+        try:
+            result = await conn.execute(
+                text(
+                    """
+                    SELECT VARIABLE_VALUE
+                    FROM information_schema.GLOBAL_VARIABLES
+                    WHERE VARIABLE_NAME = :variable_name
+                    """
+                ),
+                {"variable_name": variable_name},
+            )
+            row = result.fetchone()
+            return float(row[0] or 0) if row else 0.0
+        except Exception:
+            return 0.0
+
     async def collect_dbms_metrics(self, conn) -> Dict[str, Any]:
         """
         Собрать внутренние метрики MariaDB.
@@ -66,6 +94,7 @@ class MariaDBDialect(MySQLDialect):
         metrics = dict(DEFAULT_DBMS_METRICS)
         metrics["table_sizes_mb"] = {}
         metrics["index_sizes_mb"] = {}
+        metrics["buffer_size_label"] = "InnoDB buffer pool"
 
         async def _safe_scalar(sql: str) -> float:
             try:
@@ -102,6 +131,9 @@ class MariaDBDialect(MySQLDialect):
             FROM information_schema.TABLES
             WHERE TABLE_SCHEMA = DATABASE()
         """)
+        metrics["buffer_size_mb"] = (
+            await self._get_global_variable_value(conn, "innodb_buffer_pool_size")
+        ) / (1024 * 1024)
 
         return metrics
 

@@ -23,6 +23,7 @@ import {
   pickAggregateAttemptRate,
   pickAggregateThroughput,
   timeSeriesAttemptRate,
+  timeSeriesSuccessfulThroughput,
 } from "@/lib/throughput-metrics"
 import { DatabaseMetricsTab } from "./dashboards/database-metrics-tab"
 import { SystemMetricsTab } from "./dashboards/system-metrics-tab"
@@ -70,6 +71,8 @@ type DashboardResult = {
   dbmsMetrics?: {
     cacheHitRatio: number
     bufferPoolHitRatio: number
+    bufferSizeMB?: number
+    bufferSizeLabel?: string
     lockWaits: number
     lockWaitsMode?: "current" | "delta" | "sampled_max"
     deadlocks: number
@@ -125,6 +128,8 @@ function mapDbmsMetrics(raw: Record<string, unknown> | null | undefined): Dashbo
     cacheHitRatioStatus: cache.cacheHitRatioStatus,
     cacheHitRatioNote: cache.cacheHitRatioNote,
     cacheHitRatioMode: cache.cacheHitRatioMode,
+    bufferSizeMB: Number(raw.buffer_size_mb) || 0,
+    bufferSizeLabel: typeof raw.buffer_size_label === "string" ? raw.buffer_size_label : undefined,
     lockWaits: Number(raw.lock_waits) || 0,
     lockWaitsMode: raw.lock_waits_mode as "current" | "delta" | "sampled_max" | undefined,
     deadlocks: Number(raw.deadlocks) || 0,
@@ -270,6 +275,7 @@ function rawHistoryPointToTimeSeries(p: HistoryTsPoint): TimeSeriesPoint {
     timestamp: new Date(p.timestamp).getTime(),
     responseTime: p.response_time ?? 0,
     attemptRate: timeSeriesAttemptRate(p),
+    throughput: timeSeriesSuccessfulThroughput(p),
     activeConnections: p.active_connections ?? 0,
     errorCount: p.error_count ?? 0,
     cpuUsage: p.cpu_usage ?? 0,

@@ -533,7 +533,11 @@ export function HistoryPage() {
                       <TableHead className="text-right">P50 (мс)</TableHead>
                       <TableHead className="text-right">P95 (мс)</TableHead>
                       <TableHead className="text-right">P99 (мс)</TableHead>
+                      <TableHead className="text-right">Min (мс)</TableHead>
+                      <TableHead className="text-right">Max (мс)</TableHead>
+                      <TableHead className="text-right">Запросов/с</TableHead>
                       <TableHead className="text-right">Успешных запросов/с</TableHead>
+                      <TableHead className="text-right">Ошибок %</TableHead>
                       <TableHead className="text-right">Успешных</TableHead>
                       <TableHead className="text-right">Ошибок</TableHead>
                     </TableRow>
@@ -551,8 +555,22 @@ export function HistoryPage() {
                         <TableCell className="text-right font-mono">{result.metrics?.p50_time_ms?.toFixed(2) ?? "-"}</TableCell>
                         <TableCell className="text-right font-mono">{result.metrics?.p95_time_ms?.toFixed(2) ?? "-"}</TableCell>
                         <TableCell className="text-right font-mono">{result.metrics?.p99_time_ms?.toFixed(2) ?? "-"}</TableCell>
+                        <TableCell className="text-right font-mono">{result.metrics?.min_time_ms?.toFixed(2) ?? "-"}</TableCell>
+                        <TableCell className="text-right font-mono">{result.metrics?.max_time_ms?.toFixed(2) ?? "-"}</TableCell>
+                        <TableCell className="text-right font-mono">
+                          {result.metrics?.attempt_rate?.toFixed(2) ?? "-"}
+                        </TableCell>
                         <TableCell className="text-right font-mono">
                           {(result.metrics?.throughput ?? result.metrics?.tps)?.toFixed(2) ?? "-"}
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          {result.metrics?.successful != null && result.metrics?.failed != null
+                            ? (
+                                (result.metrics.failed /
+                                  (result.metrics.successful + result.metrics.failed)) *
+                                100
+                              ).toFixed(1)
+                            : "-"}
                         </TableCell>
                         <TableCell className="text-right font-mono">{result.metrics?.successful ?? "-"}</TableCell>
                         <TableCell className="text-right font-mono">{result.metrics?.failed ?? "-"}</TableCell>
@@ -560,7 +578,7 @@ export function HistoryPage() {
                     ))}
                     {selectedTest.results.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={9} className="text-center text-muted-foreground">
+                        <TableCell colSpan={13} className="text-center text-muted-foreground">
                           Нет результатов
                         </TableCell>
                       </TableRow>

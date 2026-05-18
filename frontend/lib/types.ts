@@ -64,6 +64,7 @@ export interface DatabaseMetrics {
   // Производительность (одна SQL-операция = один запрос + commit)
   throughput: number            // Успешных запросов в секунду
   attemptRate?: number          // Всех запросов в секунду (успех + ошибка), итог прогона
+  stdDevResponseTime?: number   // σ задержки (мс), итог прогона
   
   // Соединения
   activeConnections: number     // Активные соединения
@@ -78,11 +79,14 @@ export interface SystemMetrics {
   cpuUsage: number              // Загрузка CPU (%)
   memoryUsageMB: number         // Использование RAM (MB)
   memoryUsagePercent: number    // Использование RAM (%)
-  diskIOps: number              // Disk I/O (ops/sec)
-  diskReadMBps: number          // Скорость чтения диска (MB/s)
-  diskWriteMBps: number         // Скорость записи диска (MB/s)
-  networkInMBps: number         // Входящий сетевой трафик (MB/s)
-  networkOutMBps: number        // Исходящий сетевой трафик (MB/s)
+  diskIOps: number              // Legacy cumulative ops (или rate в новых прогонах)
+  diskOpsPerSec?: number
+  diskReadMBps: number
+  diskWriteMBps: number
+  networkInMBps: number         // Legacy cumulative MiB
+  networkOutMBps: number
+  networkInMibPerSec?: number
+  networkOutMibPerSec?: number
 }
 
 // Метрики транзакций
@@ -100,6 +104,8 @@ export interface DBMSInternalMetrics {
   cacheHitRatioStatus?: "ok" | "no_activity" | "invalid_counter" | "unavailable" | "error"
   cacheHitRatioNote?: string
   cacheHitRatioMode?: "delta" | string
+  bufferSizeMB?: number
+  bufferSizeLabel?: string
   lockWaits: number             // Количество ожиданий блокировок
   lockWaitsMode?: "current" | "delta" | "sampled_max"
   deadlocks: number             // Количество дедлоков
@@ -131,6 +137,8 @@ export interface TimeSeriesPoint {
   responseTime: number
   /** Live: запросов SQL/с за окно (~1 с). */
   attemptRate: number
+  /** Live: успешных операций/с за окно. */
+  throughput?: number
   activeConnections: number
   errorCount: number
   
@@ -139,8 +147,13 @@ export interface TimeSeriesPoint {
   memoryUsage: number
   memoryUsageMB: number
   diskIOps: number
+  diskOpsPerSec?: number
+  diskReadMibPerSec?: number
+  diskWriteMibPerSec?: number
   networkIn: number
   networkOut: number
+  networkInMibPerSec?: number
+  networkOutMibPerSec?: number
   
   // Внутренние метрики СУБД
   cacheHitRatio?: number | null
@@ -148,6 +161,8 @@ export interface TimeSeriesPoint {
   cacheHitRatioStatus?: "ok" | "no_activity" | "invalid_counter" | "unavailable" | "error"
   cacheHitRatioNote?: string
   cacheHitRatioMode?: string
+  bufferSizeMB?: number
+  bufferSizeLabel?: string
   lockWaits: number
   deadlocks: number
 }

@@ -15,19 +15,27 @@ interface MetricsMessage {
     timestamp: string
     response_time: number
     attempt_rate: number
+    throughput?: number
     active_connections: number
     error_count: number
     cpu_usage: number
     memory_usage: number
     memory_usage_mb: number
     disk_iops: number
+    disk_ops_per_sec?: number
+    disk_read_mib_per_sec?: number
+    disk_write_mib_per_sec?: number
     network_in: number
     network_out: number
+    network_in_mib_per_sec?: number
+    network_out_mib_per_sec?: number
     cache_hit_ratio?: number | null
     buffer_pool_hit_ratio?: number | null
     cache_hit_ratio_status?: string
     cache_hit_ratio_note?: string
     cache_hit_ratio_mode?: string
+    buffer_size_mb?: number
+    buffer_size_label?: string
     lock_waits: number
     deadlocks: number
     progress: number
@@ -168,19 +176,27 @@ export function useTestWebSocket({
             timestamp: new Date(metricsData.timestamp).getTime(),
             responseTime: metricsData.response_time,
             attemptRate: metricsData.attempt_rate ?? 0,
+            throughput: metricsData.throughput ?? 0,
             activeConnections: metricsData.active_connections,
             errorCount: metricsData.error_count,
             cpuUsage: metricsData.cpu_usage,
             memoryUsage: metricsData.memory_usage,
             memoryUsageMB: metricsData.memory_usage_mb,
             diskIOps: metricsData.disk_iops,
+            diskOpsPerSec: metricsData.disk_ops_per_sec,
+            diskReadMibPerSec: metricsData.disk_read_mib_per_sec,
+            diskWriteMibPerSec: metricsData.disk_write_mib_per_sec,
             networkIn: metricsData.network_in,
             networkOut: metricsData.network_out,
+            networkInMibPerSec: metricsData.network_in_mib_per_sec,
+            networkOutMibPerSec: metricsData.network_out_mib_per_sec,
             cacheHitRatio: metricsData.cache_hit_ratio ?? null,
             bufferPoolHitRatio: metricsData.buffer_pool_hit_ratio ?? null,
             cacheHitRatioStatus: metricsData.cache_hit_ratio_status,
             cacheHitRatioNote: metricsData.cache_hit_ratio_note,
             cacheHitRatioMode: metricsData.cache_hit_ratio_mode,
+            bufferSizeMB: metricsData.buffer_size_mb ?? 0,
+            bufferSizeLabel: metricsData.buffer_size_label,
             lockWaits: metricsData.lock_waits,
             deadlocks: metricsData.deadlocks,
           }

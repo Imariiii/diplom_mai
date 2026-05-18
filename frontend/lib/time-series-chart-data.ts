@@ -77,9 +77,13 @@ export function buildChartDataFromTimeSeries(
       const gapRow: ChartRow = { elapsedSeconds: prevElapsed + gapThreshold / 2 }
       gapRow[`${dbId}_responseTime`] = null
       gapRow[`${dbId}_attemptRate`] = null
+      gapRow[`${dbId}_throughput`] = null
       gapRow[`${dbId}_cpu`] = null
       gapRow[`${dbId}_memory`] = null
+      gapRow[`${dbId}_memoryMB`] = null
       gapRow[`${dbId}_diskIO`] = null
+      gapRow[`${dbId}_networkIn`] = null
+      gapRow[`${dbId}_networkOut`] = null
       gapRow[`${dbId}_connections`] = null
       gapRow[`${dbId}_errors`] = null
       rows.push(gapRow)
@@ -95,9 +99,13 @@ export function buildChartDataFromTimeSeries(
 
     row[`${dbId}_responseTime`] = point.responseTime ?? 0
     row[`${dbId}_attemptRate`] = point.attemptRate ?? 0
+    row[`${dbId}_throughput`] = point.throughput ?? 0
     row[`${dbId}_cpu`] = point.cpuUsage ?? 0
     row[`${dbId}_memory`] = point.memoryUsage ?? 0
-    row[`${dbId}_diskIO`] = point.diskIOps ?? 0
+    row[`${dbId}_memoryMB`] = point.memoryUsageMB ?? 0
+    row[`${dbId}_diskIO`] = point.diskOpsPerSec ?? point.diskIOps ?? 0
+    row[`${dbId}_networkIn`] = point.networkInMibPerSec ?? point.networkIn ?? 0
+    row[`${dbId}_networkOut`] = point.networkOutMibPerSec ?? point.networkOut ?? 0
     row[`${dbId}_connections`] = point.activeConnections ?? 0
     row[`${dbId}_errors`] = point.errorCount ?? 0
 

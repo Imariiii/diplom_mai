@@ -31,6 +31,7 @@ interface TestResult {
     activeConnections?: number
     errorCount?: number
     errorRate?: number
+    stdDevResponseTime?: number
   }
 }
 
@@ -84,20 +85,34 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
                     })}
                   </span>
                 </div>
-                {isTestFinished && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Успешных запросов/с</span>
+                  <span className="font-mono text-foreground">
+                    {formatCardSuccessfulThroughput({
+                      isTestFinished,
+                      throughput: result?.metrics?.throughput,
+                      liveThroughput: getLatestMetric(dbId, "throughput"),
+                    })}
+                  </span>
+                </div>
+                {typeof result?.metrics?.errorRate === "number" && (
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Успешных запросов/с</span>
-                    <span className="font-mono text-foreground">
-                      {formatCardSuccessfulThroughput(result?.metrics?.throughput)}
-                    </span>
+                    <span className="text-muted-foreground">Доля ошибок</span>
+                    <span className="font-mono text-foreground">{result.metrics.errorRate.toFixed(1)}%</span>
                   </div>
                 )}
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Соединения</span>
-                  <span className="font-mono text-foreground">{result?.metrics?.activeConnections || virtualUsers}</span>
+                  <span className="text-muted-foreground" title="Завершённые запросы в последнем окне (~1 с)">
+                    Запросов в окне
+                  </span>
+                  <span className="font-mono text-foreground">{getLatestMetric(dbId, "activeConnections")}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Ошибки</span>
+                  <span className="text-muted-foreground">VU</span>
+                  <span className="font-mono text-foreground">{virtualUsers}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Ошибки (итог)</span>
                   <span className="font-mono text-foreground">{result?.metrics?.errorCount || 0}</span>
                 </div>
                 {result?.indexInfo?.enabled && (
@@ -114,14 +129,14 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
         })}
       </div>
 
-      {showCharts && (
+      {isTestFinished && (
         <Card className="bg-card border-border">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-foreground">
               <Clock className="h-5 w-5 text-primary" />
               Время отклика (перцентили)
             </CardTitle>
-            <CardDescription>avg, p50, p95, p99 для каждой СУБД</CardDescription>
+            <CardDescription>Итоговая статистика за прогон: avg, p50, p95, p99 для каждой СУБД</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -159,6 +174,12 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
                         <span className="text-muted-foreground">Max:</span>
                         <span className="font-mono text-foreground">{formatMetric(metrics?.maxResponseTime) ?? "—"} ms</span>
                       </div>
+                      {typeof metrics?.stdDevResponseTime === "number" && metrics.stdDevResponseTime > 0 && (
+                        <div className="flex justify-between col-span-2">
+                          <span className="text-muted-foreground">σ (станд. откл.):</span>
+                          <span className="font-mono text-foreground">{formatMetric(metrics.stdDevResponseTime)} ms</span>
+                        </div>
+                      )}
                       {result?.indexInfo?.enabled && (
                         <>
                           <div className="flex justify-between">
@@ -188,7 +209,13 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
       )}
 
       {showCharts && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            {isTestFinished
+              ? "Временные ряды за прогон (обновлялись в реальном времени)"
+              : "Динамика во время теста (окно сэмпла ~1 с)"}
+          </p>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <TimeSeriesChart
             title="Время отклика (ms)"
             icon={<Clock className="h-5 w-5 text-primary" />}
@@ -217,7 +244,21 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
             xAxisTitle={chartXAxisTitle}
           />
           <TimeSeriesChart
-            title="Активные соединения"
+            title="Успешных запросов/с"
+            description="Только успешные SQL-операции за окно сэмпла"
+            icon={<Gauge className="h-5 w-5 text-primary" />}
+            data={chartData}
+            databases={databases}
+            dbNames={DB_NAMES}
+            getDbColor={getDbColor}
+            metricKey="throughput"
+            chartType="area"
+            customDbNames={Object.fromEntries(databases.map(db => [db, getDbDisplayName(db)]))}
+            getDbType={getDbType}
+            xAxisTitle={chartXAxisTitle}
+          />
+          <TimeSeriesChart
+            title="Запросов в окне"
             icon={<Users className="h-5 w-5 text-primary" />}
             data={chartData}
             databases={databases}
@@ -242,6 +283,7 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
             getDbType={getDbType}
             xAxisTitle={chartXAxisTitle}
           />
+          </div>
         </div>
       )}
     </div>

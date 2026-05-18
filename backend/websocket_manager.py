@@ -21,6 +21,7 @@ class TestMetricsUpdate:
     # Метрики производительности (realtime: attempt_rate — запросов SQL/с за окно)
     response_time: float = 0.0
     attempt_rate: float = 0.0
+    throughput: float = 0.0  # успешных операций/с за окно (additive)
     active_connections: int = 0
     error_count: int = 0
     
@@ -31,6 +32,11 @@ class TestMetricsUpdate:
     disk_iops: float = 0.0
     network_in: float = 0.0
     network_out: float = 0.0
+    disk_ops_per_sec: float = 0.0
+    disk_read_mib_per_sec: float = 0.0
+    disk_write_mib_per_sec: float = 0.0
+    network_in_mib_per_sec: float = 0.0
+    network_out_mib_per_sec: float = 0.0
     
     # Внутренние метрики СУБД
     cache_hit_ratio: Optional[float] = None
@@ -38,6 +44,8 @@ class TestMetricsUpdate:
     cache_hit_ratio_status: Optional[str] = None
     cache_hit_ratio_note: Optional[str] = None
     cache_hit_ratio_mode: Optional[str] = None
+    buffer_size_mb: float = 0.0
+    buffer_size_label: Optional[str] = None
     lock_waits: int = 0
     deadlocks: int = 0
     
@@ -314,17 +322,25 @@ class TestStreamingCallback:
         attempt_rate: float,
         successful: int,
         failed: int,
+        throughput: float = 0,
         cpu_usage: float = 0,
         memory_usage: float = 0,
         memory_usage_mb: float = 0,
         disk_iops: float = 0,
         network_in: float = 0,
         network_out: float = 0,
+        disk_ops_per_sec: float = 0,
+        disk_read_mib_per_sec: float = 0,
+        disk_write_mib_per_sec: float = 0,
+        network_in_mib_per_sec: float = 0,
+        network_out_mib_per_sec: float = 0,
         cache_hit_ratio: Optional[float] = None,
         buffer_pool_hit_ratio: Optional[float] = None,
         cache_hit_ratio_status: Optional[str] = None,
         cache_hit_ratio_note: Optional[str] = None,
         cache_hit_ratio_mode: Optional[str] = None,
+        buffer_size_mb: float = 0,
+        buffer_size_label: Optional[str] = None,
         lock_waits: int = 0,
         deadlocks: int = 0,
         db_name: str = "",
@@ -359,6 +375,7 @@ class TestStreamingCallback:
                 progress=progress,
                 response_time=response_time,
                 attempt_rate=attempt_rate,
+                throughput=throughput,
                 successful=successful,
                 failed=failed,
                 cpu_usage=cpu_usage,
@@ -367,11 +384,18 @@ class TestStreamingCallback:
                 disk_iops=disk_iops,
                 network_in=network_in,
                 network_out=network_out,
+                disk_ops_per_sec=disk_ops_per_sec,
+                disk_read_mib_per_sec=disk_read_mib_per_sec,
+                disk_write_mib_per_sec=disk_write_mib_per_sec,
+                network_in_mib_per_sec=network_in_mib_per_sec,
+                network_out_mib_per_sec=network_out_mib_per_sec,
                 cache_hit_ratio=cache_hit_ratio,
                 buffer_pool_hit_ratio=buffer_pool_hit_ratio,
                 cache_hit_ratio_status=cache_hit_ratio_status,
                 cache_hit_ratio_note=cache_hit_ratio_note,
                 cache_hit_ratio_mode=cache_hit_ratio_mode,
+                buffer_size_mb=buffer_size_mb,
+                buffer_size_label=buffer_size_label,
                 lock_waits=lock_waits,
                 deadlocks=deadlocks,
             )
@@ -388,17 +412,25 @@ class TestStreamingCallback:
         attempt_rate: float,
         successful: int,
         failed: int,
+        throughput: float,
         cpu_usage: float,
         memory_usage: float,
         memory_usage_mb: float,
         disk_iops: float,
         network_in: float,
         network_out: float,
+        disk_ops_per_sec: float,
+        disk_read_mib_per_sec: float,
+        disk_write_mib_per_sec: float,
+        network_in_mib_per_sec: float,
+        network_out_mib_per_sec: float,
         cache_hit_ratio: Optional[float],
         buffer_pool_hit_ratio: Optional[float],
         cache_hit_ratio_status: Optional[str] = None,
         cache_hit_ratio_note: Optional[str] = None,
         cache_hit_ratio_mode: Optional[str] = None,
+        buffer_size_mb: float = 0,
+        buffer_size_label: Optional[str] = None,
         lock_waits: int = 0,
         deadlocks: int = 0,
     ) -> None:
@@ -411,6 +443,7 @@ class TestStreamingCallback:
             timestamp=now.isoformat(),
             response_time=response_time,
             attempt_rate=attempt_rate,
+            throughput=throughput,
             active_connections=successful + failed,
             error_count=failed,
             cpu_usage=cpu_usage,
@@ -419,11 +452,18 @@ class TestStreamingCallback:
             disk_iops=disk_iops,
             network_in=network_in,
             network_out=network_out,
+            disk_ops_per_sec=disk_ops_per_sec,
+            disk_read_mib_per_sec=disk_read_mib_per_sec,
+            disk_write_mib_per_sec=disk_write_mib_per_sec,
+            network_in_mib_per_sec=network_in_mib_per_sec,
+            network_out_mib_per_sec=network_out_mib_per_sec,
             cache_hit_ratio=cache_hit_ratio,
             buffer_pool_hit_ratio=buffer_pool_hit_ratio,
             cache_hit_ratio_status=cache_hit_ratio_status,
             cache_hit_ratio_note=cache_hit_ratio_note,
             cache_hit_ratio_mode=cache_hit_ratio_mode,
+            buffer_size_mb=buffer_size_mb,
+            buffer_size_label=buffer_size_label,
             lock_waits=lock_waits,
             deadlocks=deadlocks,
             progress=progress,
@@ -446,14 +486,19 @@ class TestStreamingCallback:
                     timestamp=now,
                     response_time=response_time,
                     attempt_rate=attempt_rate,
+                    throughput=throughput,
+                    successful_throughput=throughput,
                     active_connections=successful + failed,
                     error_count=failed,
                     cpu_usage=cpu_usage,
                     memory_usage=memory_usage,
                     memory_usage_mb=memory_usage_mb,
                     disk_iops=disk_iops,
+                    disk_ops_per_sec=disk_ops_per_sec,
                     network_in=network_in,
                     network_out=network_out,
+                    network_in_mib_per_sec=network_in_mib_per_sec,
+                    network_out_mib_per_sec=network_out_mib_per_sec,
                 )
 
                 self.metric_samples_buffer.append({
@@ -463,7 +508,7 @@ class TestStreamingCallback:
                     'sample_type': 'throughput_realtime',
                     'timestamp': now,
                     'latency_ms': response_time,
-                    'throughput': None,
+                    'throughput': throughput,
                     'attempt_rate': attempt_rate,
                     'is_error': failed > 0,
                     'error_message': None,

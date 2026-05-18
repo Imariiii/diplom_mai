@@ -249,34 +249,59 @@ class TestRepository(BaseRepository):
         response_time: Optional[float] = None,
         attempt_rate: Optional[float] = None,
         throughput: Optional[float] = None,
+        successful_throughput: Optional[float] = None,
         active_connections: Optional[int] = None,
         error_count: int = 0,
         cpu_usage: Optional[float] = None,
         memory_usage: Optional[float] = None,
         memory_usage_mb: Optional[float] = None,
         disk_iops: Optional[float] = None,
+        disk_ops_per_sec: Optional[float] = None,
         network_in: Optional[float] = None,
-        network_out: Optional[float] = None
+        network_out: Optional[float] = None,
+        network_in_mib_per_sec: Optional[float] = None,
+        network_out_mib_per_sec: Optional[float] = None,
     ) -> TimeSeries:
-        """Добавить точку временного ряда (live: attempt_rate хранится в колонке throughput)."""
+        """
+        Добавить точку временного ряда.
+
+        Legacy: колонка throughput = attempt_rate (все запросы/с).
+        Колонка tps = successful_throughput (успешных/с), если передана.
+        disk_iops: rate (disk_ops_per_sec), если передан, иначе cumulative legacy.
+        network_in/out: rate MiB/s, если переданы *_mib_per_sec, иначе cumulative legacy.
+        """
         async with self.SessionLocal() as session:
-            stored_throughput = throughput if throughput is not None else attempt_rate
+            stored_attempt_rate = attempt_rate if attempt_rate is not None else throughput
+            stored_tps = successful_throughput if successful_throughput is not None else None
+            stored_disk = (
+                disk_ops_per_sec if disk_ops_per_sec is not None else disk_iops
+            )
+            stored_net_in = (
+                network_in_mib_per_sec
+                if network_in_mib_per_sec is not None
+                else network_in
+            )
+            stored_net_out = (
+                network_out_mib_per_sec
+                if network_out_mib_per_sec is not None
+                else network_out
+            )
             point = TimeSeries(
                 test_run_id=uuid.UUID(test_run_id),
                 db_type=db_type,
                 connection_key=connection_key,
                 timestamp=timestamp,
                 response_time=response_time,
-                tps=None,
-                throughput=stored_throughput,
+                tps=stored_tps,
+                throughput=stored_attempt_rate,
                 active_connections=active_connections,
                 error_count=error_count,
                 cpu_usage=cpu_usage,
                 memory_usage=memory_usage,
                 memory_usage_mb=memory_usage_mb,
-                disk_iops=disk_iops,
-                network_in=network_in,
-                network_out=network_out
+                disk_iops=stored_disk,
+                network_in=stored_net_in,
+                network_out=stored_net_out,
             )
             session.add(point)
             await session.commit()

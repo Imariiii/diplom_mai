@@ -1,6 +1,6 @@
 "use client"
 
-import { Cpu, HardDrive } from "lucide-react"
+import { Cpu, HardDrive, Network } from "lucide-react"
 import { DB_NAMES, getDbColor } from "@/lib/chart-colors"
 import type { ChartTimelineMode } from "@/lib/time-series-chart-data"
 import { ChartTimelineModeToggle } from "./shared/chart-timeline-mode-toggle"
@@ -66,13 +66,53 @@ export function SystemMetricsTab({ databases, chartData, getDbType, getDbDisplay
           xAxisTitle={chartXAxisTitle}
         />
         <TimeSeriesChart
-          title="Disk I/O (ops/sec)"
+          title="Использование RAM (МБ)"
+          icon={<HardDrive className="h-5 w-5 text-primary" />}
+          data={chartData}
+          databases={databases}
+          dbNames={DB_NAMES}
+          getDbColor={resolveDbColor}
+          metricKey="memoryMB"
+          chartType="line"
+          customDbNames={customDbNames}
+          getDbType={getDbType}
+          xAxisTitle={chartXAxisTitle}
+        />
+        <TimeSeriesChart
+          title="Disk I/O (ops/s)"
+          description="Скорость операций диска за интервал сэмпла"
           icon={<HardDrive className="h-5 w-5 text-primary" />}
           data={chartData}
           databases={databases}
           dbNames={DB_NAMES}
           getDbColor={resolveDbColor}
           metricKey="diskIO"
+          chartType="area"
+          customDbNames={customDbNames}
+          getDbType={getDbType}
+          xAxisTitle={chartXAxisTitle}
+        />
+        <TimeSeriesChart
+          title="Сеть: входящий (MiB/s)"
+          icon={<Network className="h-5 w-5 text-primary" />}
+          data={chartData}
+          databases={databases}
+          dbNames={DB_NAMES}
+          getDbColor={resolveDbColor}
+          metricKey="networkIn"
+          chartType="area"
+          customDbNames={customDbNames}
+          getDbType={getDbType}
+          xAxisTitle={chartXAxisTitle}
+        />
+        <TimeSeriesChart
+          title="Сеть: исходящий (MiB/s)"
+          icon={<Network className="h-5 w-5 text-primary" />}
+          data={chartData}
+          databases={databases}
+          dbNames={DB_NAMES}
+          getDbColor={resolveDbColor}
+          metricKey="networkOut"
           chartType="area"
           customDbNames={customDbNames}
           getDbType={getDbType}

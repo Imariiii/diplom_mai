@@ -99,7 +99,8 @@ export function DashboardsPage() {
                       if (!aggregateByDb[dbKey]) {
                         aggregateByDb[dbKey] = {
                           avgTimes: [], p50Times: [], p95Times: [], p99Times: [],
-                          minTimes: [], maxTimes: [], throughputValues: [], attemptRateValues: [],
+                          minTimes: [], maxTimes: [], stdDevTimes: [],
+                          throughputValues: [], attemptRateValues: [],
                           activeConnections: [], successful: 0, failed: 0, selfCheckWarnings: [],
                         }
                       }
@@ -110,6 +111,7 @@ export function DashboardsPage() {
                       if (typeof stats.p99_time_ms === "number") bucket.p99Times.push(stats.p99_time_ms)
                       if (typeof stats.min_time_ms === "number") bucket.minTimes.push(stats.min_time_ms)
                       if (typeof stats.max_time_ms === "number") bucket.maxTimes.push(stats.max_time_ms)
+                      if (typeof stats.std_dev_ms === "number") bucket.stdDevTimes.push(stats.std_dev_ms)
                       const tp = pickAggregateThroughput(stats)
                       if (tp !== undefined) bucket.throughputValues.push(tp)
                       const ar = pickAggregateAttemptRate(stats)
@@ -130,7 +132,8 @@ export function DashboardsPage() {
                     if (!aggregateByDb[dbKey]) {
                       aggregateByDb[dbKey] = {
                         avgTimes: [], p50Times: [], p95Times: [], p99Times: [],
-                        minTimes: [], maxTimes: [], throughputValues: [], attemptRateValues: [],
+                        minTimes: [], maxTimes: [], stdDevTimes: [],
+                        throughputValues: [], attemptRateValues: [],
                           activeConnections: [], successful: 0, failed: 0, selfCheckWarnings: [],
                       }
                     }
@@ -141,6 +144,7 @@ export function DashboardsPage() {
                     if (typeof stats.p99_time_ms === "number") bucket.p99Times.push(stats.p99_time_ms)
                     if (typeof stats.min_time_ms === "number") bucket.minTimes.push(stats.min_time_ms)
                     if (typeof stats.max_time_ms === "number") bucket.maxTimes.push(stats.max_time_ms)
+                    if (typeof stats.std_dev_ms === "number") bucket.stdDevTimes.push(stats.std_dev_ms)
                     const tpRow = pickAggregateThroughput(stats)
                     if (tpRow !== undefined) bucket.throughputValues.push(tpRow)
                     const arRow = pickAggregateAttemptRate(stats)
@@ -188,6 +192,9 @@ export function DashboardsPage() {
                         : testConfig.virtualUsers,
                       errorCount: bucket.failed,
                       errorRate: totalTransactions > 0 ? (bucket.failed / totalTransactions) * 100 : 0,
+                      stdDevResponseTime: bucket.stdDevTimes.length
+                        ? average(bucket.stdDevTimes)
+                        : undefined,
                     },
                     dbmsMetrics: dbmsMetricsData ? (() => {
                       const cache = mapRawDbmsCacheFields(dbmsMetricsData as Record<string, unknown>)
@@ -197,6 +204,10 @@ export function DashboardsPage() {
                       cacheHitRatioStatus: cache.cacheHitRatioStatus,
                       cacheHitRatioNote: cache.cacheHitRatioNote,
                       cacheHitRatioMode: cache.cacheHitRatioMode,
+                      bufferSizeMB: Number(dbmsMetricsData.buffer_size_mb) || 0,
+                      bufferSizeLabel: typeof dbmsMetricsData.buffer_size_label === "string"
+                        ? dbmsMetricsData.buffer_size_label
+                        : undefined,
                       lockWaits: dbmsMetricsData.lock_waits || 0,
                       lockWaitsMode: dbmsMetricsData.lock_waits_mode,
                       deadlocks: dbmsMetricsData.deadlocks || 0,
@@ -545,7 +556,7 @@ export function DashboardsPage() {
             <Database className="h-4 w-4 mr-2" />
             База данных
           </TabsTrigger>
-          {isTestFinished && (
+          {chartDatabases.length > 0 && (
             <TabsTrigger value="system" className="text-foreground data-[state=active]:text-foreground">
               <Cpu className="h-4 w-4 mr-2" />
               Системные
@@ -573,14 +584,14 @@ export function DashboardsPage() {
             getDbType={getDbType}
             virtualUsers={testConfig.virtualUsers}
             isTestFinished={isTestFinished}
-            showCharts={isTestFinished}
+            showCharts={chartDatabases.length > 0}
             chartXAxisTitle={chartXAxisTitle}
             chartTimelineMode={chartTimelineMode}
             onChartTimelineModeChange={setChartTimelineMode}
           />
         </TabsContent>
 
-        {isTestFinished && (
+        {chartDatabases.length > 0 && (
           <TabsContent value="system">
             <SystemMetricsTab
               databases={chartDatabases}

@@ -10,9 +10,10 @@ function makePoint(timestamp: number, responseTime = 10): TimeSeriesPoint {
   return {
     timestamp,
     responseTime,
-    attemptRate: 1,
-    activeConnections: 1,
-    errorCount: 0,
+    attemptRate: 12,
+    throughput: 8,
+    activeConnections: 3,
+    errorCount: 1,
     cpuUsage: 0,
     memoryUsage: 0,
     memoryUsageMB: 0,
@@ -27,6 +28,24 @@ function makePoint(timestamp: number, responseTime = 10): TimeSeriesPoint {
 }
 
 describe("buildChartDataFromTimeSeries", () => {
+  it("maps database tab chart metric keys (responseTime, attemptRate, throughput, connections, errors)", () => {
+    const rows = buildChartDataFromTimeSeries({
+      dbA: [makePoint(1000)],
+    })
+    const row = rows.find((r) => r.dbA_responseTime === 10)
+    expect(row?.dbA_attemptRate).toBe(12)
+    expect(row?.dbA_throughput).toBe(8)
+    expect(row?.dbA_connections).toBe(3)
+    expect(row?.dbA_errors).toBe(1)
+
+    const metricKeys = ["responseTime", "attemptRate", "throughput", "connections", "errors"] as const
+    for (const metricKey of metricKeys) {
+      const trace = extractDatabaseTrace(rows, "dbA", metricKey)
+      expect(trace.y).toHaveLength(1)
+      expect(trace.y[0]).not.toBeNull()
+    }
+  })
+
   it("uses a shared anchor across databases", () => {
     const rows = buildChartDataFromTimeSeries({
       dbA: [makePoint(1000)],

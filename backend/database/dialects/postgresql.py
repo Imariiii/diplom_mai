@@ -292,6 +292,7 @@ class PostgreSQLDialect(DbmsDialect):
         metrics = dict(DEFAULT_DBMS_METRICS)
         metrics["table_sizes_mb"] = {}
         metrics["index_sizes_mb"] = {}
+        metrics["buffer_size_label"] = "shared_buffers"
 
         result = await conn.execute(text("""
             SELECT count(*)
@@ -326,6 +327,13 @@ class PostgreSQLDialect(DbmsDialect):
         row = result.fetchone()
         if row:
             metrics["total_db_size_mb"] = float(row[0] or 0)
+
+        result = await conn.execute(text("""
+            SELECT pg_size_bytes(current_setting('shared_buffers')) / (1024 * 1024) as size_mb
+        """))
+        row = result.fetchone()
+        if row:
+            metrics["buffer_size_mb"] = float(row[0] or 0)
 
         return metrics
 
