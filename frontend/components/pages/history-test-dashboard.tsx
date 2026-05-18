@@ -13,6 +13,12 @@ import type { HistoryTestResult, HistoryTestRun } from "@/lib/api"
 import { DB_NAMES } from "@/lib/chart-colors"
 import { getVisibleSelfCheckWarnings } from "@/lib/self-check"
 import type { TestResult, TimeSeriesPoint } from "@/lib/types"
+import {
+  buildChartDataFromTimeSeries,
+  CHART_TIMELINE_AXIS_TITLE,
+  type ChartTimelineMode,
+} from "@/lib/time-series-chart-data"
+import { ChartTimelineModeToggle } from "./dashboards/shared/chart-timeline-mode-toggle"
 import { DatabaseMetricsTab } from "./dashboards/database-metrics-tab"
 import { SystemMetricsTab } from "./dashboards/system-metrics-tab"
 import { TransactionMetricsTab } from "./dashboards/transaction-metrics-tab"
@@ -284,32 +290,6 @@ function buildRealtimeByConnection(
   return out
 }
 
-function buildChartDataFromRealtime(realtimeData: Record<string, TimeSeriesPoint[]>): Record<string, unknown>[] {
-  const byElapsed: Record<number, Record<string, unknown>> = {}
-  for (const [dbId, pts] of Object.entries(realtimeData)) {
-    if (!pts.length) continue
-    const startTs = pts[0].timestamp
-    for (const point of pts) {
-      const elapsedSeconds = Math.max(0, Math.round((point.timestamp - startTs) / 1000))
-      if (!byElapsed[elapsedSeconds]) {
-        byElapsed[elapsedSeconds] = { elapsedSeconds }
-      }
-      byElapsed[elapsedSeconds][`${dbId}_responseTime`] = point.responseTime ?? 0
-      byElapsed[elapsedSeconds][`${dbId}_throughput`] = point.throughput ?? 0
-      byElapsed[elapsedSeconds][`${dbId}_tps`] = point.tps ?? 0
-      byElapsed[elapsedSeconds][`${dbId}_cpu`] = point.cpuUsage ?? 0
-      byElapsed[elapsedSeconds][`${dbId}_memory`] = point.memoryUsage ?? 0
-      byElapsed[elapsedSeconds][`${dbId}_diskIO`] = point.diskIOps ?? 0
-      byElapsed[elapsedSeconds][`${dbId}_connections`] = point.activeConnections ?? 0
-      byElapsed[elapsedSeconds][`${dbId}_errors`] = point.errorCount ?? 0
-    }
-  }
-
-  return Object.values(byElapsed).sort(
-    (a, b) => Number(a.elapsedSeconds || 0) - Number(b.elapsedSeconds || 0),
-  )
-}
-
 export function HistoryTestDashboard({
   test,
   virtualUsers,
@@ -318,6 +298,7 @@ export function HistoryTestDashboard({
   virtualUsers: number
 }) {
   const [tsPoints, setTsPoints] = useState<HistoryTsPoint[]>([])
+  const [chartTimelineMode, setChartTimelineMode] = useState<ChartTimelineMode>("timeline")
 
   const { formattedResults, connectionNames, connectionDbTypes } = useMemo(
     () => aggregateHistoryResults(test.results || []),
@@ -347,7 +328,11 @@ export function HistoryTestDashboard({
     [formattedResults, tsPoints],
   )
 
-  const chartData = useMemo(() => buildChartDataFromRealtime(realtimeData), [realtimeData])
+  const chartData = useMemo(
+    () => buildChartDataFromTimeSeries(realtimeData, { mode: chartTimelineMode }),
+    [realtimeData, chartTimelineMode],
+  )
+  const chartXAxisTitle = CHART_TIMELINE_AXIS_TITLE[chartTimelineMode]
 
   const chartDatabases = useMemo(() => {
     if (Object.keys(realtimeData).length > 0) {
@@ -427,6 +412,12 @@ export function HistoryTestDashboard({
 
   return (
     <Tabs defaultValue="database" className="space-y-4">
+      {chartDatabases.length > 1 && (
+        <ChartTimelineModeToggle
+          value={chartTimelineMode}
+          onChange={setChartTimelineMode}
+        />
+      )}
       <TabsList className="bg-muted">
         <TabsTrigger value="database" className="text-foreground data-[state=active]:text-foreground">
           <Database className="h-4 w-4 mr-2" />
@@ -460,6 +451,7 @@ export function HistoryTestDashboard({
           getDbType={getDbType}
           virtualUsers={virtualUsers}
           showCharts={isTestFinished}
+          chartXAxisTitle={chartXAxisTitle}
         />
       </TabsContent>
 
@@ -470,6 +462,7 @@ export function HistoryTestDashboard({
             chartData={chartData}
             getDbType={getDbType}
             getDbDisplayName={getDbDisplayName}
+            chartXAxisTitle={chartXAxisTitle}
           />
         </TabsContent>
       )}

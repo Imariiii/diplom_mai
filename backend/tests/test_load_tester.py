@@ -68,6 +68,10 @@ def tester():
         "lock_waits": 2,
         "deadlocks": 0,
     })
+    lt._dbms_metrics_cache = {}
+    lt._dbms_metrics_cache_at = {}
+    lt._dbms_metrics_cache_ttl = 5.0
+    lt._cancel_requested = False
     return lt
 
 
@@ -285,12 +289,30 @@ class TestRunWorkers:
         tester.db_connection.ensure_pool_size.assert_awaited_once_with("conn_pg", 3)
         assert tester._emit_metrics.await_count >= 1
 
+    @pytest.mark.asyncio
+    async def test_run_workers_vu1_emits_final_partial_window(self, tester):
+        async def query_func():
+            await asyncio.sleep(0)
+            return {"execution_time_ms": 5.0, "error": None}
+
+        tester._is_streaming = True
+        tester._streaming_interval = 10.0
+        tester._emit_metrics = AsyncMock()
+
+        await tester._run_workers("conn_pg", iterations=3, virtual_users=1, query_func=query_func)
+
+        tester._emit_metrics.assert_awaited_once()
+        assert tester._emit_metrics.await_args.kwargs.get("window_end_perf") is not None
+
 
 class TestEmitMetrics:
     @pytest.mark.asyncio
     async def test_emit_metrics_calls_callback_with_enriched_metrics(self, tester):
         tester._metrics_callback = MagicMock()
         tester._metrics_callback.on_metrics = AsyncMock()
+        tester._metrics_callback.perf_to_sample_time = MagicMock(
+            return_value=(datetime(2026, 1, 1, 12, 0, 5, tzinfo=timezone.utc), 5)
+        )
         tester._is_streaming = True
 
         await tester._emit_metrics(
@@ -299,6 +321,7 @@ class TestEmitMetrics:
             tps=34.0,
             successful=10,
             failed=1,
+            window_end_perf=5.0,
         )
 
         tester._metrics_callback.on_metrics.assert_awaited_once()
@@ -310,11 +333,24 @@ class TestEmitMetrics:
         assert kwargs["tps"] == 34.0
         assert kwargs["cpu_usage"] == 10.0
         assert kwargs["cache_hit_ratio"] == 95.0
+        assert kwargs["sample_timestamp"] == datetime(2026, 1, 1, 12, 0, 5, tzinfo=timezone.utc)
+        assert kwargs["elapsed_seconds"] == 5
+
+    @pytest.mark.asyncio
+    async def test_get_cached_dbms_metrics_reuses_cache_within_ttl(self, tester):
+        tester.get_dbms_metrics = AsyncMock(return_value={"cache_hit_ratio": 80.0})
+        first = await tester._get_cached_dbms_metrics("conn_pg")
+        second = await tester._get_cached_dbms_metrics("conn_pg")
+        assert first == second
+        tester.get_dbms_metrics.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_emit_metrics_swallows_callback_errors(self, tester):
         tester._metrics_callback = MagicMock()
         tester._metrics_callback.on_metrics = AsyncMock(side_effect=RuntimeError("ws fail"))
+        tester._metrics_callback.perf_to_sample_time = MagicMock(
+            return_value=(datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc), 0)
+        )
         tester._is_streaming = True
 
         await tester._emit_metrics(
@@ -383,6 +419,58 @@ class TestSelfCheckIntegration:
         assert "self_check" in stats
         assert "littles_law" in stats["self_check"]
         assert isinstance(stats["self_check"]["warnings"], list)
+
+
+class TestStreamingCallbackSampleTime:
+    def test_perf_to_sample_time_uses_wall_start(self):
+        manager = MagicMock()
+        callback = StreamingCallback("test-1", manager, repository=None)
+        wall_start = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        callback.set_wall_start(wall_start)
+        callback.start_time = 100.0
+
+        sample_ts, elapsed = callback.perf_to_sample_time(103.0)
+
+        assert elapsed == 3
+        assert sample_ts == wall_start + timedelta(seconds=3)
+
+    @pytest.mark.asyncio
+    async def test_on_metrics_uses_explicit_sample_timestamp(self):
+        manager = MagicMock()
+        manager.send_metrics_update = AsyncMock()
+        repository = AsyncMock()
+        repository.add_time_series_point = AsyncMock()
+        callback = StreamingCallback("test-1", manager, repository=repository)
+        explicit_ts = datetime(2026, 1, 1, 12, 0, 7, tzinfo=timezone.utc)
+
+        await callback.on_metrics(
+            db_key="conn_pg",
+            db_type="postgresql",
+            db_name="PostgreSQL",
+            response_time=15.0,
+            tps=50.0,
+            successful=5,
+            failed=1,
+            sample_timestamp=explicit_ts,
+            elapsed_seconds=7,
+        )
+
+        repository.add_time_series_point.assert_awaited_once()
+        assert repository.add_time_series_point.await_args.kwargs["timestamp"] == explicit_ts
+
+    @pytest.mark.asyncio
+    async def test_drain_realtime_metrics_flushes_buffer(self):
+        manager = MagicMock()
+        manager.send_metrics_update = AsyncMock()
+        repository = AsyncMock()
+        repository.add_metric_sample_batch = AsyncMock()
+        callback = StreamingCallback("test-1", manager, repository=repository)
+        callback.metric_samples_buffer = [{"sample_type": "throughput_realtime"}]
+
+        await callback.drain_realtime_metrics()
+
+        repository.add_metric_sample_batch.assert_awaited_once()
+        assert callback.metric_samples_buffer == []
 
 
 class TestRealtimeThroughputSamples:

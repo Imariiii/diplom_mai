@@ -1,7 +1,7 @@
 """
 Pydantic схемы для управления логическими базами данных
 """
-from typing import Optional, List
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -96,3 +96,4 @@ class LogicalDatabaseValidationResponse(BaseModel):
     reference_connection_name: Optional[str] = None
     mode: str = "lenient"
     connections: List[dict] = Field(default_factory=list)
+    bundle_preflight: Dict[str, dict] = Field(default_factory=dict)

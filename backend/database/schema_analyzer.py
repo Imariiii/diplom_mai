@@ -516,10 +516,28 @@ class SchemaAnalyzer:
 
         return capabilities
 
+    def _pk_filled_by_database(self, column: ColumnInfo) -> bool:
+        """Проверить, заполнит ли СУБД значение PK при INSERT без явного значения."""
+        default_kind = (column.default_kind or "").lower()
+        default_text = (column.column_default or "").strip().lower()
+        return bool(
+            column.is_auto_generated
+            or column.has_server_default
+            or column.identity_generation
+            or default_kind in {"identity", "serial", "auto_increment", "generated", "default"}
+            or "nextval(" in default_text
+            or "auto_increment" in default_text
+        )
+
     def _is_insert_safe(self, table: TableInfo) -> bool:
         """Проверить, можно ли с высокой вероятностью безопасно собрать INSERT."""
         if not table.columns:
             return False
+
+        if table.has_single_primary_key():
+            pk_column = table.primary_key_column()
+            if pk_column and not pk_column.is_nullable and not self._pk_filled_by_database(pk_column):
+                return False
 
         required_columns = [
             column for column in table.columns

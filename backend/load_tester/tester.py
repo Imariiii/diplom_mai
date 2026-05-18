@@ -6,8 +6,8 @@ import asyncio
 import statistics
 import psutil
 import re
-from typing import Dict, List, Optional, Callable, Any
-from datetime import datetime, timezone
+from typing import Dict, List, Optional, Callable, Any, Tuple
+from datetime import datetime, timezone, timedelta
 from sqlalchemy import text
 from backend.database.connection import DatabaseConnection
 from backend.database.dialects import get_dialect
@@ -41,6 +41,9 @@ class LoadTester:
         self._is_streaming: bool = False
         self._streaming_interval: float = 1.0
         self._cancel_requested: bool = False
+        self._dbms_metrics_cache: Dict[str, Dict[str, Any]] = {}
+        self._dbms_metrics_cache_at: Dict[str, float] = {}
+        self._dbms_metrics_cache_ttl: float = 5.0
         
         psutil.cpu_percent(interval=None)
     
@@ -84,23 +87,56 @@ class LoadTester:
         """Построить ключ кэша значений для random_from_table"""
         return f"{db_key}:{table}:{column}"
     
+    def _resolve_sample_time(
+        self,
+        window_end_perf: float,
+    ) -> Tuple[datetime, int]:
+        """Преобразовать perf_counter конца окна в wall-clock время сэмпла."""
+        if self._metrics_callback and hasattr(self._metrics_callback, "perf_to_sample_time"):
+            return self._metrics_callback.perf_to_sample_time(window_end_perf)
+
+        elapsed = max(0.0, window_end_perf)
+        sample_ts = datetime.now(timezone.utc)
+        return sample_ts, int(elapsed)
+
+    async def _get_cached_dbms_metrics(self, db_key: str) -> Dict[str, Any]:
+        """Получить метрики СУБД с кэшем, чтобы не блокировать каждый realtime-тик."""
+        now = time.perf_counter()
+        cached_at = self._dbms_metrics_cache_at.get(db_key, 0.0)
+        if (
+            db_key in self._dbms_metrics_cache
+            and (now - cached_at) < self._dbms_metrics_cache_ttl
+        ):
+            return self._dbms_metrics_cache[db_key]
+
+        metrics = await self.get_dbms_metrics(db_key)
+        self._dbms_metrics_cache[db_key] = metrics
+        self._dbms_metrics_cache_at[db_key] = now
+        return metrics
+
     async def _emit_metrics(
         self,
         db_key: str,
-        response_time: float, 
+        response_time: float,
         tps: float,
         successful: int,
-        failed: int
+        failed: int,
+        window_end_perf: Optional[float] = None,
     ):
         """Отправить метрики через callback"""
         if self._metrics_callback and self._is_streaming:
             try:
+                if window_end_perf is None:
+                    window_end_perf = time.perf_counter()
+
+                sample_timestamp, elapsed_seconds = self._resolve_sample_time(window_end_perf)
+
                 db_type = self.db_connection.get_dbms_type(db_key)
                 db_name = self.db_connection.get_connection_name(db_key)
-                
+
                 system_metrics = await self.get_system_metrics(db_key)
-                dbms_metrics = await self.get_dbms_metrics(db_key)
-                
+                dbms_metrics = await self._get_cached_dbms_metrics(db_key)
+
                 await self._metrics_callback.on_metrics(
                     db_key=db_key,
                     db_type=db_type,
@@ -118,7 +154,9 @@ class LoadTester:
                     cache_hit_ratio=dbms_metrics.get('cache_hit_ratio', 0),
                     buffer_pool_hit_ratio=dbms_metrics.get('buffer_pool_hit_ratio', 0),
                     lock_waits=dbms_metrics.get('lock_waits', 0),
-                    deadlocks=dbms_metrics.get('deadlocks', 0)
+                    deadlocks=dbms_metrics.get('deadlocks', 0),
+                    sample_timestamp=sample_timestamp,
+                    elapsed_seconds=elapsed_seconds,
                 )
             except Exception as e:
                 print(f"Ошибка отправки метрик: {e}")
@@ -192,7 +230,8 @@ class LoadTester:
                             response_time=avg_response_time,
                             tps=tps,
                             successful=recent_successful,
-                            failed=recent_failed
+                            failed=recent_failed,
+                            window_end_perf=current_time,
                         )
                     recent_times = []
                     recent_successful = 0
@@ -200,6 +239,24 @@ class LoadTester:
                     last_emit_time = current_time
                 
                 await asyncio.sleep(0.01)
+
+            if self._is_streaming:
+                final_time = time.perf_counter()
+                interval = final_time - last_emit_time
+                if recent_times or recent_successful or recent_failed:
+                    avg_response_time = (
+                        statistics.mean(recent_times) if recent_times else 0.0
+                    )
+                    total_in_window = recent_successful + recent_failed
+                    final_tps = total_in_window / interval if interval > 0 else float(total_in_window)
+                    await self._emit_metrics(
+                        db_key=db_key,
+                        response_time=avg_response_time,
+                        tps=final_tps,
+                        successful=recent_successful,
+                        failed=recent_failed,
+                        window_end_perf=final_time,
+                    )
             
             return results
         
@@ -269,6 +326,7 @@ class LoadTester:
                             tps=snapshot['tps'],
                             successful=snapshot['successful'],
                             failed=snapshot['failed'],
+                            window_end_perf=now,
                         )
             except asyncio.CancelledError:
                 return
@@ -301,6 +359,7 @@ class LoadTester:
                     tps=final_tps,
                     successful=metrics_state['recent_successful'],
                     failed=metrics_state['recent_failed'],
+                    window_end_perf=now,
                 )
         
         return results

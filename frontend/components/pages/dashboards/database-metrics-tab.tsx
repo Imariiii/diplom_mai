@@ -37,9 +37,10 @@ interface DatabaseMetricsTabProps {
   virtualUsers: number
   customDbNames?: Record<string, string>
   showCharts?: boolean
+  chartXAxisTitle?: string
 }
 
-export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLatestMetric, getDbDisplayName, getDbType, virtualUsers, customDbNames, showCharts = true }: DatabaseMetricsTabProps) {
+export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLatestMetric, getDbDisplayName, getDbType, virtualUsers, customDbNames, showCharts = true, chartXAxisTitle }: DatabaseMetricsTabProps) {
   const formatMetric = (value?: number, digits: number = 2) => {
     return typeof value === "number" ? value.toFixed(digits) : undefined
   }
@@ -168,6 +169,7 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
             chartType="line"
             customDbNames={Object.fromEntries(databases.map(db => [db, getDbDisplayName(db)]))}
             getDbType={getDbType}
+            xAxisTitle={chartXAxisTitle}
           />
           <TimeSeriesChart
             title="TPS (транзакций/сек)"
@@ -180,6 +182,7 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
             chartType="area"
             customDbNames={Object.fromEntries(databases.map(db => [db, getDbDisplayName(db)]))}
             getDbType={getDbType}
+            xAxisTitle={chartXAxisTitle}
           />
           <TimeSeriesChart
             title="Активные соединения"
@@ -192,6 +195,7 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
             chartType="line"
             customDbNames={Object.fromEntries(databases.map(db => [db, getDbDisplayName(db)]))}
             getDbType={getDbType}
+            xAxisTitle={chartXAxisTitle}
           />
           <TimeSeriesChart
             title="Количество ошибок"
@@ -204,6 +208,7 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
             chartType="line"
             customDbNames={Object.fromEntries(databases.map(db => [db, getDbDisplayName(db)]))}
             getDbType={getDbType}
+            xAxisTitle={chartXAxisTitle}
           />
         </div>
       )}

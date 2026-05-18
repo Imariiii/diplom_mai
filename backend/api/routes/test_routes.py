@@ -299,6 +299,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         manager,
         repository=test_repository if HISTORY_ENABLED and test_repository else None,
     )
+    streaming_callback.set_wall_start(start_ts)
     
     from backend.core.config import settings
     
@@ -463,6 +464,10 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                     "Сценарий не может быть запущен для выбранных БД. "
                     "Проверка совместимости SQL bundle обнаружила ошибки: "
                     + "; ".join(preflight.get("errors", []))
+                    + ". Для PostgreSQL/Pagila убедитесь, что на PK настроены sequence "
+                    "(см. ../pagila_new/rebuild.sh). Перегенерируйте common bundle: "
+                    "POST /api/logical-databases/{id}/bundles/generate. "
+                    "Проверка: GET /api/logical-databases/{id}/validate."
                 )
             if preflight.get("warnings"):
                 print(f"[TEST] Предупреждения preflight: {preflight['warnings']}")
@@ -489,10 +494,6 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
             "Финализация результатов: сбор метрик и сохранение…",
         )
 
-        end_time = time.perf_counter()
-        actual_duration = end_time - start_time
-        finish_ts = start_ts + timedelta(seconds=actual_duration)
-
         system_metrics = {}
         dbms_metrics = {}
         for db_key in db_keys:
@@ -517,26 +518,9 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                     total_transactions += stats.get('successful', 0) + stats.get('failed', 0)
             elif 'stats' in result:
                 total_transactions += result['stats'].get('successful', 0) + result['stats'].get('failed', 0)
-        
-        summary = {
-            'total_transactions': total_transactions,
-            'total_duration': actual_duration
-        }
-        print(
-            f"[TEST] Тест {test_id} завершён за {actual_duration:.1f}с. "
-            f"Транзакций: {total_transactions}"
-        )
-        
+
         if HISTORY_ENABLED and test_repository:
             try:
-                await test_repository.update_test_run_status(
-                    test_id,
-                    'completed',
-                    summary,
-                    started_at=start_ts,
-                    finished_at=finish_ts
-                )
-                
                 for result in results:
                     if 'comparison' in result:
                         for db_key, stats in result.get('comparison', {}).items():
@@ -576,6 +560,33 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                         )
             except Exception as e:
                 print(f"[HISTORY_DB] ❌ Ошибка сохранения в БД истории: {e}")
+
+        await streaming_callback.drain_realtime_metrics()
+
+        end_time = time.perf_counter()
+        actual_duration = end_time - start_time
+        finish_ts = start_ts + timedelta(seconds=actual_duration)
+
+        summary = {
+            'total_transactions': total_transactions,
+            'total_duration': actual_duration
+        }
+        print(
+            f"[TEST] Тест {test_id} завершён за {actual_duration:.1f}с. "
+            f"Транзакций: {total_transactions}"
+        )
+
+        if HISTORY_ENABLED and test_repository:
+            try:
+                await test_repository.update_test_run_status(
+                    test_id,
+                    'completed',
+                    summary,
+                    started_at=start_ts,
+                    finished_at=finish_ts
+                )
+            except Exception as e:
+                print(f"[HISTORY_DB] ❌ Ошибка обновления статуса теста: {e}")
         
         # Добавляем connection_names в результаты для frontend
         for result in results:
@@ -607,6 +618,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         active_tests[test_id]["error"] = cancel_message
         active_tests[test_id]["finished_at"] = _now_utc()
 
+        await streaming_callback.drain_realtime_metrics()
         await streaming_callback.on_status_change("cancelled", cancel_message)
 
         if HISTORY_ENABLED and test_repository:
@@ -630,6 +642,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         active_tests[test_id]["error"] = error_message
         active_tests[test_id]["finished_at"] = _now_utc()
         
+        await streaming_callback.drain_realtime_metrics()
         await streaming_callback.on_test_error(error_message)
         
         if HISTORY_ENABLED and test_repository:

@@ -9,9 +9,10 @@ interface SystemMetricsTabProps {
   chartData: Record<string, unknown>[]
   getDbType?: (dbKey: string) => string
   getDbDisplayName?: (dbKey: string) => string
+  chartXAxisTitle?: string
 }
 
-export function SystemMetricsTab({ databases, chartData, getDbType, getDbDisplayName }: SystemMetricsTabProps) {
+export function SystemMetricsTab({ databases, chartData, getDbType, getDbDisplayName, chartXAxisTitle }: SystemMetricsTabProps) {
   const resolveDbColor = (dbId: string) => {
     if (getDbType) {
       return getDbColor(getDbType(dbId))
@@ -38,6 +39,7 @@ export function SystemMetricsTab({ databases, chartData, getDbType, getDbDisplay
           yDomain={[0, 100]}
           customDbNames={customDbNames}
           getDbType={getDbType}
+          xAxisTitle={chartXAxisTitle}
         />
         <TimeSeriesChart
           title="Использование RAM (%)"
@@ -51,6 +53,7 @@ export function SystemMetricsTab({ databases, chartData, getDbType, getDbDisplay
           yDomain={[0, 100]}
           customDbNames={customDbNames}
           getDbType={getDbType}
+          xAxisTitle={chartXAxisTitle}
         />
         <TimeSeriesChart
           title="Disk I/O (ops/sec)"
@@ -63,6 +66,7 @@ export function SystemMetricsTab({ databases, chartData, getDbType, getDbDisplay
           chartType="area"
           customDbNames={customDbNames}
           getDbType={getDbType}
+          xAxisTitle={chartXAxisTitle}
         />
         <TimeSeriesChart
           title="Пропускная способность (req/s)"
@@ -75,6 +79,7 @@ export function SystemMetricsTab({ databases, chartData, getDbType, getDbDisplay
           chartType="area"
           customDbNames={customDbNames}
           getDbType={getDbType}
+          xAxisTitle={chartXAxisTitle}
         />
       </div>
     </div>

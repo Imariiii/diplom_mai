@@ -89,7 +89,13 @@ class _Bundle:
 
 
 class _BundleRepo:
-    async def get_bundle_for_profile_template(self, schema_profile_id, scenario_template_id):
+    async def get_bundle_for_profile_template(
+        self,
+        schema_profile_id,
+        scenario_template_id,
+        bundle_id=None,
+        preferred_name=None,
+    ):
         assert schema_profile_id == "profile-1"
         assert scenario_template_id == "mixed_light"
         return _Bundle()
@@ -414,6 +420,100 @@ class TestScenarioBundleResolverProfileSync:
         }
 
     @pytest.mark.asyncio
+    async def test_resolver_prefers_common_bundle_for_multi_connection_logical_db(self, monkeypatch):
+        logical_db = SimpleNamespace(
+            id="logical-1",
+            name="Sakila",
+            schema_profile_id="profile-1",
+            reference_connection_id="conn-2",
+            profile_status="confirmed",
+            compatibility_status="valid_with_warnings",
+        )
+        connections = [
+            _connection("conn-1", "Sakila", schema_profile_id="profile-1", logical_database=logical_db),
+            _connection("conn-2", "Pagila", schema_profile_id="profile-1", logical_database=logical_db),
+        ]
+        requested = {}
+
+        class _TrackingBundleRepo(_BundleRepo):
+            async def get_bundle_for_profile_template(
+                self,
+                schema_profile_id,
+                scenario_template_id,
+                bundle_id=None,
+                preferred_name=None,
+            ):
+                requested["preferred_name"] = preferred_name
+                if preferred_name == "mixed_light::Sakila::common":
+                    return _Bundle()
+                return None
+
+        async def fake_validate(self, connection_ids, reference_connection_id=None, mode="lenient"):
+            return {"valid": True, "errors": [], "warnings": []}
+
+        monkeypatch.setattr(
+            "backend.database.scenario_bundle_resolver.LogicalDatabaseValidator.validate_connections",
+            fake_validate,
+        )
+        resolver = ScenarioBundleResolver(_ConnectionRepo(connections), _TrackingBundleRepo())
+
+        resolved = await resolver.resolve_for_connections(
+            ["conn-1", "conn-2"],
+            scenario_template_id="mixed_light",
+        )
+
+        assert requested["preferred_name"] == "mixed_light::Sakila::common"
+        assert resolved["bundle"]["scenario_template_id"] == "mixed_light"
+
+    @pytest.mark.asyncio
+    async def test_resolver_requires_common_bundle_for_multi_connection_logical_db(self, monkeypatch):
+        logical_db = SimpleNamespace(
+            id="logical-1",
+            name="Sakila",
+            schema_profile_id="profile-1",
+            reference_connection_id="conn-1",
+            profile_status="confirmed",
+            compatibility_status="valid",
+        )
+        connections = [
+            _connection("conn-1", "Sakila", schema_profile_id="profile-1", logical_database=logical_db),
+            _connection("conn-2", "Pagila", schema_profile_id="profile-1", logical_database=logical_db),
+        ]
+
+        async def fake_validate(self, connection_ids, reference_connection_id=None, mode="lenient"):
+            return {"valid": True, "errors": [], "warnings": []}
+
+        monkeypatch.setattr(
+            "backend.database.scenario_bundle_resolver.LogicalDatabaseValidator.validate_connections",
+            fake_validate,
+        )
+
+        class _MissingCommonBundleRepo(_BundleRepo):
+            async def get_bundle_for_profile_template(
+                self,
+                schema_profile_id,
+                scenario_template_id,
+                bundle_id=None,
+                preferred_name=None,
+            ):
+                if preferred_name:
+                    return None
+                return await super().get_bundle_for_profile_template(
+                    schema_profile_id,
+                    scenario_template_id,
+                    bundle_id=bundle_id,
+                    preferred_name=preferred_name,
+                )
+
+        resolver = ScenarioBundleResolver(_ConnectionRepo(connections), _MissingCommonBundleRepo())
+
+        with pytest.raises(ValueError, match="не найден common bundle"):
+            await resolver.resolve_for_connections(
+                ["conn-1", "conn-2"],
+                scenario_template_id="mixed_light",
+            )
+
+    @pytest.mark.asyncio
     async def test_resolver_blocks_pending_review_connection(self):
         logical_db = SimpleNamespace(
             id="logical-1",
@@ -455,6 +555,42 @@ class TestScenarioBundleResolverProfileSync:
 
         with pytest.raises(ValueError, match="требует проверки профиля"):
             await resolver.resolve_for_connections(["conn-1"], scenario_template_id="mixed_light")
+
+
+class TestSchemaAnalyzerInsertSafe:
+    def test_insert_safe_false_when_primary_key_has_no_database_default(self):
+        table = _table(
+            "payment",
+            [
+                ColumnInfo("payment_id", "smallint", False, is_primary_key=True, category="integer"),
+                ColumnInfo("amount", "numeric", False, category="numeric"),
+            ],
+            primary_key=["payment_id"],
+        )
+        analyzer = SchemaAnalyzer.__new__(SchemaAnalyzer)
+        assert analyzer._is_insert_safe(table) is False
+
+    def test_insert_safe_true_when_primary_key_has_sequence_default(self):
+        table = _table(
+            "payment",
+            [
+                ColumnInfo(
+                    "payment_id",
+                    "smallint",
+                    False,
+                    is_primary_key=True,
+                    is_auto_generated=True,
+                    has_server_default=True,
+                    column_default="nextval('payment_payment_id_seq'::regclass)",
+                    default_kind="serial",
+                    category="integer",
+                ),
+                ColumnInfo("amount", "numeric", False, category="numeric"),
+            ],
+            primary_key=["payment_id"],
+        )
+        analyzer = SchemaAnalyzer.__new__(SchemaAnalyzer)
+        assert analyzer._is_insert_safe(table) is True
 
 
 class TestCommonCapabilityMetadata:

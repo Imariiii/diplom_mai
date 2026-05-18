@@ -48,10 +48,11 @@ class ScenarioBundleRepository(BaseRepository):
         schema_profile_id: str,
         scenario_template_id: str,
         bundle_id: Optional[str] = None,
+        preferred_name: Optional[str] = None,
     ) -> Optional[ScenarioBundle]:
         """Получить bundle для пары профиль + template.
 
-        Если `bundle_id` не задан, возвращается активный variant.
+        Если `bundle_id` не задан, возвращается активный variant или variant с `preferred_name`.
         """
         async with self.SessionLocal() as session:
             query = (
@@ -64,6 +65,8 @@ class ScenarioBundleRepository(BaseRepository):
             )
             if bundle_id:
                 query = query.where(ScenarioBundle.id == uuid.UUID(bundle_id))
+            elif preferred_name:
+                query = query.where(ScenarioBundle.name == preferred_name)
             else:
                 query = query.where(ScenarioBundle.is_active == 't')
             result = await session.execute(query)
@@ -243,8 +246,9 @@ class ScenarioBundleRepository(BaseRepository):
         generated_from_connection_id: Optional[str],
         queries: List[Dict[str, Any]],
         indexes: Optional[List[Dict[str, Any]]] = None,
+        activate: bool = False,
     ) -> ScenarioBundle:
-        """Создать или обновить системный generated bundle для profile/template."""
+        """Создать или обновить системный generated bundle по имени variant."""
         async with self.SessionLocal() as session:
             result = await session.execute(
                 select(ScenarioBundle)
@@ -255,7 +259,7 @@ class ScenarioBundleRepository(BaseRepository):
                 .where(
                     ScenarioBundle.schema_profile_id == uuid.UUID(schema_profile_id),
                     ScenarioBundle.scenario_template_id == scenario_template_id,
-                    ScenarioBundle.is_builtin == 't',
+                    ScenarioBundle.name == name,
                 )
             )
             bundle = result.unique().scalar_one_or_none()
@@ -272,21 +276,29 @@ class ScenarioBundleRepository(BaseRepository):
                     generated_from_connection_id=(
                         uuid.UUID(generated_from_connection_id) if generated_from_connection_id else None
                     ),
-                    is_active='f' if active_exists else 't',
+                    is_active='f' if active_exists and not activate else 't',
                     is_builtin='t',
                 )
                 session.add(bundle)
                 await session.flush()
             else:
-                bundle.name = name
                 bundle.description = description
                 bundle.generation_source = generation_source
                 bundle.generated_from_connection_id = (
                     uuid.UUID(generated_from_connection_id) if generated_from_connection_id else None
                 )
-                if bundle.is_active != 't' and not active_exists:
+                if not activate and bundle.is_active != 't' and not active_exists:
                     bundle.is_active = 't'
                 bundle.updated_at = get_local_now()
+
+            if activate:
+                await self._deactivate_active_bundles(
+                    session,
+                    schema_profile_id,
+                    scenario_template_id,
+                    exclude_bundle_id=str(bundle.id),
+                )
+                bundle.is_active = 't'
 
             await self._replace_bundle_contents(session, bundle, queries, indexes or [])
             await session.commit()

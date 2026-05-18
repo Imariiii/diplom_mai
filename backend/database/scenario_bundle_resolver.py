@@ -137,6 +137,14 @@ class ScenarioBundleResolver:
                 )
 
         bundle = None
+        preferred_bundle_name = None
+        if logical_database_ids and scenario_template_id and len(connections) >= 2:
+            logical_database = connections[0].logical_database
+            if logical_database:
+                preferred_bundle_name = (
+                    f"{scenario_template_id}::{logical_database.name}::common"
+                )
+
         if bundle_id:
             bundle = await self.bundle_repository.get_bundle(bundle_id)
             if not bundle:
@@ -146,10 +154,29 @@ class ScenarioBundleResolver:
             if scenario_template_id and bundle.scenario_template_id != scenario_template_id:
                 raise ValueError("Bundle не соответствует выбранному logical template")
         elif scenario_template_id:
-            bundle = await self.bundle_repository.get_bundle_for_profile_template(
-                schema_profile_id=schema_profile_id,
-                scenario_template_id=scenario_template_id,
-            )
+            if preferred_bundle_name:
+                bundle = await self.bundle_repository.get_bundle_for_profile_template(
+                    schema_profile_id=schema_profile_id,
+                    scenario_template_id=scenario_template_id,
+                    preferred_name=preferred_bundle_name,
+                )
+                if not bundle:
+                    logical_database = connections[0].logical_database
+                    logical_db_name = logical_database.name if logical_database else "logical database"
+                    generate_hint = (
+                        f"POST /api/logical-databases/{logical_database.id}/bundles/generate"
+                        if logical_database
+                        else "POST /api/logical-databases/{id}/bundles/generate"
+                    )
+                    raise ValueError(
+                        f"Для logical database '{logical_db_name}' не найден common bundle "
+                        f"'{preferred_bundle_name}'. Сгенерируйте bundles: {generate_hint}"
+                    )
+            else:
+                bundle = await self.bundle_repository.get_bundle_for_profile_template(
+                    schema_profile_id=schema_profile_id,
+                    scenario_template_id=scenario_template_id,
+                )
         if not bundle:
             profile_name = connections[0].schema_profile.name if connections[0].schema_profile else schema_profile_id
             raise ValueError(

@@ -110,6 +110,12 @@ async def test_logical_database_bundle_is_ready_for_load_test(
 
     bundle = resolved["bundle"]
     assert bundle["queries"], f"{logical_db_name}/{scenario_template_id}: bundle не содержит queries"
+    if len(active_connections) >= 2:
+        expected_common_name = f"{scenario_template_id}::{logical_db_name}::common"
+        assert bundle.get("name") == expected_common_name, (
+            f"{logical_db_name}/{scenario_template_id}: ожидался common bundle "
+            f"'{expected_common_name}', получен '{bundle.get('name')}'"
+        )
 
     validator = ScenarioBundleValidator(connection_repo)
     try:

@@ -11,6 +11,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Maximize2 } from "lucide-react"
+import {
+  computeElapsedSpanSeconds,
+  extractDatabaseTrace,
+  resolveElapsedAxisTickFormat,
+} from "@/lib/time-series-chart-data"
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false }) as any
 
@@ -26,6 +31,7 @@ interface TimeSeriesChartProps {
   yDomain?: [number | string, number | string]
   customDbNames?: Record<string, string>
   getDbType?: (dbKey: string) => string
+  xAxisTitle?: string
 }
 
 function ChartContent({
@@ -37,6 +43,7 @@ function ChartContent({
   getDisplayName,
   resolveDbColor,
   height,
+  xAxisTitle = "Время от старта (с)",
 }: {
   data: Record<string, unknown>[]
   databases: string[]
@@ -46,44 +53,53 @@ function ChartContent({
   getDisplayName: (dbId: string) => string
   resolveDbColor: (dbId: string) => string
   height: number | string
+  xAxisTitle?: string
 }) {
-  const xValues = useMemo(
-    () => data.map((point) => Number(point.elapsedSeconds || 0)),
-    [data],
+  const elapsedSpanSeconds = useMemo(
+    () => computeElapsedSpanSeconds(data, databases, metricKey),
+    [data, databases, metricKey],
+  )
+
+  const xAxisTicks = useMemo(
+    () => resolveElapsedAxisTickFormat(elapsedSpanSeconds),
+    [elapsedSpanSeconds],
   )
 
   const traces = useMemo(() => {
-    return databases.map((dbId) => ({
-      type: "scattergl",
-      mode: "lines",
-      name: getDisplayName(dbId),
-      x: xValues,
-      y: data.map((point) => {
-        const value = point[`${dbId}_${metricKey}`]
-        return typeof value === "number" ? value : null
-      }),
-      line: { color: resolveDbColor(dbId), width: 2 },
-      connectgaps: true,
-      fill: chartType === "area" ? "tozeroy" : "none",
-      opacity: chartType === "area" ? 0.75 : 1,
-      hovertemplate: "%{fullData.name}<br>t=%{x}s<br>v=%{y:.2f}<extra></extra>",
-    }))
-  }, [chartType, data, databases, getDisplayName, metricKey, resolveDbColor, xValues])
+    const hoverTime = `%{x:.${xAxisTicks.hoverFractionDigits}f}`
+    return databases.map((dbId) => {
+      const { x, y } = extractDatabaseTrace(data, dbId, metricKey)
+      return {
+        type: "scattergl",
+        mode: "lines+markers",
+        name: getDisplayName(dbId),
+        x,
+        y,
+        line: { color: resolveDbColor(dbId), width: 2 },
+        marker: { color: resolveDbColor(dbId), size: 5 },
+        connectgaps: false,
+        fill: chartType === "area" ? "tozeroy" : "none",
+        opacity: chartType === "area" ? 0.75 : 1,
+        hovertemplate: `%{fullData.name}<br>t=${hoverTime}s<br>v=%{y:.2f}<extra></extra>`,
+      }
+    })
+  }, [chartType, data, databases, getDisplayName, metricKey, resolveDbColor, xAxisTicks.hoverFractionDigits])
 
   const layout = useMemo(() => ({
     autosize: true,
     margin: { l: 55, r: 20, t: 12, b: 42 },
     paper_bgcolor: "transparent",
     plot_bgcolor: "transparent",
-    hovermode: "x unified",
+    hovermode: "closest",
     dragmode: "pan",
     legend: { orientation: "h", y: -0.18, x: 0, font: { size: 11 } },
     xaxis: {
-      title: "Время от старта (mm:ss)",
-      tickmode: "auto",
+      title: xAxisTitle,
+      tickmode: xAxisTicks.dtick !== undefined ? "linear" : "auto",
+      dtick: xAxisTicks.dtick,
       gridcolor: "hsl(var(--border))",
       zerolinecolor: "hsl(var(--border))",
-      tickformat: ",d",
+      tickformat: xAxisTicks.tickformat,
       tickprefix: "",
       ticksuffix: "s",
       tickfont: { size: 11 },
@@ -95,7 +111,7 @@ function ChartContent({
       zerolinecolor: "hsl(var(--border))",
       tickfont: { size: 11 },
     },
-  }), [yDomain])
+  }), [xAxisTicks.dtick, xAxisTicks.tickformat, xAxisTitle, yDomain])
 
   return (
     <div style={{ height }}>
@@ -126,6 +142,7 @@ export function TimeSeriesChart({
   yDomain,
   customDbNames,
   getDbType,
+  xAxisTitle,
 }: TimeSeriesChartProps) {
   const [fullscreen, setFullscreen] = useState(false)
 
@@ -169,6 +186,7 @@ export function TimeSeriesChart({
             getDisplayName={getDisplayName}
             resolveDbColor={resolveDbColor}
             height={320}
+            xAxisTitle={xAxisTitle}
           />
         </CardContent>
       </Card>
@@ -191,6 +209,7 @@ export function TimeSeriesChart({
               getDisplayName={getDisplayName}
               resolveDbColor={resolveDbColor}
               height="100%"
+              xAxisTitle={xAxisTitle}
             />
           </div>
         </DialogContent>

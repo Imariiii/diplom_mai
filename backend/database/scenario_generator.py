@@ -205,6 +205,7 @@ class ScenarioGenerator:
                 generated_from_connection_id=reference_connection_id,
                 queries=queries,
                 indexes=indexes,
+                activate=True,
             )
             full_bundle = await self.bundle_repository.get_bundle(str(bundle.id))
             if full_bundle:

@@ -18,12 +18,19 @@ import { DatabaseMetricsTab } from "./dashboards/database-metrics-tab"
 import { SystemMetricsTab } from "./dashboards/system-metrics-tab"
 import { TransactionMetricsTab } from "./dashboards/transaction-metrics-tab"
 import { DbmsMetricsTab } from "./dashboards/dbms-metrics-tab"
+import {
+  buildChartDataFromTimeSeries,
+  CHART_TIMELINE_AXIS_TITLE,
+  type ChartTimelineMode,
+} from "@/lib/time-series-chart-data"
+import { ChartTimelineModeToggle } from "./dashboards/shared/chart-timeline-mode-toggle"
 
 export function DashboardsPage() {
   const { currentTest, realtimeData, testConfig, setCurrentTest, addTestToHistory, clearRealtimeData, connectionNames, setConnectionNames, connectionDbTypes, setConnectionDbTypes, setCurrentPage, setComparisonSelection } = useAppStore()
   const [statusMessage, setStatusMessage] = useState<string>("")
   const [showProgressBar, setShowProgressBar] = useState(false)
   const [cancelLoading, setCancelLoading] = useState(false)
+  const [chartTimelineMode, setChartTimelineMode] = useState<ChartTimelineMode>("timeline")
 
   const formatFailureMessage = (message?: string | null) => {
     const cleaned = (message || "").replace(/^Ошибка:\s*/i, "").trim()
@@ -308,28 +315,11 @@ export function DashboardsPage() {
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
-  const chartData = Object.entries(realtimeData).reduce<Record<number, Record<string, unknown>>>((acc, [dbId, points]) => {
-    if (!points.length) return acc
-    const startTs = points[0].timestamp
-    points.forEach((point) => {
-      const elapsedSeconds = Math.max(0, Math.round((point.timestamp - startTs) / 1000))
-      if (!acc[elapsedSeconds]) {
-        acc[elapsedSeconds] = { elapsedSeconds }
-      }
-      acc[elapsedSeconds][`${dbId}_responseTime`] = point.responseTime ?? 0
-      acc[elapsedSeconds][`${dbId}_throughput`] = point.throughput ?? 0
-      acc[elapsedSeconds][`${dbId}_tps`] = point.tps ?? 0
-      acc[elapsedSeconds][`${dbId}_cpu`] = point.cpuUsage ?? 0
-      acc[elapsedSeconds][`${dbId}_memory`] = point.memoryUsage ?? 0
-      acc[elapsedSeconds][`${dbId}_diskIO`] = point.diskIOps ?? 0
-      acc[elapsedSeconds][`${dbId}_connections`] = point.activeConnections ?? 0
-      acc[elapsedSeconds][`${dbId}_errors`] = point.errorCount ?? 0
-    })
-    return acc
-  }, {})
-  const chartDataSorted = Object.values(chartData).sort(
-    (a, b) => Number(a.elapsedSeconds || 0) - Number(b.elapsedSeconds || 0),
+  const chartDataSorted = useMemo(
+    () => buildChartDataFromTimeSeries(realtimeData, { mode: chartTimelineMode }),
+    [realtimeData, chartTimelineMode],
   )
+  const chartXAxisTitle = CHART_TIMELINE_AXIS_TITLE[chartTimelineMode]
 
   const getLatestMetric = (dbId: string, metric: string) => {
     const points = realtimeData[dbId]
@@ -535,6 +525,12 @@ export function DashboardsPage() {
       )}
 
       <Tabs defaultValue="database" className="space-y-4">
+        {chartDatabases.length > 1 && (
+          <ChartTimelineModeToggle
+            value={chartTimelineMode}
+            onChange={setChartTimelineMode}
+          />
+        )}
         <TabsList className="bg-muted">
           <TabsTrigger value="database" className="text-foreground data-[state=active]:text-foreground">
             <Database className="h-4 w-4 mr-2" />
@@ -568,6 +564,7 @@ export function DashboardsPage() {
             getDbType={getDbType}
             virtualUsers={testConfig.virtualUsers}
             showCharts={isTestFinished}
+            chartXAxisTitle={chartXAxisTitle}
           />
         </TabsContent>
 
@@ -578,6 +575,7 @@ export function DashboardsPage() {
               chartData={chartDataSorted}
               getDbType={getDbType}
               getDbDisplayName={getDbDisplayName}
+              chartXAxisTitle={chartXAxisTitle}
             />
           </TabsContent>
         )}

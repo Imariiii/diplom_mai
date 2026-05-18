@@ -25,7 +25,9 @@ from backend.api.schemas.profile_schemas import (
 )
 from backend.database.repository.logical_database_repository import LogicalDatabaseRepository
 from backend.database.logical_database_validator import LogicalDatabaseValidator
-from backend.database.scenario_generator import ScenarioGenerator
+from backend.database.scenario_bundle_resolver import ScenarioBundleResolver
+from backend.database.scenario_bundle_validator import ScenarioBundleValidator
+from backend.database.scenario_generator import DEFAULT_SCENARIO_TYPES, ScenarioGenerator
 
 router = APIRouter(prefix="/api/logical-databases", tags=["logical-databases"])
 
@@ -462,14 +464,55 @@ async def validate_logical_database(
             reference_connection_id
             or (str(db.reference_connection_id) if getattr(db, "reference_connection_id", None) else None)
         )
+        connection_ids = [str(connection.id) for connection in active_connections]
         compatibility = await validator.validate_connections(
-            [str(connection.id) for connection in active_connections],
+            connection_ids,
             reference_connection_id=effective_reference_connection_id,
             mode=mode,
         )
+
+        bundle_preflight: Dict[str, Any] = {}
+        if len(active_connections) >= 2 and db.schema_profile_id:
+            bundle_repo = get_bundle_repo()
+            bundle_validator = ScenarioBundleValidator(get_connection_repo())
+            resolver = ScenarioBundleResolver(get_connection_repo(), bundle_repo)
+            for scenario_template_id in DEFAULT_SCENARIO_TYPES:
+                preferred_name = f"{scenario_template_id}::{db.name}::common"
+                bundle = await bundle_repo.get_bundle_for_profile_template(
+                    schema_profile_id=str(db.schema_profile_id),
+                    scenario_template_id=scenario_template_id,
+                    preferred_name=preferred_name,
+                )
+                if not bundle:
+                    bundle_preflight[scenario_template_id] = {
+                        "valid": False,
+                        "errors": [f"Common bundle '{preferred_name}' не найден"],
+                        "warnings": [],
+                    }
+                    continue
+                preflight = await bundle_validator.validate_bundle_for_connections(
+                    bundle=resolver.bundle_to_execution_dict(bundle.to_dict()),
+                    connection_ids=connection_ids,
+                )
+                bundle_preflight[scenario_template_id] = {
+                    "valid": preflight.get("valid", False),
+                    "errors": preflight.get("errors", []),
+                    "warnings": preflight.get("warnings", []),
+                }
+            await bundle_validator.schema_analyzer.db_connection.close_all()
+
+        compatibility["bundle_preflight"] = bundle_preflight
+        preflight_failed = any(
+            not item.get("valid", True)
+            for item in bundle_preflight.values()
+        )
+        profile_status = "confirmed" if compatibility.get("valid") else "incompatible"
+        if compatibility.get("valid") and preflight_failed:
+            profile_status = "needs_review"
+
         await repo.update_profile_state(
             logical_db_id=logical_db_id,
-            profile_status="confirmed" if compatibility.get("valid") else "incompatible",
+            profile_status=profile_status,
             compatibility_status=(
                 "invalid"
                 if not compatibility.get("valid")
