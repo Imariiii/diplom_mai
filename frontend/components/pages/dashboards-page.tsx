@@ -572,6 +572,7 @@ export function DashboardsPage() {
             getDbDisplayName={getDbDisplayName}
             getDbType={getDbType}
             virtualUsers={testConfig.virtualUsers}
+            isTestFinished={isTestFinished}
             showCharts={isTestFinished}
             chartXAxisTitle={chartXAxisTitle}
             chartTimelineMode={chartTimelineMode}

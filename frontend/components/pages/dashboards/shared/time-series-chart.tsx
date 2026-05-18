@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useCallback } from "react"
 import dynamic from "next/dynamic"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -21,6 +21,7 @@ const Plot = dynamic(() => import("react-plotly.js"), { ssr: false }) as any
 
 interface TimeSeriesChartProps {
   title: string
+  description?: string
   icon: React.ReactNode
   data: Record<string, unknown>[]
   databases: string[]
@@ -132,6 +133,7 @@ function ChartContent({
 
 export function TimeSeriesChart({
   title,
+  description,
   icon,
   data,
   databases,
@@ -161,10 +163,15 @@ export function TimeSeriesChart({
       <Card className="bg-card border-border">
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-foreground">
-              {icon}
-              {title}
-            </CardTitle>
+            <div>
+              <CardTitle className="flex items-center gap-2 text-foreground">
+                {icon}
+                {title}
+              </CardTitle>
+              {description && (
+                <CardDescription className="mt-1">{description}</CardDescription>
+              )}
+            </div>
             <Button
               variant="ghost"
               size="icon"

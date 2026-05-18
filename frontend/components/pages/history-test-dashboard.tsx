@@ -456,6 +456,7 @@ export function HistoryTestDashboard({
           getDbDisplayName={getDbDisplayName}
           getDbType={getDbType}
           virtualUsers={virtualUsers}
+          isTestFinished={isTestFinished}
           showCharts={isTestFinished}
           chartXAxisTitle={chartXAxisTitle}
           chartTimelineMode={chartTimelineMode}

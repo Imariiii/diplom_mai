@@ -5,7 +5,7 @@
 
 Метрики пропускной способности:
 - throughput — успешных операций в секунду (итог прогона, сравнение, окна по успехам);
-- attempt_rate — всех попыток в секунду, успех + ошибка (realtime и итоговая интенсивность).
+- attempt_rate — всех запросов в секунду, успех + ошибка (realtime и итоговая интенсивность).
 """
 import time
 import asyncio
@@ -136,7 +136,7 @@ class LoadTester:
         failed: int,
         window_end_perf: Optional[float] = None,
     ):
-        """Отправить realtime-метрики через callback (attempt_rate — попыток/с за окно)."""
+        """Отправить realtime-метрики через callback (attempt_rate — запросов/с за окно)."""
         if self._metrics_callback and self._is_streaming:
             try:
                 if window_end_perf is None:
@@ -671,7 +671,7 @@ class LoadTester:
         db_key: str,
         query_id: Optional[str],
     ) -> List[Dict[str, Any]]:
-        """Агрегировать результаты в 1-секундные окна: throughput — успехи/с, attempt_rate — попыток/с."""
+        """Агрегировать результаты в 1-секундные окна: throughput — успехи/с, attempt_rate — запросов/с."""
         if not timestamps:
             return []
 

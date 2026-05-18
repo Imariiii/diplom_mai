@@ -63,7 +63,7 @@ export interface DatabaseMetrics {
   
   // Производительность (одна SQL-операция = один запрос + commit)
   throughput: number            // Успешных запросов в секунду
-  attemptRate?: number          // Всех попыток в секунду (успех + ошибка), итог прогона
+  attemptRate?: number          // Всех запросов в секунду (успех + ошибка), итог прогона
   
   // Соединения
   activeConnections: number     // Активные соединения
@@ -129,7 +129,7 @@ export interface TimeSeriesPoint {
   
   // Метрики базы данных
   responseTime: number
-  /** Live: попыток SQL/с за окно (~1 с). */
+  /** Live: запросов SQL/с за окно (~1 с). */
   attemptRate: number
   activeConnections: number
   errorCount: number

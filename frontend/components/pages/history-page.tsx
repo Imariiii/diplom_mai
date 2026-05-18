@@ -519,7 +519,7 @@ export function HistoryPage() {
                       <TableHead className="text-right">P50 (мс)</TableHead>
                       <TableHead className="text-right">P95 (мс)</TableHead>
                       <TableHead className="text-right">P99 (мс)</TableHead>
-                      <TableHead className="text-right">Запросов/с</TableHead>
+                      <TableHead className="text-right">Успешных запросов/с</TableHead>
                       <TableHead className="text-right">Успешных</TableHead>
                       <TableHead className="text-right">Ошибок</TableHead>
                     </TableRow>

@@ -2,7 +2,7 @@
  * Нормализация метрик пропускной способности (обратная совместимость со старыми прогонами).
  *
  * throughput — успешных SQL-операций/с (итог прогона);
- * attempt_rate — всех попыток/с (realtime и итоговая интенсивность).
+ * attempt_rate — всех запросов/с (realtime и итоговая интенсивность).
  */
 
 export type ThroughputMetricsRaw = {
@@ -25,7 +25,7 @@ export function resolveAggregateAttemptRate(
   return typeof value === "number" ? value : undefined
 }
 
-/** Значение попыток/с для точки временного ряда (live хранится в throughput или attempt_rate). */
+/** Значение запросов/с для точки временного ряда (live хранится в throughput или attempt_rate). */
 export function timeSeriesAttemptRate(raw: {
   throughput?: number | null
   tps?: number | null
@@ -47,4 +47,22 @@ export function pickAggregateAttemptRate(
 ): number | undefined {
   const value = stats.attempt_rate ?? stats.completed_tps
   return typeof value === "number" ? value : undefined
+}
+
+/** «Запросы/с» в карточке: live attempt_rate во время теста, итог attempt_rate после завершения. */
+export function formatCardAttemptRate(options: {
+  isTestFinished: boolean
+  attemptRate?: number
+  liveAttemptRate: string
+}): string {
+  const { isTestFinished, attemptRate, liveAttemptRate } = options
+  if (isTestFinished) {
+    return typeof attemptRate === "number" ? attemptRate.toFixed(0) : "—"
+  }
+  return liveAttemptRate.trim() !== "" ? liveAttemptRate : "—"
+}
+
+/** «Успешных запросов/с» в карточке — только итоговый throughput после завершения теста. */
+export function formatCardSuccessfulThroughput(throughput?: number): string {
+  return typeof throughput === "number" ? throughput.toFixed(0) : "—"
 }

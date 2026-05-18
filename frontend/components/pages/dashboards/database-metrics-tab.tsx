@@ -3,6 +3,10 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Database, Clock, Gauge, Users, AlertTriangle } from "lucide-react"
 import { DB_NAMES, getDbColor } from "@/lib/chart-colors"
+import {
+  formatCardAttemptRate,
+  formatCardSuccessfulThroughput,
+} from "@/lib/throughput-metrics"
 import type { ChartTimelineMode } from "@/lib/time-series-chart-data"
 import { ChartTimelineModeToggle } from "./shared/chart-timeline-mode-toggle"
 import { TimeSeriesChart } from "./shared/time-series-chart"
@@ -39,13 +43,14 @@ interface DatabaseMetricsTabProps {
   getDbType: (dbKey: string) => string
   virtualUsers: number
   customDbNames?: Record<string, string>
+  isTestFinished: boolean
   showCharts?: boolean
   chartXAxisTitle?: string
   chartTimelineMode?: ChartTimelineMode
   onChartTimelineModeChange?: (mode: ChartTimelineMode) => void
 }
 
-export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLatestMetric, getDbDisplayName, getDbType, virtualUsers, customDbNames, showCharts = true, chartXAxisTitle, chartTimelineMode, onChartTimelineModeChange }: DatabaseMetricsTabProps) {
+export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLatestMetric, getDbDisplayName, getDbType, virtualUsers, isTestFinished, customDbNames, showCharts = true, chartXAxisTitle, chartTimelineMode, onChartTimelineModeChange }: DatabaseMetricsTabProps) {
   const formatMetric = (value?: number, digits: number = 2) => {
     return typeof value === "number" ? value.toFixed(digits) : undefined
   }
@@ -70,25 +75,23 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
                   <span className="font-mono text-foreground">{formatMetric(result?.metrics?.avgResponseTime) ?? getLatestMetric(dbId, "responseTime")} ms</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Запросов/с (успешные)</span>
+                  <span className="text-muted-foreground">Запросы/с</span>
                   <span className="font-mono text-foreground">
-                    {formatMetric(result?.metrics?.throughput, 0) ?? "—"}
+                    {formatCardAttemptRate({
+                      isTestFinished,
+                      attemptRate: result?.metrics?.attemptRate,
+                      liveAttemptRate: getLatestMetric(dbId, "attemptRate"),
+                    })}
                   </span>
                 </div>
-                {((result?.metrics?.errorCount ?? 0) > 0 || (result?.metrics?.errorRate ?? 0) > 0) && (
+                {isTestFinished && (
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Попыток/с (итог)</span>
+                    <span className="text-muted-foreground">Успешных запросов/с</span>
                     <span className="font-mono text-foreground">
-                      {formatMetric(result?.metrics?.attemptRate, 0) ?? "—"}
+                      {formatCardSuccessfulThroughput(result?.metrics?.throughput)}
                     </span>
                   </div>
                 )}
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Попыток/с (live)</span>
-                  <span className="font-mono text-foreground">
-                    {getLatestMetric(dbId, "attemptRate")}
-                  </span>
-                </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Соединения</span>
                   <span className="font-mono text-foreground">{result?.metrics?.activeConnections || virtualUsers}</span>
@@ -200,7 +203,8 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
             xAxisTitle={chartXAxisTitle}
           />
           <TimeSeriesChart
-            title="Попыток SQL/с (live)"
+            title="Запросы/с"
+            description="Все завершённые запросы в секунду, включая ошибки"
             icon={<Gauge className="h-5 w-5 text-primary" />}
             data={chartData}
             databases={databases}
