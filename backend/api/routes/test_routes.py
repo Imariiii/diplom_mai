@@ -310,6 +310,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
     test_tester.auto_restore = settings.restore.auto_restore
     if test_id in active_tests:
         active_tests[test_id]["_tester"] = test_tester
+        active_tests[test_id]["_streaming_callback"] = streaming_callback
         if active_tests[test_id].get("status") == "cancelling":
             test_tester.request_cancel()
     
@@ -689,6 +690,7 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         if test_id in active_tests:
             active_tests[test_id].pop("_task", None)
             active_tests[test_id].pop("_tester", None)
+            active_tests[test_id].pop("_streaming_callback", None)
 
 
 @router.post("/async/{test_id}/cancel")
@@ -710,14 +712,21 @@ async def cancel_async_test(test_id: str):
         if tester:
             tester.request_cancel()
 
-    await manager.send_status_update(
-        TestStatusUpdate(
-            test_id=test_id,
-            status="cancelling",
-            message="Остановка теста: завершаем текущие операции…",
-            progress=0.0,
+    streaming_callback = test_info.get("_streaming_callback")
+    if streaming_callback:
+        await streaming_callback.on_status_change(
+            "cancelling",
+            "Остановка теста: завершаем текущие операции…",
         )
-    )
+    else:
+        await manager.send_status_update(
+            TestStatusUpdate(
+                test_id=test_id,
+                status="cancelling",
+                message="Остановка теста: завершаем текущие операции…",
+                progress=0.0,
+            )
+        )
 
     return {
         "test_id": test_id,

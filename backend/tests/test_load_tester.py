@@ -494,6 +494,46 @@ class TestStreamingCallbackSampleTime:
         repository.add_metric_sample_batch.assert_awaited_once()
         assert callback.metric_samples_buffer == []
 
+    @pytest.mark.asyncio
+    async def test_on_test_start_status_includes_elapsed_seconds(self):
+        manager = MagicMock()
+        manager.send_status_update = AsyncMock()
+        callback = StreamingCallback("test-1", manager, repository=None)
+
+        await callback.on_test_start()
+
+        manager.send_status_update.assert_awaited()
+        update = manager.send_status_update.await_args.args[0]
+        assert update.status == "running"
+        assert update.elapsed_seconds == 0
+
+    @pytest.mark.asyncio
+    async def test_on_status_change_elapsed_increases_after_start(self):
+        manager = MagicMock()
+        manager.send_status_update = AsyncMock()
+        callback = StreamingCallback("test-1", manager, repository=None)
+        await callback.on_test_start()
+        callback.start_time = time.perf_counter() - 5.0
+
+        await callback.on_status_change("running", "Прогрев…")
+
+        update = manager.send_status_update.await_args.args[0]
+        assert update.elapsed_seconds >= 5
+
+    @pytest.mark.asyncio
+    async def test_on_backup_status_includes_elapsed_seconds(self):
+        manager = MagicMock()
+        manager.send_status_update = AsyncMock()
+        manager.send_operation_status = AsyncMock()
+        callback = StreamingCallback("test-1", manager, repository=None)
+        await callback.on_test_start()
+        callback.start_time = time.perf_counter() - 3.0
+
+        await callback.on_backup_status("backup_started", {"tables": ["t1"]})
+
+        manager.send_operation_status.assert_awaited_once()
+        assert manager.send_operation_status.await_args.kwargs["elapsed_seconds"] >= 3
+
 
 class TestRealtimeThroughputSamples:
     @pytest.mark.asyncio

@@ -57,6 +57,7 @@ class TestStatusUpdate:
     status: str  # pending, running, completed, failed
     message: Optional[str] = None
     progress: float = 0.0
+    elapsed_seconds: int = 0
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -161,7 +162,13 @@ class ConnectionManager:
         # Также отправляем в глобальный канал
         await self.broadcast_to_test("global", message)
     
-    async def send_backup_status(self, test_id: str, status: str, data: Dict[str, Any]):
+    async def send_backup_status(
+        self,
+        test_id: str,
+        status: str,
+        data: Dict[str, Any],
+        elapsed_seconds: int = 0,
+    ):
         """
         Отправить статус backup/restore или index-операции
         
@@ -169,11 +176,13 @@ class ConnectionManager:
             test_id: ID теста
             status: Тип статуса (backup_started, restore_completed, index_creation_started, etc.)
             data: Данные статуса (tables, duration_ms, verified, etc.)
+            elapsed_seconds: Секунд с начала теста (on_test_start)
         """
         message = {
             "type": "backup_status",
             "status": status,
             "test_id": test_id,
+            "elapsed_seconds": max(0, int(elapsed_seconds)),
             "data": data,
             "timestamp": datetime.now().isoformat()
         }
@@ -181,9 +190,15 @@ class ConnectionManager:
         # Также отправляем в глобальный канал
         await self.broadcast_to_test("global", message)
 
-    async def send_operation_status(self, test_id: str, status: str, data: Dict[str, Any]):
+    async def send_operation_status(
+        self,
+        test_id: str,
+        status: str,
+        data: Dict[str, Any],
+        elapsed_seconds: int = 0,
+    ):
         """Совместимый алиас для статусов служебных операций теста"""
-        await self.send_backup_status(test_id, status, data)
+        await self.send_backup_status(test_id, status, data, elapsed_seconds=elapsed_seconds)
     
     def get_connection_count(self, test_id: str = None) -> int:
         """Получить количество соединений"""
@@ -280,6 +295,12 @@ class TestStreamingCallback:
                 "max_deadlocks": 0,
             },
         )
+
+    def _elapsed_seconds(self) -> int:
+        """Секунд с момента on_test_start (единый источник для UI-таймера)."""
+        if not self._start_time_set:
+            return 0
+        return max(0, int(time.perf_counter() - self.start_time))
     
     def _calculate_progress(self) -> float:
         """Вернуть текущее значение прогресса"""
@@ -463,7 +484,8 @@ class TestStreamingCallback:
             test_id=self.test_id,
             status=status,
             message=message,
-            progress=progress
+            progress=progress,
+            elapsed_seconds=self._elapsed_seconds(),
         )
         
         await self.manager.send_status_update(update)
@@ -496,7 +518,12 @@ class TestStreamingCallback:
     
     async def on_backup_status(self, status: str, data: Dict[str, Any] = None):
         """Вызывается при изменении статуса backup/restore/index-операций"""
-        await self.manager.send_operation_status(self.test_id, status, data or {})
+        await self.manager.send_operation_status(
+            self.test_id,
+            status,
+            data or {},
+            elapsed_seconds=self._elapsed_seconds(),
+        )
 
     async def on_test_error(self, error: str):
         """Вызывается при ошибке теста"""

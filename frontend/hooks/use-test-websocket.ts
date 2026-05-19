@@ -43,6 +43,7 @@ interface StatusMessage {
     status: "pending" | "running" | "cancelling" | "cancelled" | "completed" | "failed"
     message?: string
     progress: number
+    elapsed_seconds?: number
   }
 }
 
@@ -56,6 +57,7 @@ interface BackupStatusMessage {
   type: "backup_status"
   status: string
   test_id: string
+  elapsed_seconds?: number
   data: Record<string, unknown>
   timestamp: string
 }
@@ -132,6 +134,24 @@ export function useTestWebSocket({
     }, 500)
   }, [])
 
+  const syncElapsedFromServer = useCallback(
+    (elapsed: number) => {
+      baseElapsedRef.current = Math.max(0, Math.floor(elapsed))
+      lastSyncRef.current = Date.now()
+      setElapsedSeconds(baseElapsedRef.current)
+      startTimer()
+    },
+    [startTimer],
+  )
+
+  const resetElapsedTimer = useCallback(() => {
+    stopTimer()
+    baseElapsedRef.current = 0
+    lastSyncRef.current = null
+    setElapsedSeconds(0)
+    setRemainingSeconds(0)
+  }, [stopTimer])
+
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
       const message: WebSocketMessage = JSON.parse(event.data)
@@ -140,13 +160,9 @@ export function useTestWebSocket({
         case "metrics":
           const metricsData = message.data
           
-          // Обновляем прогресс и синхронизируем таймер с сервером
           setProgress(metricsData.progress)
-          baseElapsedRef.current = metricsData.elapsed_seconds
-          lastSyncRef.current = Date.now()
-          setElapsedSeconds(metricsData.elapsed_seconds)
+          syncElapsedFromServer(metricsData.elapsed_seconds)
           setRemainingSeconds(metricsData.remaining_seconds)
-          startTimer()
           
           const point: TimeSeriesPoint = {
             timestamp: new Date(metricsData.timestamp).getTime(),
@@ -194,6 +210,8 @@ export function useTestWebSocket({
           if (statusData.status === "completed" || statusData.status === "failed" || statusData.status === "cancelled") {
             setBackupStatus("")
             stopTimer()
+          } else if (typeof statusData.elapsed_seconds === "number") {
+            syncElapsedFromServer(statusData.elapsed_seconds)
           }
           
           // Обновляем статус текущего теста
@@ -209,6 +227,9 @@ export function useTestWebSocket({
           
         case "backup_status":
           setBackupStatus(message.status)
+          if (typeof message.elapsed_seconds === "number") {
+            syncElapsedFromServer(message.elapsed_seconds)
+          }
           onBackupStatus?.(message)
           break
 
@@ -223,7 +244,7 @@ export function useTestWebSocket({
     } catch (error) {
       console.error("[WS] Error parsing message:", error)
     }
-  }, [addRealtimeData, currentTest, setCurrentTest, onMetrics, onStatus, onBackupStatus, startTimer, stopTimer])
+  }, [addRealtimeData, currentTest, setCurrentTest, onMetrics, onStatus, onBackupStatus, syncElapsedFromServer, stopTimer])
 
   const connect = useCallback(() => {
     // Не подключаемся если testId пустой или невалидный
@@ -315,9 +336,10 @@ export function useTestWebSocket({
 
   // Автоподключение при монтировании (только при изменении testId)
   useEffect(() => {
-    // Подключаемся только если есть валидный testId
+    resetElapsedTimer()
+    setBackupStatus("")
+
     if (testId && testId.trim() !== "") {
-      setBackupStatus("")
       connect()
     }
     
