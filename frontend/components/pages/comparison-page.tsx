@@ -46,7 +46,6 @@ import { ComparisonCharts } from "@/components/comparison/comparison-charts"
 import { StatisticalSummary } from "@/components/comparison/statistical-summary"
 import { AnalysisReport } from "@/components/comparison/analysis-report"
 import { TestConfigSection } from "@/components/comparison/test-config-section"
-import { ResourceMetricsPanel } from "@/components/comparison/resource-metrics-panel"
 
 const MODE_LABELS: Record<string, string> = {
   per_test: "Внутритестовый анализ",
@@ -231,8 +230,6 @@ export function ComparisonPage() {
 
       <div className="mx-auto max-w-[1400px] space-y-6 px-4 py-6 md:px-6">
         <ExecutiveSummary result={result} />
-
-        <ResourceMetricsPanel result={result} />
 
         {warnings.length > 0 && <WarningsCard warnings={warnings} />}
 
