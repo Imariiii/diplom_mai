@@ -141,6 +141,8 @@ function aggregateHistoryResults(results: HistoryTestResult[]): {
   connectionDbTypes: Record<string, string>
 } {
   type Bucket = {
+    rollbacks: number
+    workloadMode?: string
     avgTimes: number[]
     p50Times: number[]
     p95Times: number[]
@@ -169,6 +171,7 @@ function aggregateHistoryResults(results: HistoryTestResult[]): {
     const dbKey = groupKeyFromHistoryRow(row)
     if (!aggregateByDb[dbKey]) {
       aggregateByDb[dbKey] = {
+        rollbacks: 0,
         avgTimes: [],
         p50Times: [],
         p95Times: [],
@@ -197,8 +200,10 @@ function aggregateHistoryResults(results: HistoryTestResult[]): {
     const ar = pickAggregateAttemptRate(m)
     if (ar !== undefined) bucket.attemptRateValues.push(ar)
     if (typeof m.active_connections === "number") bucket.activeConnections.push(m.active_connections)
-    bucket.successful += m.successful || 0
-    bucket.failed += m.failed || 0
+    bucket.successful += m.successful_transactions ?? m.successful ?? 0
+    bucket.failed += m.failed_transactions ?? m.failed ?? 0
+    bucket.rollbacks += Number(m.rollbacks) || 0
+    if (m.workload_mode) bucket.workloadMode = String(m.workload_mode)
     if (m.index_info) bucket.indexInfo = m.index_info as Record<string, unknown>
     getVisibleSelfCheckWarnings(m.self_check).forEach((warning) => {
       if (!bucket.selfCheckWarnings.includes(warning)) {
@@ -251,7 +256,7 @@ function aggregateHistoryResults(results: HistoryTestResult[]): {
         totalTransactions,
         successfulTransactions: bucket.successful,
         failedTransactions: bucket.failed,
-        rollbacks: 0,
+        rollbacks: bucket.rollbacks,
       },
       systemMetrics: mapSystemMetrics(bucket.system_metrics),
     }

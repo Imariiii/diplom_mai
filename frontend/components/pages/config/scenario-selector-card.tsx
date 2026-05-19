@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Code2, Layers } from "lucide-react"
 import type { ScenarioBundleSummary, ScenarioTemplate } from "@/lib/types"
+import { formatWorkloadModeLabel } from "@/lib/throughput-metrics"
 
 interface ScenarioSelectorCardProps {
   scenarios: ScenarioTemplate[]
@@ -44,10 +45,12 @@ export function ScenarioSelectorCard({
   const [sqlDialogOpen, setSqlDialogOpen] = useState(false)
 
   const indexes = activeBundle?.indexes ?? []
+  const isTransactionBundle = activeBundle?.workload_mode === "transaction"
   const queries = useMemo(() => {
     const list = activeBundle?.queries ?? []
     return [...list].sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
   }, [activeBundle?.queries])
+  const transactions = activeBundle?.transactions ?? []
 
   const indexesCount = indexes.length
 
@@ -91,10 +94,18 @@ export function ScenarioSelectorCard({
         </div>
 
         {activeBundle && (
-          <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-sm">
-            <span className="text-muted-foreground">Активный набор: </span>
-            <span className="font-medium text-foreground">{activeBundle.name}</span>
-            {queries.length > 0 && (
+          <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-sm space-y-1">
+            <div>
+              <Badge variant="outline" className="mr-2 text-[10px]">
+                {formatWorkloadModeLabel(activeBundle.workload_mode)}
+              </Badge>
+              <span className="text-muted-foreground">Активный набор: </span>
+              <span className="font-medium text-foreground">{activeBundle.name}</span>
+            </div>
+            {isTransactionBundle && transactions.length > 0 && (
+              <span className="text-muted-foreground"> · {transactions.length} транзакций</span>
+            )}
+            {!isTransactionBundle && queries.length > 0 && (
               <span className="text-muted-foreground"> · {queries.length} запросов</span>
             )}
             {indexesCount > 0 && (

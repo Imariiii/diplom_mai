@@ -193,12 +193,17 @@ class ScenarioBundleResolver:
 
     def bundle_to_execution_dict(self, bundle: Dict[str, Any]) -> Dict[str, Any]:
         """Привести bundle к формату, совместимому с LoadTester.run_scenario_test."""
+        workload_mode = bundle.get("workload_mode") or "query"
         return {
             "id": bundle["id"],
             "name": bundle["name"],
             "description": bundle.get("description"),
             "scenario_type": bundle["scenario_template_id"],
+            "workload_mode": workload_mode,
+            "primary_rate_unit": bundle.get("primary_rate_unit")
+            or ("tps" if workload_mode == "transaction" else "qps"),
             "queries": bundle.get("queries", []),
+            "transactions": bundle.get("transactions", []),
             "indexes": bundle.get("indexes", []),
             "schema_profile_id": bundle.get("schema_profile_id"),
             "schema_profile_name": bundle.get("schema_profile_name"),

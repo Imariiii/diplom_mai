@@ -9,6 +9,7 @@ import asyncio
 
 from backend.api.schemas import AsyncTestRequest
 from backend.core.summary_utils import sanitize_test_summary
+from backend.database.bundle_workload import get_bundle_workload_mode, get_primary_rate_unit
 from backend.database.scenario_bundle_resolver import ScenarioBundleResolver
 from backend.database.scenario_bundle_validator import ScenarioBundleValidator
 from backend.load_tester.tester import LoadTester, TestCancelledError
@@ -82,6 +83,7 @@ def prune_active_tests(active_tests: Dict[str, Dict] = None, now: datetime = Non
 
 def _build_bundle_config_snapshot(bundle: Dict) -> Dict:
     """Собрать bundle snapshot для истории и comparison."""
+    workload_mode = bundle.get("workload_mode") or "query"
     return {
         "id": bundle.get("id"),
         "name": bundle.get("name"),
@@ -92,7 +94,11 @@ def _build_bundle_config_snapshot(bundle: Dict) -> Dict:
         "schema_profile_name": bundle.get("schema_profile_name"),
         "generation_source": bundle.get("generation_source"),
         "is_builtin": bundle.get("is_builtin"),
+        "workload_mode": workload_mode,
+        "primary_rate_unit": bundle.get("primary_rate_unit")
+        or ("tps" if workload_mode == "transaction" else "qps"),
         "queries": bundle.get("queries", []),
+        "transactions": bundle.get("transactions", []),
         "indexes": bundle.get("indexes", []),
     }
 
@@ -441,10 +447,17 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                 bundle_id=request.bundle_id,
             )
             resolved_bundle = resolved["bundle"]
-            queries_count = len(resolved_bundle.get("queries", []))
+            workload_mode = get_bundle_workload_mode(resolved_bundle)
+            units_count = (
+                len(resolved_bundle.get("transactions", []))
+                if workload_mode == "transaction"
+                else len(resolved_bundle.get("queries", []))
+            )
+            units_label = "транзакций" if workload_mode == "transaction" else "запросов"
             print(
                 f"[TEST] Разрешён bundle: {resolved_bundle['name']!r} "
-                f"(профиль: {resolved['schema_profile_name']!r}), запросов: {queries_count}"
+                f"(профиль: {resolved['schema_profile_name']!r}), "
+                f"режим: {workload_mode}, {units_label}: {units_count}"
             )
             resolved_config = dict(active_tests[test_id]["config"])
             resolved_config.update({
@@ -455,6 +468,9 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                 "resolved_bundle_description": resolved_bundle.get("description"),
                 "resolved_profile_id": resolved["schema_profile_id"],
                 "resolved_profile_name": resolved["schema_profile_name"],
+                "workload_mode": workload_mode,
+                "primary_rate_unit": get_primary_rate_unit(workload_mode),
+                "comparison_unit": "transaction" if workload_mode == "transaction" else "query",
                 "resolved_bundle_snapshot": _build_bundle_config_snapshot(resolved_bundle),
             })
             active_tests[test_id]["config"] = resolved_config
@@ -595,13 +611,22 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
         actual_duration = end_time - start_time
         finish_ts = start_ts + timedelta(seconds=actual_duration)
 
-        summary = {
+        run_config = active_tests[test_id].get("config") or {}
+        workload_mode = run_config.get("workload_mode") or "query"
+        primary_rate_unit = run_config.get("primary_rate_unit") or get_primary_rate_unit(workload_mode)
+        summary = sanitize_test_summary({
+            'workload_mode': workload_mode,
+            'primary_rate_unit': primary_rate_unit,
+            'comparison_unit': run_config.get("comparison_unit")
+            or ("transaction" if workload_mode == "transaction" else "query"),
+            'total_units': total_transactions,
             'total_transactions': total_transactions,
-            'total_duration': actual_duration
-        }
+            'total_duration': actual_duration,
+        })
+        units_label = "транзакций" if workload_mode == "transaction" else "операций"
         print(
             f"[TEST] Тест {test_id} завершён за {actual_duration:.1f}с. "
-            f"Транзакций: {total_transactions}"
+            f"Единиц нагрузки ({units_label}): {total_transactions}"
         )
 
         if HISTORY_ENABLED and test_repository:

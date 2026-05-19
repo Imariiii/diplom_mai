@@ -66,3 +66,41 @@ export function formatCardAttemptRate(options: {
 export function formatCardSuccessfulThroughput(throughput?: number): string {
   return typeof throughput === "number" ? throughput.toFixed(0) : "—"
 }
+
+export type WorkloadMode = "query" | "transaction"
+
+export function resolveWorkloadMode(
+  value?: string | null,
+): WorkloadMode {
+  return value === "transaction" ? "transaction" : "query"
+}
+
+export function resolvePrimaryRateUnit(
+  workloadMode: WorkloadMode,
+  explicit?: string | null,
+): "qps" | "tps" {
+  if (explicit === "tps" || explicit === "qps") return explicit
+  return workloadMode === "transaction" ? "tps" : "qps"
+}
+
+export function formatWorkloadModeLabel(workloadMode?: string | null): string {
+  return resolveWorkloadMode(workloadMode) === "transaction"
+    ? "Транзакционный bundle"
+    : "SQL bundle"
+}
+
+export function formatPrimaryThroughputLabel(
+  workloadMode?: string | null,
+  primaryRateUnit?: string | null,
+): string {
+  const mode = resolveWorkloadMode(workloadMode)
+  const unit = resolvePrimaryRateUnit(mode, primaryRateUnit)
+  if (unit === "tps") return "TPS (транзакций/с)"
+  return "QPS (запросов/с)"
+}
+
+export function formatSummaryUnitsLabel(workloadMode?: string | null): string {
+  return resolveWorkloadMode(workloadMode) === "transaction"
+    ? "Единиц нагрузки (транзакции)"
+    : "Единиц нагрузки (запросы)"
+}

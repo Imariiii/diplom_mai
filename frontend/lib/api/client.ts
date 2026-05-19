@@ -70,7 +70,18 @@ class ApiClient {
         if (Array.isArray(error.detail)) {
           // Pydantic validation errors (422): detail — массив объектов
           if (response.status === 422) {
-            message = "Заполните все обязательные поля корректно"
+            const fieldHints = (error.detail as Array<{ loc?: unknown[]; msg?: string }>)
+              .map((entry) => {
+                const field = Array.isArray(entry.loc)
+                  ? entry.loc.filter((part) => typeof part === "string" && part !== "body").join(".")
+                  : ""
+                return field ? `${field}: ${entry.msg ?? ""}` : entry.msg
+              })
+              .filter(Boolean)
+              .slice(0, 3)
+            message = fieldHints.length
+              ? `Заполните обязательные поля: ${fieldHints.join("; ")}`
+              : "Заполните все обязательные поля корректно"
           } else {
             message = (error.detail as Array<{ msg?: string }>)
               .map((e) => e.msg ?? String(e))

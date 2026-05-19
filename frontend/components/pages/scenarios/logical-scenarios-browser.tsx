@@ -20,16 +20,20 @@ import {
 
 import { apiClient } from "@/lib/api"
 import type {
+  BundleWorkloadMode,
   LogicalDatabase,
   ScenarioBundleSummary,
   ScenarioBundleSaveRequest,
   ScenarioIndex,
   ScenarioParam,
   ScenarioQuery,
+  ScenarioTransaction,
+  ScenarioTransactionStep,
   ScenarioTemplate,
   SchemaProfileDetail,
   SchemaProfileSummary,
 } from "@/lib/types"
+import { formatWorkloadModeLabel } from "@/lib/throughput-metrics"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -110,6 +114,22 @@ function cloneIndexes(indexes: ScenarioIndex[] = []): ScenarioIndex[] {
   }))
 }
 
+function cloneTransactions(transactions: ScenarioTransaction[] = []): ScenarioTransaction[] {
+  return transactions.map((transaction, index) => ({
+    name: transaction.name,
+    weight: transaction.weight ?? 1,
+    order_index: transaction.order_index ?? index,
+    description: transaction.description ?? null,
+    steps: (transaction.steps || []).map((step, stepIndex) => ({
+      sql_template: step.sql_template,
+      query_type: step.query_type,
+      order_index: step.order_index ?? stepIndex,
+      description: step.description ?? null,
+    })),
+    params: cloneParams(transaction.params || []),
+  }))
+}
+
 function bundleToDraft(bundle: ScenarioBundleSummary): ScenarioBundleSaveRequest {
   return {
     scenario_template_id: bundle.scenario_template_id,
@@ -118,7 +138,9 @@ function bundleToDraft(bundle: ScenarioBundleSummary): ScenarioBundleSaveRequest
     generation_source: bundle.generation_source,
     generated_from_connection_id: bundle.generated_from_connection_id ?? undefined,
     is_active: bundle.is_active,
+    workload_mode: bundle.workload_mode || "query",
     queries: cloneQueries(bundle.queries),
+    transactions: cloneTransactions(bundle.transactions || []),
     indexes: cloneIndexes(bundle.indexes),
   }
 }
@@ -192,6 +214,7 @@ export function LogicalScenariosBrowser() {
   const [loadingProfile, setLoadingProfile] = useState(false)
   const [saving, setSaving] = useState(false)
   const [expandedQueries, setExpandedQueries] = useState<Set<number>>(new Set())
+  const [expandedTransactions, setExpandedTransactions] = useState<Set<number>>(new Set())
   const [templateSearch, setTemplateSearch] = useState("")
   const [creatingBundle, setCreatingBundle] = useState(false)
   const [templateDialog, setTemplateDialog] = useState<{
@@ -337,6 +360,7 @@ export function LogicalScenariosBrowser() {
   const handleTemplateChange = async (templateId: string) => {
     setSelectedTemplateId(templateId)
     setExpandedQueries(new Set())
+    setExpandedTransactions(new Set())
     syncEditorState(selectedProfileDetail, templateId)
   }
 
@@ -381,6 +405,169 @@ export function LogicalScenariosBrowser() {
     setExpandedQueries((prev) => {
       const next = new Set(prev)
       next.add(draftBundle?.queries.length ?? 0)
+      return next
+    })
+  }
+
+  const updateTransaction = (ti: number, patch: Partial<ScenarioTransaction>) => {
+    updateDraftBundle((cur) => ({
+      ...cur,
+      transactions: (cur.transactions || []).map((tx, i) => (i === ti ? { ...tx, ...patch } : tx)),
+    }))
+  }
+
+  const addTransaction = () => {
+    updateDraftBundle((cur) => ({
+      ...cur,
+      transactions: [
+        ...(cur.transactions || []),
+        {
+          name: `Транзакция ${(cur.transactions?.length || 0) + 1}`,
+          weight: 1,
+          order_index: cur.transactions?.length || 0,
+          description: "",
+          steps: [{ sql_template: "", query_type: "select", order_index: 0, description: "" }],
+          params: [],
+        },
+      ],
+    }))
+    setExpandedTransactions((prev) => {
+      const next = new Set(prev)
+      next.add(draftBundle?.transactions?.length ?? 0)
+      return next
+    })
+  }
+
+  const removeTransaction = (ti: number) => {
+    updateDraftBundle((cur) => ({
+      ...cur,
+      transactions: (cur.transactions || [])
+        .filter((_, i) => i !== ti)
+        .map((tx, i) => ({ ...tx, order_index: i })),
+    }))
+    setExpandedTransactions((prev) => {
+      const next = new Set<number>()
+      prev.forEach((idx) => {
+        if (idx < ti) next.add(idx)
+        else if (idx > ti) next.add(idx - 1)
+      })
+      return next
+    })
+  }
+
+  const updateTransactionStep = (ti: number, si: number, patch: Partial<ScenarioTransactionStep>) => {
+    updateDraftBundle((cur) => ({
+      ...cur,
+      transactions: (cur.transactions || []).map((tx, i) =>
+        i === ti
+          ? {
+              ...tx,
+              steps: tx.steps.map((step, j) => (j === si ? { ...step, ...patch } : step)),
+            }
+          : tx,
+      ),
+    }))
+  }
+
+  const addTransactionStep = (ti: number) => {
+    updateDraftBundle((cur) => ({
+      ...cur,
+      transactions: (cur.transactions || []).map((tx, i) =>
+        i === ti
+          ? {
+              ...tx,
+              steps: [
+                ...tx.steps,
+                {
+                  sql_template: "",
+                  query_type: "select",
+                  order_index: tx.steps.length,
+                  description: "",
+                },
+              ],
+            }
+          : tx,
+      ),
+    }))
+  }
+
+  const removeTransactionStep = (ti: number, si: number) => {
+    updateDraftBundle((cur) => ({
+      ...cur,
+      transactions: (cur.transactions || []).map((tx, i) =>
+        i === ti
+          ? {
+              ...tx,
+              steps: tx.steps
+                .filter((_, j) => j !== si)
+                .map((step, j) => ({ ...step, order_index: j })),
+            }
+          : tx,
+      ),
+    }))
+  }
+
+  const addTransactionParam = (ti: number) => {
+    updateDraftBundle((cur) => ({
+      ...cur,
+      transactions: (cur.transactions || []).map((tx, i) =>
+        i === ti
+          ? {
+              ...tx,
+              params: [
+                ...tx.params,
+                {
+                  param_name: "",
+                  param_type: "random_int",
+                  min_value: 1,
+                  max_value: 1000,
+                  fixed_value: null,
+                  table_ref: null,
+                  column_ref: null,
+                  string_length: null,
+                  current_value: 0,
+                  step: 1,
+                },
+              ],
+            }
+          : tx,
+      ),
+    }))
+  }
+
+  const updateTransactionParam = (ti: number, pi: number, patch: Partial<ScenarioParam>) => {
+    updateDraftBundle((cur) => ({
+      ...cur,
+      transactions: (cur.transactions || []).map((tx, i) =>
+        i === ti
+          ? {
+              ...tx,
+              params: tx.params.map((param, j) => (j === pi ? { ...param, ...patch } : param)),
+            }
+          : tx,
+      ),
+    }))
+  }
+
+  const removeTransactionParam = (ti: number, pi: number) => {
+    updateDraftBundle((cur) => ({
+      ...cur,
+      transactions: (cur.transactions || []).map((tx, i) =>
+        i === ti
+          ? {
+              ...tx,
+              params: tx.params.filter((_, j) => j !== pi),
+            }
+          : tx,
+      ),
+    }))
+  }
+
+  const toggleTransactionExpanded = (ti: number) => {
+    setExpandedTransactions((prev) => {
+      const next = new Set(prev)
+      if (next.has(ti)) next.delete(ti)
+      else next.add(ti)
       return next
     })
   }
@@ -556,7 +743,33 @@ export function LogicalScenariosBrowser() {
 
   const handleSaveBundle = async () => {
     if (!draftBundle || !selectedProfileId || !selectedBundle) return
-    if (draftBundle.queries.length === 0) {
+    const isTransactionBundle = draftBundle.workload_mode === "transaction"
+    if (isTransactionBundle) {
+      if (!draftBundle.transactions?.length) {
+        toast.error("Добавьте хотя бы одну транзакцию")
+        return
+      }
+      for (const tx of draftBundle.transactions) {
+        if (!tx.steps.length) {
+          toast.error(`Транзакция «${tx.name}» должна содержать хотя бы один шаг SQL`)
+          return
+        }
+        const names = tx.params.map((param) => param.param_name).filter(Boolean)
+        if (names.length !== new Set(names).size) {
+          toast.error(`Транзакция «${tx.name}»: дублирующиеся param_name`)
+          return
+        }
+        for (const param of tx.params) {
+          if (param.param_type !== "random_from_table") continue
+          if (!param.table_ref?.trim() || !param.column_ref?.trim()) {
+            toast.error(
+              `Транзакция «${tx.name}»: для параметра «${param.param_name || "?"}» укажите таблицу и колонку`,
+            )
+            return
+          }
+        }
+      }
+    } else if (draftBundle.queries.length === 0) {
       toast.error("Добавьте хотя бы один SQL-запрос")
       return
     }
@@ -572,21 +785,40 @@ export function LogicalScenariosBrowser() {
     }
   }
 
-  const handleCreateBundle = async () => {
+  const handleCreateBundle = async (workloadMode: BundleWorkloadMode = "query") => {
     if (!selectedProfileId || !selectedTemplateId) return
     setCreatingBundle(true)
     try {
+      const isTransaction = workloadMode === "transaction"
       const created = await apiClient.createBundleVariant(selectedProfileId, {
         scenario_template_id: selectedTemplateId,
-        name: "Bundle 1",
+        name: isTransaction ? "Transaction bundle 1" : "Bundle 1",
         description: "",
         generation_source: "manual_variant",
         is_active: true,
-        queries: [],
+        workload_mode: workloadMode,
+        queries: isTransaction ? [] : [],
+        transactions: isTransaction
+          ? [{
+              name: "Транзакция 1",
+              weight: 1,
+              order_index: 0,
+              description: "",
+              steps: [],
+              params: [],
+            }]
+          : [],
         indexes: [],
       })
-      toast.success("Bundle создан — добавьте SQL-запросы и сохраните")
+      toast.success(
+        isTransaction
+          ? "Транзакционный bundle создан — настройте шаги и сохраните"
+          : "SQL bundle создан — добавьте запросы и сохраните",
+      )
       await loadProfile(selectedProfileId, selectedTemplateId, created.id)
+      if (isTransaction) {
+        setExpandedTransactions(new Set([0]))
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Не удалось создать bundle")
     } finally {
@@ -598,7 +830,7 @@ export function LogicalScenariosBrowser() {
 
   const profileName = selectedLogicalDatabase?.schema_profile_name || selectedProfileDetail?.name || null
   const bundleSubtitle = draftBundle
-    ? `${draftBundle.name} · ${draftBundle.generation_source || "manual"}`
+    ? `${draftBundle.name} · ${formatWorkloadModeLabel(draftBundle.workload_mode)} · ${draftBundle.generation_source || "manual"}`
     : null
 
   if (loading) {
@@ -887,19 +1119,35 @@ export function LogicalScenariosBrowser() {
                       Для шаблона <span className="font-medium text-foreground">{selectedTemplate.name}</span> в этом профиле ещё нет bundle с SQL-запросами и индексами.
                     </p>
                   </div>
-                  <Button
-                    onClick={handleCreateBundle}
-                    disabled={creatingBundle || !selectedProfileId}
-                  >
-                    {creatingBundle
-                      ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      : <Plus className="mr-2 h-4 w-4" />}
-                    Создать bundle
-                  </Button>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <Button
+                      onClick={() => handleCreateBundle("query")}
+                      disabled={creatingBundle || !selectedProfileId}
+                    >
+                      {creatingBundle
+                        ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        : <Plus className="mr-2 h-4 w-4" />}
+                      SQL bundle
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => handleCreateBundle("transaction")}
+                      disabled={creatingBundle || !selectedProfileId}
+                    >
+                      {creatingBundle
+                        ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        : <Plus className="mr-2 h-4 w-4" />}
+                      Транзакционный bundle
+                    </Button>
+                  </div>
                 </div>
               ) : (
-                <Tabs defaultValue="queries" className="space-y-4">
+                <Tabs
+                  defaultValue={draftBundle.workload_mode === "transaction" ? "transactions" : "queries"}
+                  className="space-y-4"
+                >
                   <TabsList className="h-auto w-full justify-start overflow-x-auto rounded-lg border border-border bg-card p-1">
+                    {draftBundle.workload_mode !== "transaction" && (
                     <TabsTrigger
                       value="queries"
                       className="gap-2 px-3 py-1.5 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
@@ -908,6 +1156,17 @@ export function LogicalScenariosBrowser() {
                       SQL-запросы
                       <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-[10px] data-[state=active]:bg-primary-foreground/20">{draftBundle.queries.length}</Badge>
                     </TabsTrigger>
+                    )}
+                    {draftBundle.workload_mode === "transaction" && (
+                    <TabsTrigger
+                      value="transactions"
+                      className="gap-2 px-3 py-1.5 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
+                    >
+                      <Layers className="h-3.5 w-3.5" />
+                      Транзакции
+                      <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-[10px] data-[state=active]:bg-primary-foreground/20">{draftBundle.transactions?.length ?? 0}</Badge>
+                    </TabsTrigger>
+                    )}
                     <TabsTrigger
                       value="indexes"
                       className="gap-2 px-3 py-1.5 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
@@ -924,7 +1183,252 @@ export function LogicalScenariosBrowser() {
                     </TabsTrigger>
                   </TabsList>
 
+                  {draftBundle.workload_mode === "transaction" && (
+                  <TabsContent value="transactions" className="space-y-3 focus-visible:outline-none">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-muted-foreground">
+                        Параметры общие для всех шагов одного выполнения транзакции
+                      </p>
+                      <Button variant="outline" size="sm" onClick={addTransaction}>
+                        <Plus className="h-3.5 w-3.5" />
+                        Добавить транзакцию
+                      </Button>
+                    </div>
+                    {(draftBundle.transactions || []).length === 0 && (
+                      <Empty className="border p-6">
+                        <EmptyHeader>
+                          <EmptyTitle className="text-base">Нет транзакций</EmptyTitle>
+                          <EmptyDescription>Добавьте хотя бы одну транзакцию с шагами SQL.</EmptyDescription>
+                        </EmptyHeader>
+                      </Empty>
+                    )}
+                    <div className="space-y-3">
+                      {(draftBundle.transactions || []).map((transaction, ti) => {
+                        const isExpanded = expandedTransactions.has(ti)
+                        return (
+                          <div key={`tx-${ti}`} className="overflow-hidden rounded-xl border bg-card">
+                            <button
+                              type="button"
+                              className="w-full px-4 py-3 text-left transition-colors hover:bg-muted/30"
+                              onClick={() => toggleTransactionExpanded(ti)}
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="font-medium text-foreground">{transaction.name || `Транзакция ${ti + 1}`}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {transaction.steps.length} шаг(ов) · вес {transaction.weight ?? 1}
+                                  </p>
+                                </div>
+                                <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", isExpanded && "rotate-180")} />
+                              </div>
+                            </button>
+                            {isExpanded && (
+                              <div className="space-y-4 border-t px-4 py-4">
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                  <div className="space-y-1">
+                                    <Label>Название</Label>
+                                    <Input value={transaction.name} onChange={(e) => updateTransaction(ti, { name: e.target.value })} />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <Label>Вес</Label>
+                                    <Input type="number" min={1} value={transaction.weight ?? 1} onChange={(e) => updateTransaction(ti, { weight: Number(e.target.value) || 1 })} />
+                                  </div>
+                                </div>
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <Label>Шаги SQL</Label>
+                                    <Button variant="outline" size="sm" onClick={() => addTransactionStep(ti)}>
+                                      <Plus className="h-3.5 w-3.5" />
+                                      Шаг
+                                    </Button>
+                                  </div>
+                                  {transaction.steps.map((step, si) => (
+                                    <div key={`tx-${ti}-step-${si}`} className="space-y-2 rounded-lg border p-3">
+                                      <div className="flex flex-wrap gap-2">
+                                        <Select value={step.query_type} onValueChange={(value) => updateTransactionStep(ti, si, { query_type: value })}>
+                                          <SelectTrigger className="h-8 w-28"><SelectValue /></SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value="select">select</SelectItem>
+                                            <SelectItem value="insert">insert</SelectItem>
+                                            <SelectItem value="update">update</SelectItem>
+                                            <SelectItem value="delete">delete</SelectItem>
+                                          </SelectContent>
+                                        </Select>
+                                        <Button variant="ghost" size="sm" className="text-destructive" onClick={() => removeTransactionStep(ti, si)}>
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                        </Button>
+                                      </div>
+                                      <Textarea
+                                        className="font-mono text-xs min-h-[80px]"
+                                        value={step.sql_template}
+                                        onChange={(e) => updateTransactionStep(ti, si, { sql_template: e.target.value })}
+                                        placeholder="SQL шага; плейсхолдеры {param}"
+                                      />
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <Label>Параметры (transaction-scoped)</Label>
+                                    <Button variant="outline" size="sm" onClick={() => addTransactionParam(ti)}>
+                                      <Plus className="h-3.5 w-3.5" />
+                                      Параметр
+                                    </Button>
+                                  </div>
+                                  {transaction.params.map((param, pi) => (
+                                    <div key={`tx-${ti}-param-${pi}`} className="flex items-start gap-3 rounded-lg border bg-background px-3 py-2.5">
+                                      <span className="mt-1.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
+                                        {pi + 1}
+                                      </span>
+                                      <div className="min-w-0 flex-1 space-y-2">
+                                        <div className="grid grid-cols-[1fr_9rem] gap-2">
+                                          <div className="space-y-1">
+                                            <Label className="text-[11px] text-muted-foreground leading-none">Имя</Label>
+                                            <Input
+                                              className="h-7 text-xs font-mono"
+                                              placeholder="customer_id"
+                                              value={param.param_name}
+                                              onChange={(e) => updateTransactionParam(ti, pi, { param_name: e.target.value })}
+                                            />
+                                          </div>
+                                          <div className="space-y-1">
+                                            <Label className="text-[11px] text-muted-foreground leading-none">Тип</Label>
+                                            <Select
+                                              value={param.param_type}
+                                              onValueChange={(value) => updateTransactionParam(ti, pi, { param_type: value })}
+                                            >
+                                              <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                                              <SelectContent>
+                                                <SelectItem value="random_int">random_int</SelectItem>
+                                                <SelectItem value="random_string">random_string</SelectItem>
+                                                <SelectItem value="random_from_table">random_from_table</SelectItem>
+                                                <SelectItem value="random_date">random_date</SelectItem>
+                                                <SelectItem value="sequential_int">sequential_int</SelectItem>
+                                                <SelectItem value="uuid">uuid</SelectItem>
+                                                <SelectItem value="fixed">fixed</SelectItem>
+                                              </SelectContent>
+                                            </Select>
+                                          </div>
+                                        </div>
+                                        {param.param_type === "random_int" && (
+                                          <div className="grid grid-cols-2 gap-2">
+                                            <div className="space-y-1">
+                                              <Label className="text-[11px] text-muted-foreground leading-none">Min</Label>
+                                              <Input
+                                                className="h-7 text-xs"
+                                                type="number"
+                                                placeholder="1"
+                                                value={param.min_value ?? ""}
+                                                onChange={(e) =>
+                                                  updateTransactionParam(ti, pi, {
+                                                    min_value: e.target.value === "" ? null : Number(e.target.value),
+                                                  })
+                                                }
+                                              />
+                                            </div>
+                                            <div className="space-y-1">
+                                              <Label className="text-[11px] text-muted-foreground leading-none">Max</Label>
+                                              <Input
+                                                className="h-7 text-xs"
+                                                type="number"
+                                                placeholder="1000"
+                                                value={param.max_value ?? ""}
+                                                onChange={(e) =>
+                                                  updateTransactionParam(ti, pi, {
+                                                    max_value: e.target.value === "" ? null : Number(e.target.value),
+                                                  })
+                                                }
+                                              />
+                                            </div>
+                                          </div>
+                                        )}
+                                        {param.param_type === "random_string" && (
+                                          <div className="w-32 space-y-1">
+                                            <Label className="text-[11px] text-muted-foreground leading-none">Длина</Label>
+                                            <Input
+                                              className="h-7 text-xs"
+                                              type="number"
+                                              placeholder="10"
+                                              value={param.string_length ?? ""}
+                                              onChange={(e) =>
+                                                updateTransactionParam(ti, pi, {
+                                                  string_length: e.target.value === "" ? null : Number(e.target.value),
+                                                })
+                                              }
+                                            />
+                                          </div>
+                                        )}
+                                        {param.param_type === "random_from_table" && (
+                                          <div className="grid grid-cols-2 gap-2">
+                                            <div className="space-y-1">
+                                              <Label className="text-[11px] text-muted-foreground leading-none">Таблица</Label>
+                                              <Input
+                                                className="h-7 text-xs font-mono"
+                                                placeholder="customer"
+                                                value={param.table_ref ?? ""}
+                                                onChange={(e) =>
+                                                  updateTransactionParam(ti, pi, { table_ref: e.target.value || null })
+                                                }
+                                              />
+                                            </div>
+                                            <div className="space-y-1">
+                                              <Label className="text-[11px] text-muted-foreground leading-none">Колонка</Label>
+                                              <Input
+                                                className="h-7 text-xs font-mono"
+                                                placeholder="customer_id"
+                                                value={param.column_ref ?? ""}
+                                                onChange={(e) =>
+                                                  updateTransactionParam(ti, pi, { column_ref: e.target.value || null })
+                                                }
+                                              />
+                                            </div>
+                                          </div>
+                                        )}
+                                        {param.param_type === "fixed" && (
+                                          <div className="space-y-1">
+                                            <Label className="text-[11px] text-muted-foreground leading-none">Значение</Label>
+                                            <Input
+                                              className="h-7 text-xs"
+                                              placeholder="42"
+                                              value={param.fixed_value ?? ""}
+                                              onChange={(e) =>
+                                                updateTransactionParam(ti, pi, { fixed_value: e.target.value || null })
+                                              }
+                                            />
+                                          </div>
+                                        )}
+                                        {["sequential_int", "uuid", "random_date"].includes(param.param_type) && (
+                                          <p className="text-[11px] italic text-muted-foreground/70">
+                                            Значение генерируется автоматически при каждом выполнении транзакции.
+                                          </p>
+                                        )}
+                                      </div>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        className="shrink-0 self-center text-muted-foreground hover:text-destructive"
+                                        onClick={() => removeTransactionParam(ti, pi)}
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </div>
+                                  ))}
+                                </div>
+                                <Button variant="ghost" size="sm" className="text-destructive" onClick={() => removeTransaction(ti)}>
+                                  <Trash2 className="mr-1 h-3 w-3" />
+                                  Удалить транзакцию
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </TabsContent>
+                  )}
+
                   {/* === Queries tab === */}
+                  {draftBundle.workload_mode !== "transaction" && (
                   <TabsContent value="queries" className="space-y-3 focus-visible:outline-none">
                     <div className="flex items-center justify-between">
                       <p className="text-xs text-muted-foreground">Разверните запрос для редактирования SQL-шаблона и параметров</p>
@@ -1141,6 +1645,7 @@ export function LogicalScenariosBrowser() {
                       })}
                     </div>
                   </TabsContent>
+                  )}
 
                   {/* === Indexes tab === */}
                   <TabsContent value="indexes" className="space-y-3 focus-visible:outline-none">
@@ -1238,6 +1743,10 @@ export function LogicalScenariosBrowser() {
                         <div>
                           <span className="text-xs text-muted-foreground">Название</span>
                           <p className="font-medium">{draftBundle.name}</p>
+                        </div>
+                        <div>
+                          <span className="text-xs text-muted-foreground">Тип нагрузки</span>
+                          <p className="font-medium">{formatWorkloadModeLabel(draftBundle.workload_mode)}</p>
                         </div>
                         <div>
                           <span className="text-xs text-muted-foreground">Источник генерации</span>

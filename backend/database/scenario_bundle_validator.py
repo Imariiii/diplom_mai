@@ -6,9 +6,15 @@ from typing import Any, Dict, List, Optional, Set
 
 from sqlalchemy import text
 
+from backend.database.bundle_workload import get_bundle_workload_mode
 from backend.database.dialects import get_dialect
 from backend.database.repository.connection_repository import ConnectionRepository
 from backend.database.schema_analyzer import SchemaAnalyzer, SchemaMetadata
+
+_TX_CONTROL_PATTERN = re.compile(
+    r"\b(BEGIN|COMMIT|ROLLBACK|START\s+TRANSACTION)\b",
+    re.IGNORECASE,
+)
 
 
 class ScenarioBundleValidator:
@@ -67,6 +73,17 @@ class ScenarioBundleValidator:
         errors: List[str] = []
         warnings: List[str] = []
         tables = metadata.tables
+        workload_mode = get_bundle_workload_mode(bundle)
+
+        if workload_mode == "transaction":
+            return await self._validate_transaction_bundle_for_connection(
+                bundle=bundle,
+                connection_id=connection_id,
+                connection_name=connection_name,
+                dbms_type=dbms_type,
+                metadata=metadata,
+                smoke_run=smoke_run,
+            )
 
         for query in bundle.get("queries", []):
             sql_template = query.get("sql_template") or ""
@@ -123,6 +140,181 @@ class ScenarioBundleValidator:
                     warnings.append(f"{connection_name}: индекс bundle ссылается на отсутствующую колонку {table.name}.{column_name}")
 
         return errors, warnings
+
+    async def _validate_transaction_bundle_for_connection(
+        self,
+        bundle: Dict[str, Any],
+        connection_id: str,
+        connection_name: str,
+        dbms_type: str,
+        metadata: SchemaMetadata,
+        smoke_run: bool = False,
+    ) -> tuple[List[str], List[str]]:
+        """Проверить transaction bundle на одном подключении."""
+        errors: List[str] = []
+        warnings: List[str] = []
+        tables = metadata.tables
+        transactions = bundle.get("transactions", []) or []
+        if not transactions:
+            errors.append(f"{connection_name}: transaction bundle не содержит транзакций")
+            return errors, warnings
+
+        for transaction in transactions:
+            tx_name = transaction.get("name") or "без имени"
+            steps = transaction.get("steps", []) or []
+            if not steps:
+                errors.append(f"{connection_name}: транзакция '{tx_name}' не содержит шагов")
+                continue
+
+            param_names = [param.get("param_name") for param in transaction.get("params", []) or []]
+            if len(param_names) != len(set(param_names)):
+                errors.append(
+                    f"{connection_name}: транзакция '{tx_name}' содержит дублирующиеся param_name"
+                )
+
+            for step in sorted(steps, key=lambda item: item.get("order_index", 0)):
+                sql_template = step.get("sql_template") or ""
+                step_label = step.get("description") or sql_template[:80]
+                if _TX_CONTROL_PATTERN.search(sql_template):
+                    errors.append(
+                        f"{connection_name}: шаг '{step_label}' транзакции '{tx_name}' "
+                        "содержит явное управление транзакцией (BEGIN/COMMIT/ROLLBACK)"
+                    )
+
+                referenced_tables = self._extract_table_names(sql_template)
+                for table_name in referenced_tables:
+                    if table_name not in tables:
+                        errors.append(
+                            f"{connection_name}: шаг '{step_label}' транзакции '{tx_name}' "
+                            f"ссылается на отсутствующую таблицу {table_name}"
+                        )
+
+                if step.get("query_type") in {"update", "insert"}:
+                    self._validate_write_query(
+                        sql_template, metadata, connection_name, errors, warnings
+                    )
+
+            for param in transaction.get("params", []) or []:
+                table_ref = param.get("table_ref")
+                column_ref = param.get("column_ref")
+                if param.get("param_type") != "random_from_table":
+                    continue
+                if not table_ref or not column_ref:
+                    errors.append(
+                        f"{connection_name}: параметр {param.get('param_name')} транзакции '{tx_name}' "
+                        "не содержит table_ref/column_ref"
+                    )
+                    continue
+                table = tables.get(table_ref)
+                if not table:
+                    errors.append(
+                        f"{connection_name}: параметр {param.get('param_name')} транзакции '{tx_name}' "
+                        f"ссылается на отсутствующую таблицу {table_ref}"
+                    )
+                    continue
+                column = table.get_column(column_ref)
+                if not column:
+                    errors.append(
+                        f"{connection_name}: параметр {param.get('param_name')} транзакции '{tx_name}' "
+                        f"ссылается на отсутствующую колонку {table_ref}.{column_ref}"
+                    )
+                    continue
+                try:
+                    has_sample = await self._has_sample_value(
+                        connection_id, dbms_type, table_ref, column_ref
+                    )
+                except Exception as exc:
+                    errors.append(
+                        f"{connection_name}: не удалось проверить значения параметра "
+                        f"{table_ref}.{column_ref} транзакции '{tx_name}': {exc}"
+                    )
+                    continue
+                if not has_sample:
+                    errors.append(
+                        f"{connection_name}: нет значений для параметра "
+                        f"{table_ref}.{column_ref} транзакции '{tx_name}'"
+                    )
+
+            if smoke_run and not errors:
+                write_steps = [
+                    step for step in steps
+                    if step.get("query_type") in {"update", "insert"}
+                ]
+                if write_steps:
+                    try:
+                        await self._smoke_run_transaction_steps(
+                            connection_id,
+                            dbms_type,
+                            transaction,
+                            write_steps,
+                        )
+                    except Exception as exc:
+                        errors.append(
+                            f"{connection_name}: smoke-run транзакции '{tx_name}' "
+                            f"завершился ошибкой: {exc}"
+                        )
+
+        for index_def in bundle.get("indexes", []):
+            table = tables.get(index_def.get("table_name"))
+            if not table:
+                warnings.append(
+                    f"{connection_name}: индекс bundle ссылается на отсутствующую таблицу "
+                    f"{index_def.get('table_name')}"
+                )
+                continue
+            for column_name in self._split_columns(index_def.get("column_names") or ""):
+                if not table.get_column(column_name):
+                    warnings.append(
+                        f"{connection_name}: индекс bundle ссылается на отсутствующую колонку "
+                        f"{table.name}.{column_name}"
+                    )
+
+        return errors, warnings
+
+    async def _smoke_run_transaction_steps(
+        self,
+        connection_id: str,
+        dbms_type: str,
+        transaction: Dict[str, Any],
+        write_steps: List[Dict[str, Any]],
+    ) -> None:
+        """Выполнить write-шаги транзакции в одной DB-транзакции и откатить."""
+        dialect = get_dialect(dbms_type)
+        engine = await self.schema_analyzer.db_connection.get_engine_async(connection_id)
+        params: Dict[str, Any] = {}
+        for param in transaction.get("params", []) or []:
+            if param.get("param_type") != "random_from_table":
+                continue
+            table_ref = param.get("table_ref")
+            column_ref = param.get("column_ref")
+            if not table_ref or not column_ref:
+                continue
+            sql = dialect.get_sample_column_values_sql(table_ref, column_ref)
+            async with engine.connect() as conn:
+                result = await conn.execute(text(sql), {"limit": 1})
+                row = result.fetchone()
+                if row is None:
+                    raise ValueError(f"Нет значения для {table_ref}.{column_ref}")
+                params[param["param_name"]] = row[0]
+
+        async with engine.connect() as conn:
+            db_trans = await conn.begin()
+            try:
+                for step in sorted(write_steps, key=lambda item: item.get("order_index", 0)):
+                    executable_sql = step.get("sql_template") or ""
+                    for param_name in sorted(params.keys(), key=len, reverse=True):
+                        executable_sql = executable_sql.replace(
+                            "'{" + param_name + "}'", f":{param_name}"
+                        )
+                        executable_sql = executable_sql.replace(
+                            "{" + param_name + "}", f":{param_name}"
+                        )
+                    missing = re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", executable_sql)
+                    if missing:
+                        raise KeyError(", ".join(sorted(set(missing))))
+                    await conn.execute(text(executable_sql), params)
+            finally:
+                await db_trans.rollback()
 
     async def _has_sample_value(self, connection_id: str, dbms_type: str, table_name: str, column_name: str) -> bool:
         dialect = get_dialect(dbms_type)

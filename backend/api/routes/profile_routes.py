@@ -25,6 +25,45 @@ from backend.database.scenario_generator import ScenarioGenerator
 router = APIRouter(prefix="/api/schema-profiles", tags=["schema-profiles"])
 
 
+def _validate_bundle_save_request(
+    request: ScenarioBundleSaveRequest,
+    *,
+    is_create: bool = False,
+) -> None:
+    """Проверить согласованность workload_mode и содержимого bundle."""
+    if request.workload_mode == "transaction":
+        if not request.transactions:
+            raise HTTPException(
+                status_code=400,
+                detail="Transaction bundle должен содержать хотя бы одну транзакцию",
+            )
+        for tx in request.transactions:
+            if not is_create and not tx.steps:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Транзакция '{tx.name}' должна содержать хотя бы один шаг SQL",
+                )
+            for step in tx.steps:
+                if not (step.sql_template or "").strip():
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Транзакция '{tx.name}': шаг SQL не может быть пустым",
+                    )
+            param_names = [param.param_name for param in tx.params]
+            if len(param_names) != len(set(param_names)):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Транзакция '{tx.name}': дублирующиеся param_name в параметрах",
+                )
+        return
+
+    if not is_create and not request.queries:
+        raise HTTPException(
+            status_code=400,
+            detail="Query bundle должен содержать хотя бы один SQL-запрос",
+        )
+
+
 def get_profile_repository():
     if not initialize.profile_repository:
         raise HTTPException(status_code=503, detail="ProfileRepository не настроен")
@@ -164,6 +203,7 @@ async def create_bundle_variant(profile_id: str, request: ScenarioBundleSaveRequ
     if not template:
         raise HTTPException(status_code=404, detail="Logical template не найден")
 
+    _validate_bundle_save_request(request, is_create=True)
     bundle = await bundle_repo.create_bundle_variant(
         schema_profile_id=profile_id,
         scenario_template_id=request.scenario_template_id,
@@ -173,6 +213,8 @@ async def create_bundle_variant(profile_id: str, request: ScenarioBundleSaveRequ
         generated_from_connection_id=request.generated_from_connection_id,
         queries=[query.model_dump() for query in request.queries],
         indexes=[index.model_dump() for index in request.indexes],
+        transactions=[tx.model_dump() for tx in request.transactions],
+        workload_mode=request.workload_mode,
         is_active=request.is_active,
         is_builtin=False,
     )
@@ -197,6 +239,7 @@ async def update_bundle_variant(profile_id: str, bundle_id: str, request: Scenar
 
     bundle_repo = get_bundle_repository()
     try:
+        _validate_bundle_save_request(request)
         updated = await bundle_repo.update_bundle_variant(
             bundle_id=bundle_id,
             name=request.name,
@@ -205,6 +248,8 @@ async def update_bundle_variant(profile_id: str, bundle_id: str, request: Scenar
             generated_from_connection_id=request.generated_from_connection_id,
             queries=[query.model_dump() for query in request.queries],
             indexes=[index.model_dump() for index in request.indexes],
+            transactions=[tx.model_dump() for tx in request.transactions],
+            workload_mode=request.workload_mode,
             is_active=request.is_active,
         )
     except ValueError as exc:

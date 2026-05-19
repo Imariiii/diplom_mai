@@ -560,3 +560,57 @@ class TestRealtimeThroughputSamples:
         assert callback.metric_samples_buffer[0]["sample_type"] == "throughput_realtime"
         assert callback.metric_samples_buffer[0]["attempt_rate"] == 50.0
         assert callback.metric_samples_buffer[0]["throughput"] is None
+
+
+class TestExecuteScenarioTransaction:
+    @pytest.mark.asyncio
+    async def test_execute_scenario_transaction_commits_all_steps(self, tester):
+        conn = MagicMock()
+        trans = MagicMock()
+        trans.commit = AsyncMock()
+        trans.rollback = AsyncMock()
+        conn.begin = AsyncMock(return_value=trans)
+
+        result_mock = MagicMock()
+        result_mock.returns_rows = False
+        conn.execute = AsyncMock(return_value=result_mock)
+
+        engine = _AsyncEngine(conn)
+        tester.db_connection.get_engine_async = AsyncMock(return_value=engine)
+
+        transaction = {
+            "name": "checkout",
+            "steps": [
+                {"sql_template": "SELECT 1", "query_type": "select"},
+                {"sql_template": "UPDATE t SET x=1", "query_type": "update"},
+            ],
+            "params": [],
+        }
+        result = await tester.execute_scenario_transaction("db1", transaction, "scenario")
+        assert result["error"] is None
+        assert result["steps_executed"] == 2
+        assert result["rollbacks"] == 0
+        trans.commit.assert_awaited_once()
+        assert conn.execute.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_execute_scenario_transaction_rolls_back_on_error(self, tester):
+        conn = MagicMock()
+        trans = MagicMock()
+        trans.commit = AsyncMock()
+        trans.rollback = AsyncMock()
+        conn.begin = AsyncMock(return_value=trans)
+        conn.execute = AsyncMock(side_effect=RuntimeError("boom"))
+
+        engine = _AsyncEngine(conn)
+        tester.db_connection.get_engine_async = AsyncMock(return_value=engine)
+
+        transaction = {
+            "name": "fail",
+            "steps": [{"sql_template": "SELECT 1", "query_type": "select"}],
+            "params": [],
+        }
+        result = await tester.execute_scenario_transaction("db1", transaction, "scenario")
+        assert result["error"] is not None
+        assert result["rollbacks"] == 1
+        trans.rollback.assert_awaited_once()

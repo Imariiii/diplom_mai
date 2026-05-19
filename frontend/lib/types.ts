@@ -490,6 +490,24 @@ export interface SchemaProfileListResponse {
   profiles: SchemaProfileSummary[]
 }
 
+export type BundleWorkloadMode = "query" | "transaction"
+
+export interface ScenarioTransactionStep {
+  sql_template: string
+  query_type: string
+  order_index?: number
+  description?: string | null
+}
+
+export interface ScenarioTransaction {
+  name: string
+  weight?: number
+  order_index?: number
+  description?: string | null
+  steps: ScenarioTransactionStep[]
+  params: ScenarioParam[]
+}
+
 export interface ScenarioBundleSummary {
   id: string
   schema_profile_id: string
@@ -502,9 +520,12 @@ export interface ScenarioBundleSummary {
   is_builtin: boolean
   is_active: boolean
   generated_from_connection_id?: string | null
+  workload_mode?: BundleWorkloadMode
+  primary_rate_unit?: "qps" | "tps" | null
   created_at?: string | null
   updated_at?: string | null
   queries: ScenarioQuery[]
+  transactions?: ScenarioTransaction[]
   indexes: ScenarioIndex[]
 }
 
@@ -515,7 +536,9 @@ export interface ScenarioBundleSaveRequest {
   generation_source?: string
   generated_from_connection_id?: string
   is_active: boolean
+  workload_mode?: BundleWorkloadMode
   queries: ScenarioQuery[]
+  transactions?: ScenarioTransaction[]
   indexes: ScenarioIndex[]
 }
 

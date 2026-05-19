@@ -1,11 +1,13 @@
 """
 Модуль для проведения нагрузочного тестирования.
 
-Единица нагрузки — одна SQL-операция (один execute + commit), не многошаговая ACID-транзакция.
+Единица нагрузки зависит от bundle:
+- query-mode: одна SQL-операция (один execute + commit);
+- transaction-mode: одна пользовательская транзакция (несколько шагов в одном begin/commit).
 
 Метрики пропускной способности:
-- throughput — успешных операций в секунду (итог прогона, сравнение, окна по успехам);
-- attempt_rate — всех запросов в секунду, успех + ошибка (realtime и итоговая интенсивность).
+- throughput — успешных primary units в секунду (QPS или TPS);
+- attempt_rate — всех попыток в секунду, успех + ошибка (realtime и итоговая интенсивность).
 """
 import time
 import asyncio
@@ -15,6 +17,12 @@ import re
 from typing import Dict, List, Optional, Callable, Any, Tuple
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import text
+from backend.database.bundle_workload import (
+    collect_bundle_sql_templates,
+    collect_param_refs_for_cache,
+    get_bundle_workload_mode,
+    get_primary_rate_unit,
+)
 from backend.database.connection import DatabaseConnection
 from backend.database.dialects import get_dialect
 from backend.database.dialects.cache_metrics import merge_running_cache_hit
@@ -1088,6 +1096,76 @@ class LoadTester:
             'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
+    async def execute_scenario_transaction(
+        self,
+        db_key: str,
+        transaction: Dict,
+        scenario_name: str,
+    ) -> Dict:
+        """Выполнить пользовательскую транзакцию: все шаги в одном begin/commit."""
+        start_time = time.perf_counter()
+        error = None
+        rows_count = 0
+        steps_executed = 0
+        rollbacks = 0
+        db_type = self.db_connection.get_dbms_type(db_key)
+        tx_name = transaction.get("name", "transaction")
+        steps = sorted(
+            transaction.get("steps", []) or [],
+            key=lambda step: step.get("order_index", 0),
+        )
+        params_config = transaction.get("params", []) or []
+        param_values: Dict[str, Any] = {}
+
+        try:
+            for param_config in params_config:
+                param_name = param_config["param_name"]
+                param_type = param_config["param_type"]
+                param_values[param_name] = await self._generate_param_value(
+                    db_key, param_type, param_config
+                )
+        except Exception as exc:
+            error = str(exc)
+
+        try:
+            if error is not None:
+                raise RuntimeError(error)
+            engine = await self.db_connection.get_engine_async(db_key)
+            async with engine.connect() as conn:
+                db_trans = await conn.begin()
+                try:
+                    for step in steps:
+                        sql_template = step["sql_template"]
+                        executable_sql = self._build_executable_sql(sql_template, param_values)
+                        result = await conn.execute(executable_sql, param_values)
+                        if result.returns_rows:
+                            rows_count += len(result.fetchall())
+                        steps_executed += 1
+                    await db_trans.commit()
+                except Exception as exc:
+                    await db_trans.rollback()
+                    rollbacks = 1
+                    error = str(exc)
+        except Exception as exc:
+            error = str(exc)
+
+        end_time = time.perf_counter()
+        execution_time = (end_time - start_time) * 1000
+        first_sql = steps[0]["sql_template"] if steps else ""
+        return {
+            "scenario": scenario_name,
+            "transaction": tx_name,
+            "db_key": db_key,
+            "db_type": db_type,
+            "sql": first_sql[:200] + "..." if len(first_sql) > 200 else first_sql,
+            "execution_time_ms": execution_time,
+            "rows_count": rows_count,
+            "steps_executed": steps_executed,
+            "rollbacks": rollbacks,
+            "error": error,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
     async def _generate_param_value(
         self,
         db_key: str,
@@ -1204,6 +1282,11 @@ class LoadTester:
         for table, column in refs:
             await self._get_random_value_from_table(db_key, table, column)
 
+    async def _prime_random_value_cache_from_params(self, db_key: str, params: List[Dict[str, Any]]):
+        """Предзагрузить random_from_table для transaction-scoped параметров."""
+        pseudo_queries = [{"params": params}]
+        await self._prime_random_value_cache(db_key, pseudo_queries)
+
     async def run_scenario_test(
         self,
         db_key: str,
@@ -1228,25 +1311,43 @@ class LoadTester:
             if self._metrics_callback:
                 self._metrics_callback.set_progress(progress_start + _pslice * pct)
 
+        workload_mode = get_bundle_workload_mode(scenario)
+        primary_rate_unit = scenario.get("primary_rate_unit") or get_primary_rate_unit(workload_mode)
+        is_transaction_mode = workload_mode == "transaction"
         queries = scenario.get('queries', [])
+        transactions = scenario.get('transactions', [])
         scenario_indexes = scenario.get('indexes', [])
-        if not queries:
+
+        if is_transaction_mode and not transactions:
+            print(f"[SCENARIO] ⚠ Нет транзакций в сценарии {scenario_name!r} для {conn_name}")
+            return {
+                'scenario': scenario_name,
+                'db_key': db_key,
+                'db_type': self.db_connection.get_dbms_type(db_key),
+                'workload_mode': workload_mode,
+                'error': 'No transactions in scenario',
+                'successful': 0,
+                'failed': 0,
+            }
+        if not is_transaction_mode and not queries:
             print(f"[SCENARIO] ⚠ Нет запросов в сценарии {scenario_name!r} для {conn_name}")
             return {
                 'scenario': scenario_name,
                 'db_key': db_key,
                 'db_type': self.db_connection.get_dbms_type(db_key),
+                'workload_mode': workload_mode,
                 'error': 'No queries in scenario',
                 'successful': 0,
-                'failed': 0
+                'failed': 0,
             }
 
+        unit_label = "транзакций" if is_transaction_mode else "запросов"
         print(
-            f"[SCENARIO] Старт {conn_name} | сценарий={scenario_name!r} | "
+            f"[SCENARIO] Старт {conn_name} | сценарий={scenario_name!r} | режим={workload_mode} | "
             f"{iterations} итер. x {virtual_users} VU | restore={auto_restore} | indexes={use_indexes}"
         )
 
-        sql_queries = [q['sql_template'] for q in queries]
+        sql_queries = collect_bundle_sql_templates(scenario)
         self._raise_if_cancel_requested("подготовка сценария")
 
         # Фаза: подготовка / backup (0-8% диапазона)
@@ -1256,11 +1357,17 @@ class LoadTester:
         )
         _set_progress(0.08)
 
-        weighted_queries = []
-        for query in queries:
-            weight = query.get('weight', 1)
-            for _ in range(weight):
-                weighted_queries.append(query)
+        weighted_units: List[Dict[str, Any]] = []
+        if is_transaction_mode:
+            for transaction in transactions:
+                weight = transaction.get('weight', 1)
+                for _ in range(weight):
+                    weighted_units.append(transaction)
+        else:
+            for query in queries:
+                weight = query.get('weight', 1)
+                for _ in range(weight):
+                    weighted_units.append(query)
 
         self.set_workload_context(
             **workload_context_from_test(scenario_queries=sql_queries)
@@ -1330,14 +1437,23 @@ class LoadTester:
                     f"за {index_creation_result.total_time_ms:.0f}ms"
                 )
 
-            await self._prime_random_value_cache(db_key, queries)
+            if is_transaction_mode:
+                await self._prime_random_value_cache_from_params(
+                    db_key, collect_param_refs_for_cache(scenario),
+                )
+            else:
+                await self._prime_random_value_cache(db_key, queries)
 
-            async def _warmup_scenario_query():
-                q = random.choice(weighted_queries)
+            async def _warmup_scenario_unit():
+                unit = random.choice(weighted_units)
+                if is_transaction_mode:
+                    return await self.execute_scenario_transaction(
+                        db_key, unit, scenario_name,
+                    )
                 return await self.execute_scenario_query(
                     db_key,
-                    q['sql_template'],
-                    q.get('params', []),
+                    unit['sql_template'],
+                    unit.get('params', []),
                     scenario_name,
                 )
 
@@ -1349,7 +1465,7 @@ class LoadTester:
                     db_key=db_key,
                     warmup_time=warmup_time,
                     virtual_users=virtual_users,
-                    query_func=_warmup_scenario_query,
+                    query_func=_warmup_scenario_unit,
                     status_label=f"сценарий «{scenario_name}»",
                     progress_start=progress_start + _pslice * 0.08,
                     progress_end=progress_start + _pslice * warmup_end_pct,
@@ -1364,26 +1480,30 @@ class LoadTester:
             print(f"[SCENARIO] Запуск нагрузки {conn_name}: {iterations} итераций x {virtual_users} VU...")
             await self._emit_status(
                 "running",
-                f"Нагрузка: «{scenario_name}» — выполнение запросов "
+                f"Нагрузка: «{scenario_name}» — выполнение {unit_label} "
                 f"({iterations} ит. × {virtual_users} VU)…",
             )
             self._raise_if_cancel_requested("нагрузка")
             start_time = time.perf_counter()
 
-            async def _make_scenario_query():
-                q = random.choice(weighted_queries)
+            async def _make_scenario_unit():
+                unit = random.choice(weighted_units)
+                if is_transaction_mode:
+                    return await self.execute_scenario_transaction(
+                        db_key, unit, scenario_name,
+                    )
                 return await self.execute_scenario_query(
                     db_key,
-                    q['sql_template'],
-                    q.get('params', []),
-                    scenario_name
+                    unit['sql_template'],
+                    unit.get('params', []),
+                    scenario_name,
                 )
             
             results = await self._run_workers(
                 db_key=db_key,
                 iterations=iterations,
                 virtual_users=virtual_users,
-                query_func=_make_scenario_query,
+                query_func=_make_scenario_unit,
                 progress_start=progress_start + _pslice * testing_start_pct,
                 progress_end=progress_start + _pslice * 0.88,
             )
@@ -1455,6 +1575,9 @@ class LoadTester:
             'scenario_type': scenario.get('scenario_type', 'unknown'),
             'db_key': db_key,
             'db_type': db_type,
+            'workload_mode': workload_mode,
+            'primary_rate_unit': primary_rate_unit,
+            'comparison_unit': 'transaction' if is_transaction_mode else 'query',
             'iterations': iterations,
             'virtual_users': virtual_users,
             'successful': successful_count,
@@ -1483,6 +1606,30 @@ class LoadTester:
             'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
+        if is_transaction_mode:
+            statements_total = sum(
+                result.get('steps_executed', 0)
+                for result in results
+                if result.get('error') is None
+            )
+            rollbacks_total = sum(result.get('rollbacks', 0) for result in results)
+            stats.update({
+                'successful_transactions': successful_count,
+                'failed_transactions': failed_count,
+                'rollbacks': rollbacks_total,
+                'statements_total': statements_total,
+                'queries_total': statements_total,
+                'avg_queries_per_transaction': (
+                    statements_total / successful_count if successful_count > 0 else 0
+                ),
+                'qps': statements_total / total_test_time if total_test_time > 0 else 0,
+            })
+        else:
+            stats.update({
+                'successful_queries': successful_count,
+                'failed_queries': failed_count,
+            })
+
         stats['self_check'] = self._build_self_check(stats)
         stats['raw_samples'] = self.build_metric_samples(
             results,
@@ -1490,10 +1637,11 @@ class LoadTester:
             query_id=f"scenario:{scenario_name}"
         )
 
+        rate_label = primary_rate_unit.upper()
         print(
             f"[SCENARIO] ✓ {conn_name}: успешно={successful_count}, ошиб.={failed_count}, "
             f"avg={stats['avg_time_ms']:.1f}ms, p95={stats['p95_time_ms']:.1f}ms, "
-            f"throughput={stats['throughput']:.1f} req/s"
+            f"throughput={stats['throughput']:.1f} {rate_label}"
         )
         return stats
 
@@ -1512,10 +1660,17 @@ class LoadTester:
 
         all_results = []
 
-        queries_count = len(scenario.get('queries', []))
+        workload_mode = get_bundle_workload_mode(scenario)
+        units_count = (
+            len(scenario.get('transactions', []))
+            if workload_mode == "transaction"
+            else len(scenario.get('queries', []))
+        )
+        units_label = "транзакций" if workload_mode == "transaction" else "запросов"
         print(
             f"[TEST] Сценарий: {scenario['name']!r} | БД: {len(db_types)} | "
-            f"итераций: {iterations} | VU: {virtual_users} | запросов в сценарии: {queries_count}"
+            f"итераций: {iterations} | VU: {virtual_users} | "
+            f"режим: {workload_mode} | {units_label} в bundle: {units_count}"
         )
 
         if self._metrics_callback:

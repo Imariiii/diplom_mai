@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { Play, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -28,6 +28,8 @@ import { ScenarioSelectorCard } from "./config/scenario-selector-card"
 import { QuerySelectorCard } from "./config/query-selector-card"
 import { LoadParamsCard } from "./config/load-params-card"
 import { ConfigSummaryCard } from "./config/config-summary-card"
+import { formatWorkloadModeLabel } from "@/lib/throughput-metrics"
+import { findActiveScenarioBundle, isBundleActive } from "@/lib/scenario-bundle-utils"
 
 export function ConfigPage() {
   const {
@@ -89,17 +91,37 @@ export function ConfigPage() {
       })
   }
 
-  useEffect(() => {
+  const reloadLogicalDatabaseDetail = useCallback(async () => {
     if (!selectedLogicalDbId) {
       setSelectedLogicalDatabaseDetail(null)
       return
     }
-
-    apiClient
-      .getLogicalDatabaseDetail(selectedLogicalDbId)
-      .then((detail) => setSelectedLogicalDatabaseDetail(detail))
-      .catch(() => setSelectedLogicalDatabaseDetail(null))
+    try {
+      const detail = await apiClient.getLogicalDatabaseDetail(selectedLogicalDbId)
+      setSelectedLogicalDatabaseDetail(detail)
+    } catch {
+      setSelectedLogicalDatabaseDetail(null)
+    }
   }, [selectedLogicalDbId])
+
+  useEffect(() => {
+    void reloadLogicalDatabaseDetail()
+  }, [reloadLogicalDatabaseDetail])
+
+  const currentPage = useAppStore((state) => state.currentPage)
+  useEffect(() => {
+    if (currentPage === "config") {
+      void reloadLogicalDatabaseDetail()
+    }
+  }, [currentPage, reloadLogicalDatabaseDetail])
+
+  useEffect(() => {
+    const onFocus = () => {
+      void reloadLogicalDatabaseDetail()
+    }
+    window.addEventListener("focus", onFocus)
+    return () => window.removeEventListener("focus", onFocus)
+  }, [reloadLogicalDatabaseDetail])
 
   /** Проверка сохранённых подключений выбранной БД (результат — в карточке выбора СУБД) */
   useEffect(() => {
@@ -210,7 +232,7 @@ export function ConfigPage() {
     }
 
     if (testConfig.testMode === "scenario" && !selectedBundle) {
-      toast.error("Для выбранного сценария нет активного SQL bundle")
+      toast.error("Для выбранного сценария нет активного bundle")
       return false
     }
 
@@ -318,10 +340,19 @@ export function ConfigPage() {
     selectedLogicalDatabaseDetail?.schema_profile_name ||
     selectedConnections[0]?.schema_profile_name ||
     null
-  const selectedBundle = selectedBundles.find(
-    (bundle) => bundle.scenario_template_id === testConfig.scenario && bundle.is_active
+  const selectedBundle = findActiveScenarioBundle(selectedBundles, testConfig.scenario)
+  const inactiveBundleForScenario = selectedBundles.find(
+    (bundle) =>
+      bundle.scenario_template_id === testConfig.scenario && !isBundleActive(bundle),
   )
   const hasMissingActiveBundle = testConfig.testMode === "scenario" && !selectedBundle
+
+  useEffect(() => {
+    if (testConfig.testMode !== "scenario" || !selectedBundle) return
+    if (testConfig.bundleId !== selectedBundle.id) {
+      setTestConfig({ bundleId: selectedBundle.id })
+    }
+  }, [testConfig.testMode, testConfig.bundleId, selectedBundle, setTestConfig])
 
   const canRunTest = () => {
     if (testConfig.databases.length === 0) return false
@@ -407,16 +438,11 @@ export function ConfigPage() {
           useIndexes={testConfig.useIndexes}
           activeBundle={selectedBundle ?? null}
           onScenarioChange={(id) => {
+            const bundle = findActiveScenarioBundle(selectedBundles, id)
             setTestConfig({
               scenario: id,
-              bundleId: selectedBundles.find(
-                (bundle) => bundle.scenario_template_id === id && bundle.is_active
-              )?.id,
-              useIndexes: (
-                selectedBundles.find(
-                  (bundle) => bundle.scenario_template_id === id && bundle.is_active
-                )?.indexes?.length ?? 0
-              ) > 0 ? testConfig.useIndexes : false,
+              bundleId: bundle?.id,
+              useIndexes: (bundle?.indexes?.length ?? 0) > 0 ? testConfig.useIndexes : false,
             })
           }}
           onUseIndexesChange={(value) => setTestConfig({ useIndexes: value })}
@@ -424,8 +450,20 @@ export function ConfigPage() {
       )}
 
       {testConfig.testMode === "scenario" && hasMissingActiveBundle && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700">
-          Для выбранного logical scenario нет активного SQL bundle. Сначала сгенерируйте или активируйте bundle для профиля.
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 space-y-1">
+          <p>
+            Для сценария «{selectedScenario?.name || testConfig.scenario}» нет активного bundle
+            {selectedProfileName ? ` в профиле ${selectedProfileName}` : ""}.
+          </p>
+          {inactiveBundleForScenario ? (
+            <p>
+              Bundle «{inactiveBundleForScenario.name}» есть, но не активен — откройте «Сценарии» и активируйте variant.
+            </p>
+          ) : (
+            <p>
+              Создайте bundle в «Сценарии», сохраните и убедитесь, что статус «Активный», затем обновите эту страницу.
+            </p>
+          )}
         </div>
       )}
 
@@ -487,6 +525,7 @@ export function ConfigPage() {
               connections={connections}
               selectedProfileName={hasMixedProfiles ? null : selectedProfileName}
               selectedBundleName={selectedBundle?.name || null}
+              workloadModeLabel={selectedBundle ? formatWorkloadModeLabel(selectedBundle.workload_mode) : null}
             />
           </div>
           <DialogFooter className="min-w-0 shrink-0 flex-col gap-2 border-t border-border px-6 py-4 sm:flex-row sm:justify-end">

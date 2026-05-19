@@ -35,6 +35,8 @@ from backend.comparison.schemas import (
     ResourceMetrics,
     ScenarioInfo,
     ScenarioQueryInfo,
+    ScenarioTransactionInfo,
+    ScenarioTransactionStepInfo,
     SeriesChartPoint,
     SeriesCharts,
     SeriesResult,
@@ -361,10 +363,28 @@ class ComparisonService:
         if not same_scenario:
             reasons.append(f"Различные сценарии: {', '.join(str(s) for s in scenarios)}")
 
-        query_sets = set(s.get("query_ids") for s in sigs)
+        workload_modes = {s.get("workload_mode") or "query" for s in sigs}
+        same_workload_mode = len(workload_modes) <= 1
+        if not same_workload_mode:
+            reasons.append(
+                "Смешение query-level и transaction-level нагрузки: "
+                + ", ".join(sorted(str(mode) for mode in workload_modes))
+            )
+
+        query_sets = set()
+        transaction_sets = set()
+        for signature in sigs:
+            mode = signature.get("workload_mode") or "query"
+            if mode == "transaction":
+                transaction_sets.add(signature.get("transaction_ids"))
+            else:
+                query_sets.add(signature.get("query_ids"))
         same_query_ids = len(query_sets) <= 1
-        if not same_query_ids:
+        same_transaction_ids = len(transaction_sets) <= 1
+        if workload_modes == {"query"} and not same_query_ids:
             reasons.append("Различные наборы запросов в сценариях")
+        if workload_modes == {"transaction"} and not same_transaction_ids:
+            reasons.append("Различные наборы транзакций в сценариях")
 
         bundle_ids = {s.get("bundle_id") for s in sigs if s.get("bundle_id")}
         if len(bundle_ids) > 1:
@@ -413,11 +433,25 @@ class ComparisonService:
                 "Различная concurrency прогрева (warmup_concurrency_mode)"
             )
 
-        is_valid = same_scenario and same_query_ids and len(bundle_ids) <= 1 and len(logical_db_ids) <= 1
+        same_workload_signature = True
+        if workload_modes == {"query"}:
+            same_workload_signature = same_query_ids
+        elif workload_modes == {"transaction"}:
+            same_workload_signature = same_transaction_ids
+
+        is_valid = (
+            same_scenario
+            and same_workload_mode
+            and same_workload_signature
+            and len(bundle_ids) <= 1
+            and len(logical_db_ids) <= 1
+        )
 
         return ComparabilityReport(
             same_scenario=same_scenario,
+            same_workload_mode=same_workload_mode,
             same_query_ids=same_query_ids,
+            same_transaction_ids=same_transaction_ids,
             same_schema_profile=same_schema_profile,
             same_load_params=same_load_params,
             is_valid_for_series=is_valid,
@@ -739,6 +773,11 @@ class ComparisonService:
         config = test_data.get("config", {}) or {}
         results = test_data.get("results", []) or []
         snapshot = config.get("resolved_bundle_snapshot") or {}
+        workload_mode = (
+            config.get("workload_mode")
+            or snapshot.get("workload_mode")
+            or "query"
+        )
         snapshot_queries = snapshot.get("queries") or []
         if snapshot_queries:
             query_ids = sorted([
@@ -747,8 +786,30 @@ class ComparisonService:
             ])
         else:
             query_ids = sorted([r.get("query_id") or "" for r in results])
+
+        snapshot_transactions = snapshot.get("transactions") or []
+        if snapshot_transactions:
+            transaction_ids = sorted([
+                f"{tx.get('name') or ''}:"
+                + "|".join(
+                    f"{step.get('order_index', 0)}:{step.get('query_type') or ''}:"
+                    f"{step.get('sql_template') or ''}"
+                    for step in sorted(
+                        tx.get("steps", []) or [],
+                        key=lambda step: step.get("order_index", 0),
+                    )
+                )
+                for tx in snapshot_transactions
+            ])
+        else:
+            transaction_ids = []
+
         return {
             "scenario": config.get("scenario"),
+            "workload_mode": workload_mode,
+            "primary_rate_unit": config.get("primary_rate_unit")
+            or snapshot.get("primary_rate_unit")
+            or ("tps" if workload_mode == "transaction" else "qps"),
             "iterations": config.get("iterations"),
             "virtual_users": config.get("virtual_users"),
             "warmup_time": config.get("warmup_time"),
@@ -760,6 +821,7 @@ class ComparisonService:
             "profile_id": config.get("resolved_profile_id") or config.get("schema_profile_id"),
             "logical_database_id": test_data.get("logical_database_id") or config.get("logical_database_id"),
             "query_ids": tuple(query_ids),
+            "transaction_ids": tuple(transaction_ids),
         }
 
     def _get_test_db_keys(self, test_data: Dict[str, Any]) -> List[str]:
@@ -1170,6 +1232,7 @@ class ComparisonService:
         return None
 
     def _scenario_info_from_snapshot(self, snapshot: Dict[str, Any]) -> ScenarioInfo:
+        workload_mode = snapshot.get("workload_mode") or "query"
         queries = [
             ScenarioQueryInfo(
                 sql_template=q.get("sql_template", ""),
@@ -1179,11 +1242,35 @@ class ComparisonService:
             )
             for q in snapshot.get("queries", []) or []
         ]
+        transactions = [
+            ScenarioTransactionInfo(
+                name=tx.get("name", "transaction"),
+                weight=tx.get("weight", 1),
+                description=tx.get("description"),
+                steps=[
+                    ScenarioTransactionStepInfo(
+                        sql_template=step.get("sql_template", ""),
+                        query_type=step.get("query_type", "unknown"),
+                        order_index=step.get("order_index", 0),
+                        description=step.get("description"),
+                    )
+                    for step in sorted(
+                        tx.get("steps", []) or [],
+                        key=lambda step: step.get("order_index", 0),
+                    )
+                ],
+            )
+            for tx in snapshot.get("transactions", []) or []
+        ]
         return ScenarioInfo(
             name=snapshot.get("name", "Без названия"),
             description=snapshot.get("description"),
             scenario_type=snapshot.get("scenario_template_id") or snapshot.get("scenario_type", "unknown"),
+            workload_mode=workload_mode,
+            primary_rate_unit=snapshot.get("primary_rate_unit")
+            or ("tps" if workload_mode == "transaction" else "qps"),
             queries=queries,
+            transactions=transactions,
         )
 
     async def _resolve_connections(self, connection_ids: Optional[List[str]]) -> List[ConnectionInfo]:

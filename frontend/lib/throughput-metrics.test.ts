@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest"
 import {
   formatCardAttemptRate,
   formatCardSuccessfulThroughput,
+  formatPrimaryThroughputLabel,
+  formatSummaryUnitsLabel,
+  formatWorkloadModeLabel,
+  resolvePrimaryRateUnit,
+  resolveWorkloadMode,
 } from "./throughput-metrics"
 
 describe("formatCardAttemptRate", () => {
@@ -52,5 +57,21 @@ describe("formatCardSuccessfulThroughput", () => {
 
   it("shows dash when throughput missing", () => {
     expect(formatCardSuccessfulThroughput(undefined)).toBe("—")
+  })
+})
+
+describe("workload mode labels", () => {
+  it("resolves workload mode with query default", () => {
+    expect(resolveWorkloadMode(undefined)).toBe("query")
+    expect(resolveWorkloadMode("transaction")).toBe("transaction")
+  })
+
+  it("formats bundle and throughput labels", () => {
+    expect(formatWorkloadModeLabel("query")).toBe("SQL bundle")
+    expect(formatWorkloadModeLabel("transaction")).toBe("Транзакционный bundle")
+    expect(resolvePrimaryRateUnit("query")).toBe("qps")
+    expect(resolvePrimaryRateUnit("transaction")).toBe("tps")
+    expect(formatPrimaryThroughputLabel("transaction")).toContain("TPS")
+    expect(formatSummaryUnitsLabel("transaction")).toContain("транзакции")
   })
 })

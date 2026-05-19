@@ -519,6 +519,7 @@ class ScenarioBundle(Base):
         ForeignKey('db_connection_configs.id', ondelete='SET NULL'),
         nullable=True,
     )
+    workload_mode = Column(String(20), nullable=False, default='query')
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -530,6 +531,12 @@ class ScenarioBundle(Base):
         back_populates="bundle",
         cascade="all, delete-orphan",
         order_by="ScenarioBundleQuery.order_index",
+    )
+    transactions = relationship(
+        "ScenarioBundleTransaction",
+        back_populates="bundle",
+        cascade="all, delete-orphan",
+        order_by="ScenarioBundleTransaction.order_index",
     )
     indexes = relationship("ScenarioBundleIndex", back_populates="bundle", cascade="all, delete-orphan")
 
@@ -562,9 +569,12 @@ class ScenarioBundle(Base):
             'generated_from_connection_id': (
                 str(self.generated_from_connection_id) if self.generated_from_connection_id else None
             ),
+            'workload_mode': self.workload_mode or 'query',
+            'primary_rate_unit': 'tps' if (self.workload_mode or 'query') == 'transaction' else 'qps',
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'queries': [query.to_dict() for query in self.queries] if self.queries else [],
+            'transactions': [tx.to_dict() for tx in self.transactions] if self.transactions else [],
             'indexes': [index.to_dict() for index in self.indexes] if self.indexes else [],
         }
 
@@ -633,6 +643,130 @@ class ScenarioBundleParam(Base):
         return {
             'id': str(self.id),
             'query_id': str(self.query_id),
+            'param_name': self.param_name,
+            'param_type': self.param_type,
+            'min_value': self.min_value,
+            'max_value': self.max_value,
+            'string_pattern': self.string_pattern,
+            'string_length': self.string_length,
+            'table_ref': self.table_ref,
+            'column_ref': self.column_ref,
+            'current_value': self.current_value,
+            'step': self.step,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class ScenarioBundleTransaction(Base):
+    """Пользовательская транзакция внутри transaction bundle."""
+    __tablename__ = 'scenario_bundle_transactions'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    bundle_id = Column(UUID(as_uuid=True), ForeignKey('scenario_bundles.id', ondelete='CASCADE'), nullable=False)
+    name = Column(String(255), nullable=False)
+    weight = Column(Integer, nullable=False, default=1)
+    order_index = Column(Integer, nullable=False, default=0)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    bundle = relationship("ScenarioBundle", back_populates="transactions")
+    steps = relationship(
+        "ScenarioBundleTransactionStep",
+        back_populates="transaction",
+        cascade="all, delete-orphan",
+        order_by="ScenarioBundleTransactionStep.order_index",
+    )
+    params = relationship(
+        "ScenarioBundleTransactionParam",
+        back_populates="transaction",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index('idx_scenario_bundle_transactions_bundle_id', 'bundle_id'),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'id': str(self.id),
+            'bundle_id': str(self.bundle_id),
+            'name': self.name,
+            'weight': self.weight,
+            'order_index': self.order_index,
+            'description': self.description,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'steps': [step.to_dict() for step in self.steps] if self.steps else [],
+            'params': [param.to_dict() for param in self.params] if self.params else [],
+        }
+
+
+class ScenarioBundleTransactionStep(Base):
+    """Шаг SQL внутри транзакции bundle."""
+    __tablename__ = 'scenario_bundle_transaction_steps'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    transaction_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('scenario_bundle_transactions.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+    sql_template = Column(Text, nullable=False)
+    query_type = Column(String(20), nullable=False)
+    order_index = Column(Integer, nullable=False, default=0)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    transaction = relationship("ScenarioBundleTransaction", back_populates="steps")
+
+    __table_args__ = (
+        Index('idx_scenario_bundle_transaction_steps_tx_id', 'transaction_id'),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'id': str(self.id),
+            'transaction_id': str(self.transaction_id),
+            'sql_template': self.sql_template,
+            'query_type': self.query_type,
+            'order_index': self.order_index,
+            'description': self.description,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class ScenarioBundleTransactionParam(Base):
+    """Параметры транзакции (общие для всех шагов в рамках одного выполнения)."""
+    __tablename__ = 'scenario_bundle_transaction_params'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    transaction_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('scenario_bundle_transactions.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+    param_name = Column(String(100), nullable=False)
+    param_type = Column(String(50), nullable=False)
+    min_value = Column(Integer, nullable=True)
+    max_value = Column(Integer, nullable=True)
+    string_pattern = Column(String(255), nullable=True)
+    string_length = Column(Integer, nullable=True)
+    table_ref = Column(String(100), nullable=True)
+    column_ref = Column(String(100), nullable=True)
+    current_value = Column(Integer, nullable=True, default=0)
+    step = Column(Integer, nullable=True, default=1)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    transaction = relationship("ScenarioBundleTransaction", back_populates="params")
+
+    __table_args__ = (
+        Index('idx_scenario_bundle_transaction_params_tx_id', 'transaction_id'),
+        Index('idx_scenario_bundle_transaction_params_name', 'param_name'),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'id': str(self.id),
+            'transaction_id': str(self.transaction_id),
             'param_name': self.param_name,
             'param_type': self.param_type,
             'min_value': self.min_value,

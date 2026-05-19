@@ -13,7 +13,11 @@ from backend.database.models import (
     ScenarioBundleIndex,
     ScenarioBundleParam,
     ScenarioBundleQuery,
+    ScenarioBundleTransaction,
+    ScenarioBundleTransactionParam,
+    ScenarioBundleTransactionStep,
 )
+from backend.database.bundle_workload import get_bundle_workload_mode
 from backend.database.repository.base import BaseRepository, get_local_now
 
 
@@ -25,6 +29,8 @@ class ScenarioBundleRepository(BaseRepository):
             joinedload(ScenarioBundle.schema_profile),
             joinedload(ScenarioBundle.scenario_template),
             joinedload(ScenarioBundle.queries).joinedload(ScenarioBundleQuery.params),
+            joinedload(ScenarioBundle.transactions).joinedload(ScenarioBundleTransaction.steps),
+            joinedload(ScenarioBundle.transactions).joinedload(ScenarioBundleTransaction.params),
             joinedload(ScenarioBundle.indexes),
         )
 
@@ -108,6 +114,8 @@ class ScenarioBundleRepository(BaseRepository):
         generated_from_connection_id: Optional[str],
         queries: List[Dict[str, Any]],
         indexes: Optional[List[Dict[str, Any]]] = None,
+        transactions: Optional[List[Dict[str, Any]]] = None,
+        workload_mode: str = "query",
         is_active: bool = False,
         is_builtin: bool = False,
     ) -> ScenarioBundle:
@@ -131,12 +139,20 @@ class ScenarioBundleRepository(BaseRepository):
                 generated_from_connection_id=(
                     uuid.UUID(generated_from_connection_id) if generated_from_connection_id else None
                 ),
+                workload_mode=workload_mode,
                 is_active='t' if should_activate else 'f',
                 is_builtin='t' if is_builtin else 'f',
             )
             session.add(bundle)
             await session.flush()
-            await self._replace_bundle_contents(session, bundle, queries, indexes or [])
+            await self._replace_bundle_contents(
+                session,
+                bundle,
+                queries,
+                indexes or [],
+                transactions or [],
+                workload_mode,
+            )
             await session.commit()
             return await self.get_bundle(str(bundle.id))
 
@@ -149,6 +165,8 @@ class ScenarioBundleRepository(BaseRepository):
         generated_from_connection_id: Optional[str],
         queries: List[Dict[str, Any]],
         indexes: Optional[List[Dict[str, Any]]] = None,
+        transactions: Optional[List[Dict[str, Any]]] = None,
+        workload_mode: str = "query",
         is_active: Optional[bool] = None,
     ) -> Optional[ScenarioBundle]:
         """Полностью обновить bundle variant."""
@@ -175,10 +193,18 @@ class ScenarioBundleRepository(BaseRepository):
             bundle.generated_from_connection_id = (
                 uuid.UUID(generated_from_connection_id) if generated_from_connection_id else None
             )
+            bundle.workload_mode = workload_mode
             bundle.is_active = 't' if target_active else 'f'
             bundle.updated_at = get_local_now()
 
-            await self._replace_bundle_contents(session, bundle, queries, indexes or [])
+            await self._replace_bundle_contents(
+                session,
+                bundle,
+                queries,
+                indexes or [],
+                transactions or [],
+                workload_mode,
+            )
             await session.commit()
             return await self.get_bundle(str(bundle.id))
 
@@ -201,6 +227,8 @@ class ScenarioBundleRepository(BaseRepository):
             generated_from_connection_id=source_payload.get("generated_from_connection_id"),
             queries=source_payload.get("queries", []),
             indexes=source_payload.get("indexes", []),
+            transactions=source_payload.get("transactions", []),
+            workload_mode=get_bundle_workload_mode(source_payload),
             is_active=False,
             is_builtin=False,
         )
@@ -246,6 +274,8 @@ class ScenarioBundleRepository(BaseRepository):
         generated_from_connection_id: Optional[str],
         queries: List[Dict[str, Any]],
         indexes: Optional[List[Dict[str, Any]]] = None,
+        transactions: Optional[List[Dict[str, Any]]] = None,
+        workload_mode: str = "query",
         activate: bool = False,
     ) -> ScenarioBundle:
         """Создать или обновить системный generated bundle по имени variant."""
@@ -276,6 +306,7 @@ class ScenarioBundleRepository(BaseRepository):
                     generated_from_connection_id=(
                         uuid.UUID(generated_from_connection_id) if generated_from_connection_id else None
                     ),
+                    workload_mode=workload_mode,
                     is_active='f' if active_exists and not activate else 't',
                     is_builtin='t',
                 )
@@ -300,7 +331,14 @@ class ScenarioBundleRepository(BaseRepository):
                 )
                 bundle.is_active = 't'
 
-            await self._replace_bundle_contents(session, bundle, queries, indexes or [])
+            await self._replace_bundle_contents(
+                session,
+                bundle,
+                queries,
+                indexes or [],
+                transactions or [],
+                workload_mode,
+            )
             await session.commit()
             return await self.get_bundle(str(bundle.id))
 
@@ -309,6 +347,8 @@ class ScenarioBundleRepository(BaseRepository):
             select(ScenarioBundle)
             .options(
                 joinedload(ScenarioBundle.queries).joinedload(ScenarioBundleQuery.params),
+                joinedload(ScenarioBundle.transactions).joinedload(ScenarioBundleTransaction.steps),
+                joinedload(ScenarioBundle.transactions).joinedload(ScenarioBundleTransaction.params),
                 joinedload(ScenarioBundle.indexes),
             )
             .where(ScenarioBundle.id == uuid.UUID(bundle_id))
@@ -356,14 +396,66 @@ class ScenarioBundleRepository(BaseRepository):
         bundle: ScenarioBundle,
         queries: List[Dict[str, Any]],
         indexes: List[Dict[str, Any]],
+        transactions: List[Dict[str, Any]],
+        workload_mode: str,
     ) -> None:
         await session.execute(
             delete(ScenarioBundleQuery).where(ScenarioBundleQuery.bundle_id == bundle.id)
         )
         await session.execute(
+            delete(ScenarioBundleTransaction).where(ScenarioBundleTransaction.bundle_id == bundle.id)
+        )
+        await session.execute(
             delete(ScenarioBundleIndex).where(ScenarioBundleIndex.bundle_id == bundle.id)
         )
         await session.flush()
+
+        bundle.workload_mode = workload_mode
+
+        if workload_mode == "transaction":
+            for tx_index, tx_payload in enumerate(transactions):
+                transaction = ScenarioBundleTransaction(
+                    id=uuid.uuid4(),
+                    bundle_id=bundle.id,
+                    name=tx_payload["name"],
+                    weight=tx_payload.get("weight", 1),
+                    order_index=tx_payload.get("order_index", tx_index),
+                    description=tx_payload.get("description"),
+                )
+                session.add(transaction)
+                await session.flush()
+
+                for param_payload in tx_payload.get("params", []):
+                    session.add(
+                        ScenarioBundleTransactionParam(
+                            id=uuid.uuid4(),
+                            transaction_id=transaction.id,
+                            param_name=param_payload["param_name"],
+                            param_type=param_payload["param_type"],
+                            min_value=param_payload.get("min_value"),
+                            max_value=param_payload.get("max_value"),
+                            string_pattern=param_payload.get("string_pattern"),
+                            string_length=param_payload.get("string_length"),
+                            table_ref=param_payload.get("table_ref"),
+                            column_ref=param_payload.get("column_ref"),
+                            current_value=param_payload.get("current_value", 0),
+                            step=param_payload.get("step", 1),
+                        )
+                    )
+
+                for step_index, step_payload in enumerate(tx_payload.get("steps", [])):
+                    session.add(
+                        ScenarioBundleTransactionStep(
+                            id=uuid.uuid4(),
+                            transaction_id=transaction.id,
+                            sql_template=step_payload["sql_template"],
+                            query_type=step_payload["query_type"],
+                            order_index=step_payload.get("order_index", step_index),
+                            description=step_payload.get("description"),
+                        )
+                    )
+            await session.flush()
+            return
 
         for order_index, query_payload in enumerate(queries):
             query = ScenarioBundleQuery(

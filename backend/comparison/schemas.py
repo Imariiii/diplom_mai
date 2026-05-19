@@ -43,7 +43,9 @@ class ComparabilityReport(BaseModel):
     """Отчёт о сопоставимости прогонов для серийного анализа"""
 
     same_scenario: bool = True
+    same_workload_mode: bool = True
     same_query_ids: bool = True
+    same_transaction_ids: bool = True
     same_schema_profile: bool = True
     same_load_params: bool = True
     is_valid_for_series: bool = True
@@ -95,6 +97,24 @@ class ComparisonRequest(BaseModel):
 # Общие модели (переиспользуются обоими режимами)
 # ---------------------------------------------------------------------------
 
+class ScenarioTransactionStepInfo(BaseModel):
+    """Шаг SQL внутри транзакции сценария"""
+
+    sql_template: str
+    query_type: str
+    order_index: int = 0
+    description: Optional[str] = None
+
+
+class ScenarioTransactionInfo(BaseModel):
+    """Транзакция в transaction bundle"""
+
+    name: str
+    weight: int = 1
+    description: Optional[str] = None
+    steps: List[ScenarioTransactionStepInfo] = Field(default_factory=list)
+
+
 class ScenarioQueryInfo(BaseModel):
     """Информация о SQL-запросе сценария"""
 
@@ -110,7 +130,10 @@ class ScenarioInfo(BaseModel):
     name: str
     description: Optional[str] = None
     scenario_type: str
+    workload_mode: str = "query"
+    primary_rate_unit: str = "qps"
     queries: List[ScenarioQueryInfo] = Field(default_factory=list)
+    transactions: List[ScenarioTransactionInfo] = Field(default_factory=list)
 
 
 class ConnectionInfo(BaseModel):

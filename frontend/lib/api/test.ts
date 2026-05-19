@@ -95,6 +95,10 @@ export interface FullTestResponse {
   summary?: {
     total_duration: number
     total_transactions: number
+    total_units?: number
+    workload_mode?: string
+    primary_rate_unit?: string
+    comparison_unit?: string
   }
 }
 
@@ -116,6 +120,10 @@ export interface AsyncTestStatus {
   summary?: {
     total_transactions: number
     total_duration: number
+    total_units?: number
+    workload_mode?: string
+    primary_rate_unit?: string
+    comparison_unit?: string
   }
   error?: string
 }
@@ -130,6 +138,10 @@ export interface HistoryTestRun {
   summary: {
     total_transactions?: number
     total_duration?: number
+    total_units?: number
+    workload_mode?: string
+    primary_rate_unit?: string
+    comparison_unit?: string
   } | null
   created_at: string | null
   logical_database_id: string | null

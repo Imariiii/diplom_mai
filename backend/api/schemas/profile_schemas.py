@@ -70,6 +70,38 @@ class ScenarioBundleQueryPayload(BaseModel):
     params: List[ScenarioBundleParamPayload] = Field(default_factory=list)
 
 
+class ScenarioBundleTransactionStepPayload(BaseModel):
+    """Шаг SQL внутри транзакции bundle."""
+    sql_template: str = Field(..., min_length=1)
+    query_type: str = Field(..., min_length=1, max_length=20)
+    order_index: int = Field(default=0, ge=0)
+    description: Optional[str] = None
+
+
+class ScenarioBundleTransactionParamPayload(BaseModel):
+    """Параметр транзакции (transaction-scoped)."""
+    param_name: str = Field(..., min_length=1, max_length=100)
+    param_type: str = Field(..., min_length=1, max_length=50)
+    min_value: Optional[int] = None
+    max_value: Optional[int] = None
+    string_pattern: Optional[str] = None
+    string_length: Optional[int] = None
+    table_ref: Optional[str] = None
+    column_ref: Optional[str] = None
+    current_value: Optional[int] = 0
+    step: Optional[int] = 1
+
+
+class ScenarioBundleTransactionPayload(BaseModel):
+    """Транзакция внутри transaction bundle."""
+    name: str = Field(..., min_length=1, max_length=255)
+    weight: int = Field(default=1, ge=1)
+    order_index: int = Field(default=0, ge=0)
+    description: Optional[str] = None
+    steps: List[ScenarioBundleTransactionStepPayload] = Field(default_factory=list)
+    params: List[ScenarioBundleTransactionParamPayload] = Field(default_factory=list)
+
+
 class ScenarioBundleIndexPayload(BaseModel):
     """Индекс внутри bundle."""
     table_name: str = Field(..., min_length=1, max_length=100)
@@ -96,7 +128,10 @@ class ScenarioBundleSummaryResponse(BaseModel):
     generated_from_connection_id: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    workload_mode: str = "query"
+    primary_rate_unit: Optional[str] = None
     queries: List[dict] = Field(default_factory=list)
+    transactions: List[dict] = Field(default_factory=list)
     indexes: List[dict] = Field(default_factory=list)
 
 
@@ -108,7 +143,9 @@ class ScenarioBundleSaveRequest(BaseModel):
     generation_source: str = Field(default="manual_variant", min_length=1, max_length=50)
     generated_from_connection_id: Optional[str] = None
     is_active: bool = False
+    workload_mode: str = Field(default="query", pattern="^(query|transaction)$")
     queries: List[ScenarioBundleQueryPayload] = Field(default_factory=list)
+    transactions: List[ScenarioBundleTransactionPayload] = Field(default_factory=list)
     indexes: List[ScenarioBundleIndexPayload] = Field(default_factory=list)
 
 

@@ -41,7 +41,9 @@ export interface AnalysisWarning {
 
 export interface ComparabilityReport {
   same_scenario: boolean
+  same_workload_mode?: boolean
   same_query_ids: boolean
+  same_transaction_ids?: boolean
   same_schema_profile: boolean
   same_load_params: boolean
   is_valid_for_series: boolean
@@ -68,11 +70,28 @@ export interface ScenarioQueryInfo {
   description?: string | null
 }
 
+export interface ScenarioTransactionStepInfo {
+  sql_template: string
+  query_type: string
+  order_index?: number
+  description?: string | null
+}
+
+export interface ScenarioTransactionInfo {
+  name: string
+  weight?: number
+  description?: string | null
+  steps: ScenarioTransactionStepInfo[]
+}
+
 export interface ScenarioInfo {
   name: string
   description?: string | null
   scenario_type: string
+  workload_mode?: string
+  primary_rate_unit?: string
   queries: ScenarioQueryInfo[]
+  transactions?: ScenarioTransactionInfo[]
 }
 
 export interface ConnectionInfo {

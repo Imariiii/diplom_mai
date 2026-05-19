@@ -507,3 +507,27 @@ class TestSeriesAnalyze:
         svc = ComparisonService(repository=mock_repo)
         report = svc._build_comparability_report([t1, t2])
         assert any("профил" in r.lower() for r in report.reasons)
+
+    def test_comparability_blocks_mixed_workload_modes(self, mock_repo):
+        id1, id2 = uuid.uuid4(), uuid.uuid4()
+        t1 = _make_test_data(id1, "Query run", db_keys=["conn_pg"])
+        t2 = _make_test_data(id2, "Txn run", db_keys=["conn_pg"])
+        t1["config"]["workload_mode"] = "query"
+        t1["config"]["resolved_bundle_snapshot"] = {
+            "workload_mode": "query",
+            "queries": [{"sql_template": "SELECT 1", "query_type": "select"}],
+        }
+        t2["config"]["workload_mode"] = "transaction"
+        t2["config"]["resolved_bundle_snapshot"] = {
+            "workload_mode": "transaction",
+            "transactions": [{
+                "name": "tx1",
+                "steps": [{"sql_template": "SELECT 1", "query_type": "select", "order_index": 0}],
+            }],
+        }
+
+        svc = ComparisonService(repository=mock_repo)
+        report = svc._build_comparability_report([t1, t2])
+        assert report.same_workload_mode is False
+        assert report.is_valid_for_series is False
+        assert any("transaction-level" in reason for reason in report.reasons)

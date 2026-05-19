@@ -15,6 +15,7 @@ interface ConfigSummaryCardProps {
   connections: DatabaseConnection[]
   selectedProfileName: string | null
   selectedBundleName: string | null
+  workloadModeLabel?: string | null
   /** Только сетка полей — для встраивания в диалог (заголовок задаётся снаружи) */
   embedded?: boolean
 }
@@ -30,6 +31,7 @@ export function ConfigSummaryCard({
   connections,
   selectedProfileName,
   selectedBundleName,
+  workloadModeLabel,
   embedded = false,
 }: ConfigSummaryCardProps) {
   const row = (label: string, value: ReactNode) => (
@@ -54,6 +56,7 @@ export function ConfigSummaryCard({
           {row("Индексы", useIndexes ? "Включены" : "Выключены")}
           {row("Профиль", selectedProfileName || "Не определён")}
           {row("Bundle", selectedBundleName || "Не разрешён")}
+          {row("Тип нагрузки", workloadModeLabel || "SQL bundle")}
         </>
       ) : (
         row("Запрос", "Пользовательский SQL")

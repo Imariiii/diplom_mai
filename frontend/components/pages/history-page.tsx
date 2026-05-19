@@ -38,6 +38,20 @@ import { useAppStore } from "@/lib/store"
 import { DB_NAMES, getDbColor } from "@/lib/chart-colors"
 import { getVisibleSelfCheckWarnings } from "@/lib/self-check"
 import type { LogicalDatabaseWithConnections } from "@/lib/types"
+import { formatSummaryUnitsLabel } from "@/lib/throughput-metrics"
+
+function historyUnitsLabel(test: HistoryTestRun): string {
+  const mode = test.config?.workload_mode || test.summary?.workload_mode
+  return formatSummaryUnitsLabel(mode)
+}
+
+function historyUnitsCount(test: HistoryTestRun): number | string {
+  const summary = test.summary
+  if (!summary) return "-"
+  if (typeof summary.total_units === "number") return summary.total_units
+  if (typeof summary.total_transactions === "number") return summary.total_transactions
+  return "-"
+}
 import { HistoryTestDashboard } from "./history-test-dashboard"
 
 const STATUS_CONFIG = {
@@ -437,8 +451,8 @@ export function HistoryPage() {
                 <p className="font-mono">{formatDate(selectedTest.finished_at)}</p>
               </div>
               <div>
-                <p className="text-muted-foreground">Транзакций</p>
-                <p className="font-mono">{selectedTest.summary?.total_transactions ?? "-"}</p>
+                <p className="text-muted-foreground">{historyUnitsLabel(selectedTest)}</p>
+                <p className="font-mono">{historyUnitsCount(selectedTest)}</p>
               </div>
             </div>
           </CardContent>
@@ -879,7 +893,7 @@ export function HistoryPage() {
                   {showConnectionsColumn && <TableHead>Подключения</TableHead>}
                   <TableHead>Начало</TableHead>
                   <TableHead>Длительность</TableHead>
-                  <TableHead className="text-right">Транзакций</TableHead>
+                  <TableHead className="text-right">Единиц нагрузки</TableHead>
                   <TableHead className="text-right">Действия</TableHead>
                 </TableRow>
               </TableHeader>
@@ -938,7 +952,7 @@ export function HistoryPage() {
                         {test.summary?.total_duration ? formatDuration(test.summary.total_duration) : "-"}
                       </TableCell>
                       <TableCell className="text-right font-mono">
-                        {test.summary?.total_transactions ?? "-"}
+                        {historyUnitsCount(test)}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
