@@ -1194,7 +1194,19 @@ class LoadTester:
             return str(uuid.uuid4())
 
         elif param_type == 'fixed':
-            return param_config.get('fixed_value', '')
+            raw_value = param_config.get('fixed_value')
+            if raw_value is None or str(raw_value).strip() == '':
+                param_name = param_config.get('param_name', '?')
+                raise ValueError(
+                    f"Параметр '{param_name}' имеет тип fixed, но fixed_value не задан"
+                )
+            text_value = str(raw_value).strip()
+            try:
+                if '.' in text_value or 'e' in text_value.lower():
+                    return float(text_value)
+                return int(text_value)
+            except ValueError:
+                return text_value
 
         elif param_type == 'random_string':
             length = param_config.get('string_length', 10)

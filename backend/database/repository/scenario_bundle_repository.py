@@ -438,6 +438,7 @@ class ScenarioBundleRepository(BaseRepository):
                             string_length=param_payload.get("string_length"),
                             table_ref=param_payload.get("table_ref"),
                             column_ref=param_payload.get("column_ref"),
+                            fixed_value=param_payload.get("fixed_value"),
                             current_value=param_payload.get("current_value", 0),
                             step=param_payload.get("step", 1),
                         )
@@ -483,6 +484,7 @@ class ScenarioBundleRepository(BaseRepository):
                         string_length=param_payload.get("string_length"),
                         table_ref=param_payload.get("table_ref"),
                         column_ref=param_payload.get("column_ref"),
+                        fixed_value=param_payload.get("fixed_value"),
                         current_value=param_payload.get("current_value", 0),
                         step=param_payload.get("step", 1),
                     )

@@ -760,6 +760,15 @@ export function LogicalScenariosBrowser() {
           return
         }
         for (const param of tx.params) {
+          if (param.param_type === "fixed") {
+            if (!param.fixed_value?.trim()) {
+              toast.error(
+                `Транзакция «${tx.name}»: для параметра «${param.param_name || "?"}» укажите фиксированное значение`,
+              )
+              return
+            }
+            continue
+          }
           if (param.param_type !== "random_from_table") continue
           if (!param.table_ref?.trim() || !param.column_ref?.trim()) {
             toast.error(

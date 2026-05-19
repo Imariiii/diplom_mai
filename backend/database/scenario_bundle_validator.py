@@ -2,7 +2,7 @@
 Preflight-проверка SQL bundle перед запуском нагрузочного теста.
 """
 import re
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import text
 
@@ -195,9 +195,19 @@ class ScenarioBundleValidator:
                     )
 
             for param in transaction.get("params", []) or []:
+                param_type = param.get("param_type")
+                param_label = param.get("param_name") or "?"
+                if param_type == "fixed":
+                    fixed_value = param.get("fixed_value")
+                    if fixed_value is None or str(fixed_value).strip() == "":
+                        errors.append(
+                            f"{connection_name}: параметр {param_label} транзакции '{tx_name}' "
+                            "имеет тип fixed, но fixed_value не задан"
+                        )
+                    continue
                 table_ref = param.get("table_ref")
                 column_ref = param.get("column_ref")
-                if param.get("param_type") != "random_from_table":
+                if param_type != "random_from_table":
                     continue
                 if not table_ref or not column_ref:
                     errors.append(
@@ -342,13 +352,9 @@ class ScenarioBundleValidator:
             if column and (column.is_primary_key or column.is_unique):
                 errors.append(f"{connection_name}: UPDATE меняет ключевую колонку {table_name}.{column_name}")
 
-        insert_match = re.search(
-            r"\bINSERT\s+INTO\s+([A-Za-z_][\w]*)\s*\((.*?)\)\s*VALUES\s*\((.*?)\)",
-            sql_template,
-            re.IGNORECASE | re.DOTALL,
-        )
-        if insert_match:
-            table_name, columns_sql, values_sql = insert_match.groups()
+        insert_parts = self._parse_insert_statement(sql_template)
+        if insert_parts:
+            table_name, columns_sql, values_sql = insert_parts
             table = metadata.tables.get(table_name)
             if not table:
                 return
@@ -395,6 +401,45 @@ class ScenarioBundleValidator:
 
     def _split_columns(self, column_names: str) -> List[str]:
         return [column.strip() for column in column_names.split(",") if column.strip()]
+
+    def _parse_insert_statement(self, sql_template: str) -> Optional[Tuple[str, str, str]]:
+        """Разобрать INSERT ... (cols) VALUES (...), учитывая вложенные скобки (NOW() и т.п.)."""
+        header_match = re.search(
+            r"\bINSERT\s+INTO\s+([A-Za-z_][\w]*)\s*\((.*?)\)\s*VALUES\s*\(",
+            sql_template,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if not header_match:
+            return None
+        open_paren_index = header_match.end() - 1
+        values_sql = self._extract_parenthesized_list(header_match.string, open_paren_index)
+        if values_sql is None:
+            return None
+        return header_match.group(1), header_match.group(2), values_sql
+
+    def _extract_parenthesized_list(self, sql_template: str, open_paren_index: int) -> Optional[str]:
+        """Вернуть содержимое SQL-списка внутри внешних скобок, начиная с '(' на open_paren_index."""
+        if open_paren_index >= len(sql_template) or sql_template[open_paren_index] != "(":
+            return None
+        depth = 0
+        quote: Optional[str] = None
+        start = open_paren_index + 1
+        for index, char in enumerate(sql_template[open_paren_index:], start=open_paren_index):
+            if quote:
+                if char == quote:
+                    quote = None
+                continue
+            if char in {"'", '"'}:
+                quote = char
+                continue
+            if char == "(":
+                depth += 1
+                continue
+            if char == ")":
+                depth -= 1
+                if depth == 0:
+                    return sql_template[start:index]
+        return None
 
     def _split_sql_list(self, sql_list: str) -> List[str]:
         """Разбить SQL-список по запятым без захода внутрь кавычек/скобок."""

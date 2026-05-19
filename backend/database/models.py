@@ -628,6 +628,7 @@ class ScenarioBundleParam(Base):
     string_length = Column(Integer, nullable=True)
     table_ref = Column(String(100), nullable=True)
     column_ref = Column(String(100), nullable=True)
+    fixed_value = Column(String(255), nullable=True)
     current_value = Column(Integer, nullable=True, default=0)
     step = Column(Integer, nullable=True, default=1)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -651,6 +652,7 @@ class ScenarioBundleParam(Base):
             'string_length': self.string_length,
             'table_ref': self.table_ref,
             'column_ref': self.column_ref,
+            'fixed_value': self.fixed_value,
             'current_value': self.current_value,
             'step': self.step,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -752,6 +754,7 @@ class ScenarioBundleTransactionParam(Base):
     string_length = Column(Integer, nullable=True)
     table_ref = Column(String(100), nullable=True)
     column_ref = Column(String(100), nullable=True)
+    fixed_value = Column(String(255), nullable=True)
     current_value = Column(Integer, nullable=True, default=0)
     step = Column(Integer, nullable=True, default=1)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -775,6 +778,7 @@ class ScenarioBundleTransactionParam(Base):
             'string_length': self.string_length,
             'table_ref': self.table_ref,
             'column_ref': self.column_ref,
+            'fixed_value': self.fixed_value,
             'current_value': self.current_value,
             'step': self.step,
             'created_at': self.created_at.isoformat() if self.created_at else None,

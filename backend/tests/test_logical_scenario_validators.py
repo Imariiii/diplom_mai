@@ -216,3 +216,42 @@ class TestScenarioBundleValidator:
         )
 
         assert any("composite UNIQUE (rental_date, inventory_id, customer_id)" in error for error in errors)
+
+    def test_insert_with_now_function_matches_column_count(self):
+        metadata = _metadata("pg", [
+            _table(
+                "rental",
+                [
+                    ColumnInfo(
+                        "rental_id",
+                        "integer",
+                        False,
+                        is_primary_key=True,
+                        is_auto_generated=True,
+                        column_default="nextval('rental_rental_id_seq'::regclass)",
+                        has_server_default=True,
+                        default_kind="serial",
+                        category="integer",
+                    ),
+                    ColumnInfo("rental_date", "timestamp", False, category="date"),
+                    ColumnInfo("inventory_id", "smallint", False, category="integer"),
+                    ColumnInfo("customer_id", "smallint", False, category="integer"),
+                    ColumnInfo("staff_id", "smallint", False, category="integer"),
+                ],
+                primary_key=["rental_id"],
+            )
+        ])
+        validator = ScenarioBundleValidator.__new__(ScenarioBundleValidator)
+        errors = []
+        warnings = []
+
+        validator._validate_write_query(
+            "INSERT INTO rental (rental_date, inventory_id, customer_id, staff_id) "
+            "VALUES (NOW(), {inventory_id}, {customer_id}, {staff_id})",
+            metadata,
+            "Pagila",
+            errors,
+            warnings,
+        )
+
+        assert not any("разное число колонок и значений" in error for error in errors)

@@ -56,6 +56,7 @@ class ScenarioBundleParamPayload(BaseModel):
     string_length: Optional[int] = None
     table_ref: Optional[str] = None
     column_ref: Optional[str] = None
+    fixed_value: Optional[str] = None
     current_value: Optional[int] = 0
     step: Optional[int] = 1
 
@@ -88,6 +89,7 @@ class ScenarioBundleTransactionParamPayload(BaseModel):
     string_length: Optional[int] = None
     table_ref: Optional[str] = None
     column_ref: Optional[str] = None
+    fixed_value: Optional[str] = None
     current_value: Optional[int] = 0
     step: Optional[int] = 1
 
