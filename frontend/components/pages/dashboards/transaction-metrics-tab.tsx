@@ -2,7 +2,8 @@
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Database, CheckCircle, XCircle, BarChart3 } from "lucide-react"
-import { DB_NAMES, getDbColor, CHART_COLORS } from "@/lib/chart-colors"
+import { CHART_SERIES_COLORS, DB_NAMES, getDbColor } from "@/lib/chart-colors"
+import { useChartTheme } from "@/lib/chart-theme"
 import {
   BarChart,
   Bar,
@@ -34,6 +35,8 @@ interface TransactionMetricsTabProps {
 }
 
 export function TransactionMetricsTab({ databases, results, getDbType, getDbDisplayName }: TransactionMetricsTabProps) {
+  const chartTheme = useChartTheme()
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -111,28 +114,28 @@ export function TransactionMetricsTab({ databases, results, getDbType, getDbDisp
                     }
                   })}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.border} />
                   <XAxis
                     dataKey="name"
-                    stroke={CHART_COLORS.axis}
-                    tick={{ fill: CHART_COLORS.text }}
+                    stroke={chartTheme.border}
+                    tick={{ fill: chartTheme.mutedForeground }}
                   />
                   <YAxis
-                    stroke={CHART_COLORS.axis}
-                    tick={{ fill: CHART_COLORS.text }}
+                    stroke={chartTheme.border}
+                    tick={{ fill: chartTheme.mutedForeground }}
                   />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: "hsl(var(--card))",
-                      border: "1px solid hsl(var(--border))",
+                      backgroundColor: chartTheme.card,
+                      border: `1px solid ${chartTheme.border}`,
                       borderRadius: "8px",
-                      color: CHART_COLORS.text,
+                      color: chartTheme.cardForeground,
                     }}
-                    labelStyle={{ color: CHART_COLORS.text }}
+                    labelStyle={{ color: chartTheme.cardForeground }}
                   />
-                  <Legend wrapperStyle={{ color: CHART_COLORS.text }} />
-                  <Bar dataKey="successful" name="Успешные" fill={CHART_COLORS.success} />
-                  <Bar dataKey="failed" name="Неудачные" fill={CHART_COLORS.error} />
+                  <Legend wrapperStyle={{ color: chartTheme.mutedForeground }} />
+                  <Bar dataKey="successful" name="Успешные" fill={CHART_SERIES_COLORS.success} />
+                  <Bar dataKey="failed" name="Неудачные" fill={CHART_SERIES_COLORS.error} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

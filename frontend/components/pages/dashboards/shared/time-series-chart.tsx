@@ -16,6 +16,7 @@ import {
   extractDatabaseTrace,
   resolveElapsedAxisTickFormat,
 } from "@/lib/time-series-chart-data"
+import { useChartTheme } from "@/lib/chart-theme"
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false }) as any
 
@@ -56,6 +57,8 @@ function ChartContent({
   height: number | string
   xAxisTitle?: string
 }) {
+  const chartTheme = useChartTheme()
+
   const elapsedSpanSeconds = useMemo(
     () => computeElapsedSpanSeconds(data, databases, metricKey),
     [data, databases, metricKey],
@@ -93,26 +96,40 @@ function ChartContent({
     plot_bgcolor: "transparent",
     hovermode: "closest",
     dragmode: "pan",
-    legend: { orientation: "h", y: -0.18, x: 0, font: { size: 11 } },
+    font: { color: chartTheme.foreground, size: 11 },
+    legend: {
+      orientation: "h",
+      y: -0.18,
+      x: 0,
+      font: { size: 11, color: chartTheme.mutedForeground },
+    },
     xaxis: {
-      title: xAxisTitle,
+      title: { text: xAxisTitle, font: { color: chartTheme.mutedForeground, size: 11 } },
       tickmode: xAxisTicks.dtick !== undefined ? "linear" : "auto",
       dtick: xAxisTicks.dtick,
-      gridcolor: "hsl(var(--border))",
-      zerolinecolor: "hsl(var(--border))",
+      gridcolor: chartTheme.border,
+      zerolinecolor: chartTheme.border,
       tickformat: xAxisTicks.tickformat,
       tickprefix: "",
       ticksuffix: "s",
-      tickfont: { size: 11 },
+      tickfont: { size: 11, color: chartTheme.mutedForeground },
     },
     yaxis: {
       autorange: yDomain ? false : true,
       range: yDomain ? [yDomain[0], yDomain[1]] : undefined,
-      gridcolor: "hsl(var(--border))",
-      zerolinecolor: "hsl(var(--border))",
-      tickfont: { size: 11 },
+      gridcolor: chartTheme.border,
+      zerolinecolor: chartTheme.border,
+      tickfont: { size: 11, color: chartTheme.mutedForeground },
     },
-  }), [xAxisTicks.dtick, xAxisTicks.tickformat, xAxisTitle, yDomain])
+  }), [
+    chartTheme.border,
+    chartTheme.foreground,
+    chartTheme.mutedForeground,
+    xAxisTicks.dtick,
+    xAxisTicks.tickformat,
+    xAxisTitle,
+    yDomain,
+  ])
 
   return (
     <div style={{ height }}>

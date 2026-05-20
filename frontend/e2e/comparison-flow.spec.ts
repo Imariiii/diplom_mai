@@ -1,34 +1,37 @@
 /**
- * E2E-тест: "золотой" сценарий сравнения тестов.
+ * E2E: навигация SPA и загрузка главной страницы.
  *
- * Предполагает запущенный frontend (localhost:3000) и backend (localhost:8000)
- * с хотя бы 2 завершёнными тестами в истории.
- *
- * Запуск: npx playwright test
+ * Frontend поднимается через webServer в playwright.config.ts.
+ * Backend не обязателен для этих сценариев.
  */
 import { test, expect } from "@playwright/test";
+
+async function openSidebar(page: import("@playwright/test").Page) {
+  const menuButton = page.locator("header button").first();
+  await expect(menuButton).toBeVisible();
+  await menuButton.click();
+  await expect(page.getByRole("button", { name: "История тестов" })).toBeVisible();
+}
 
 test.describe("Comparison flow", () => {
   test("navigate to history page", async ({ page }) => {
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
-    // SPA navigation through sidebar
-    const historyLink = page.locator("text=История");
-    if (await historyLink.isVisible()) {
-      await historyLink.click();
-      await expect(page.locator("text=История тестов").or(page.locator("text=История"))).toBeVisible();
-    }
+    await openSidebar(page);
+    await page.getByRole("button", { name: "История тестов" }).click();
+
+    await expect(page.getByRole("heading", { name: "История тестов" })).toBeVisible();
   });
 
-  test("home page loads and shows status", async ({ page }) => {
+  test("home page loads and shows welcome", async ({ page }) => {
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
-    // Main heading or logo should be visible
     await expect(page.locator("body")).toBeVisible();
-    // API status indicator should appear
-    const statusText = page.locator("text=API").or(page.locator("text=Статус"));
-    await expect(statusText.first()).toBeVisible({ timeout: 10000 });
+    await expect(
+      page.getByRole("heading", { name: /Добро пожаловать в/i }),
+    ).toBeVisible();
+    await expect(page.getByText("TestBDBench").first()).toBeVisible();
   });
 });

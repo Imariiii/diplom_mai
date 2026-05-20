@@ -27,12 +27,10 @@ export const getDbName = (dbId: string): string => {
   return DB_NAMES[dbId] || dbId
 }
 
-// Цвета для графиков
-export const CHART_COLORS = {
-  axis: "#9CA3AF",      // Цвет осей
-  text: "#ffffff",      // Цвет текста
-  success: "#22c55e",  // Зелёный для успешных операций
-  error: "#ef4444",    // Красный для ошибок
+// Семантические цвета серий (читаемы в light и dark)
+export const CHART_SERIES_COLORS = {
+  success: "#22c55e",
+  error: "#ef4444",
 }
 
 // Цвета для метрик (Среднее, P95, P99)

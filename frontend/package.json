@@ -11,10 +11,13 @@
     "dev": "next dev",
     "lint": "eslint .",
     "start": "next start",
+    "pretest": "node scripts/check-node-version.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "pretest:e2e": "node scripts/check-node-version.mjs",
+    "test:e2e": "playwright test",
+    "test:all": "npm test && npm run test:e2e"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
