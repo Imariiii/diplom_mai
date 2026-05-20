@@ -54,8 +54,17 @@ from backend.comparison.statistics import (
     compare_two_samples,
     detect_saturation_point,
     mann_kendall_trend,
+    REQUEST_LEVEL_DEPENDENT_OBSERVATION_THRESHOLD,
     spearman_correlation,
 )
+
+
+# Для сравнения: без лимита на выборку одной СУБД (см. get_metric_samples limit=None).
+COMPARISON_METRIC_SAMPLE_LIMIT: Optional[int] = None
+LEGACY_METRIC_SAMPLE_LIMIT = 10000
+STANDARD_LATENCY_SOURCE = "metric_samples"
+STANDARD_THROUGHPUT_SUMMARY_SOURCE = "aggregated_metrics"
+THROUGHPUT_WINDOW_SOURCE = "throughput_window"
 
 
 class ComparisonService:
@@ -163,10 +172,11 @@ class ComparisonService:
                     comparisons.append(compare_two_samples(
                         a=info_a.get(key, []),
                         b=info_b.get(key, []),
-                        baseline_id=label_a,
-                        compared_id=label_b,
+                        baseline_id=db_a,
+                        compared_id=db_b,
                         db_key=f"{label_a} vs {label_b}",
                         metric=metric,
+                        warn_dependent_observations=(metric == "latency_ms"),
                     ))
         return comparisons
 
@@ -273,7 +283,6 @@ class ComparisonService:
         test_infos = [await self._build_test_info(t) for t in tests]
         db_key_labels = self._build_db_key_labels(tests)
         warnings: List[AnalysisWarning] = []
-
         all_db_keys = self._get_all_db_keys(tests)
 
         descriptive_stats_map: Dict[str, Dict[str, MetricStatsBundle]] = {}
@@ -302,6 +311,8 @@ class ComparisonService:
             )
             per_db[db_key] = summary
             self._fill_series_charts(charts, db_key, db_key_labels.get(db_key, db_key), summary)
+
+        self._warn_series_metric_source_consistency(per_db, db_key_labels, warnings)
 
         cross_db_ranks = self._build_cross_db_ranks(per_db, load_levels, db_key_labels)
         self._fill_series_bar_box(charts, tests, descriptive_stats_map, raw_samples_map, db_key_labels, load_levels)
@@ -433,6 +444,28 @@ class ComparisonService:
                 "Различная concurrency прогрева (warmup_concurrency_mode)"
             )
 
+        same_warmup = (
+            len(warmup_mode_set) <= 1
+            and len(warmup_profile_set) <= 1
+            and len(warmup_concurrency_set) <= 1
+        )
+        if not same_warmup:
+            reasons.append("Различные настройки прогрева между прогонами")
+
+        level_runs: Dict[str, List[str]] = {}
+        for t in tests:
+            config = t.get("config", {}) or {}
+            vu = int(config.get("virtual_users", 1) or 1)
+            it = int(config.get("iterations", 1) or 1)
+            wu = int(float(config.get("warmup_time", 0) or 0))
+            level_key = f"vu{vu}_it{it}_wu{wu}"
+            level_runs.setdefault(level_key, []).append(str(t.get("id")))
+        has_duplicate_load_levels = any(len(ids) > 1 for ids in level_runs.values())
+        if has_duplicate_load_levels:
+            reasons.append(
+                "Несколько прогонов на одном уровне нагрузки; серия требует уникальных уровней"
+            )
+
         same_workload_signature = True
         if workload_modes == {"query"}:
             same_workload_signature = same_query_ids
@@ -443,6 +476,9 @@ class ComparisonService:
             same_scenario
             and same_workload_mode
             and same_workload_signature
+            and same_schema_profile
+            and same_warmup
+            and not has_duplicate_load_levels
             and len(bundle_ids) <= 1
             and len(database_group_ids) <= 1
         )
@@ -457,6 +493,62 @@ class ComparisonService:
             is_valid_for_series=is_valid,
             reasons=reasons,
         )
+
+    @staticmethod
+    def _warn_duplicate_load_levels(
+        load_levels: List[LoadLevel],
+        warnings: List[AnalysisWarning],
+    ) -> None:
+        for level in load_levels:
+            if len(level.test_ids) > 1:
+                warnings.append(AnalysisWarning(
+                    severity="warn",
+                    code="duplicate_load_level",
+                    message=(
+                        f"Уровень нагрузки «{level.label}» содержит {len(level.test_ids)} прогонов; "
+                        "для серии используется только первый"
+                    ),
+                ))
+
+    @staticmethod
+    def _warn_series_metric_source_consistency(
+        per_db: Dict[str, DbSeriesSummary],
+        db_key_labels: Dict[str, str],
+        warnings: List[AnalysisWarning],
+    ) -> None:
+        degraded_sources = {"time_series", "aggregated_metrics", "mixed_sources"}
+        trusted_sources = {"metric_samples", "standard_mixed"}
+        for db_key, summary in per_db.items():
+            label = db_key_labels.get(db_key, summary.db_label or db_key)
+            by_level = summary.descriptive_stats_by_level or {}
+            if not by_level:
+                continue
+            level_sources = {bundle.source for bundle in by_level.values()}
+            has_degraded = any(s in degraded_sources for s in level_sources)
+            has_raw = any(s in trusted_sources for s in level_sources)
+            if has_degraded and has_raw:
+                warnings.append(AnalysisWarning(
+                    severity="warn",
+                    code="inconsistent_series_sources",
+                    message=(
+                        f"Для {label} разные уровни нагрузки используют разные источники latency "
+                        f"({', '.join(sorted(level_sources))}); деградация p95 может быть несопоставима"
+                    ),
+                ))
+            for level_id, bundle in by_level.items():
+                if (
+                    bundle.data_quality == "degraded"
+                    or bundle.source in degraded_sources
+                    or bundle.sample_size_warning
+                ):
+                    warnings.append(AnalysisWarning(
+                        severity="warn",
+                        code="degraded_series_level",
+                        message=(
+                            f"Для {label} на уровне {level_id} понижено качество данных "
+                            f"(source={bundle.source})"
+                        ),
+                    ))
 
     def _build_load_levels(self, tests: List[Dict[str, Any]]) -> List[LoadLevel]:
         """Построить упорядоченный список уровней нагрузки из конфигураций прогонов."""
@@ -563,6 +655,7 @@ class ComparisonService:
                         compared_id=tid,
                         db_key=db_key,
                         metric=metric,
+                        warn_dependent_observations=(metric == "latency_ms"),
                     ))
             prev_level_tid = tid
             prev_level_samples = curr_samples
@@ -851,25 +944,61 @@ class ComparisonService:
     # Сбор метрик (общий для обоих режимов)
     # ------------------------------------------------------------------
 
+    async def _fetch_metric_samples_for_db(self, test_id: str, db_key: str) -> List[Dict[str, Any]]:
+        """Загрузить metric_samples только для одной СУБД (без глобального усечения)."""
+        get_metric_samples = getattr(self.repository, "get_metric_samples", None)
+        if not callable(get_metric_samples):
+            return []
+        try:
+            return await get_metric_samples(
+                test_id,
+                connection_key=db_key,
+                limit=COMPARISON_METRIC_SAMPLE_LIMIT,
+            )
+        except TypeError:
+            # Старый mock/репозиторий без connection_key
+            raw = await get_metric_samples(test_id)
+            return self._filter_metric_samples(raw, db_key)
+        except Exception as exc:
+            print(f"[COMPARISON] Ошибка получения raw samples для {test_id}/{db_key}: {exc}")
+            return []
+
     async def _collect_metric_samples(
         self, test_id: str, db_key: str, test_data: Dict[str, Any],
     ) -> Dict[str, Any]:
-        metric_samples = []
-        get_metric_samples = getattr(self.repository, "get_metric_samples", None)
-        if callable(get_metric_samples):
-            try:
-                metric_samples = await get_metric_samples(test_id)
-            except Exception as exc:
-                print(f"[COMPARISON] Ошибка получения raw samples для {test_id}: {exc}")
-
         aggregate_metrics = self._find_result_metrics(test_data, db_key)
         db_type = self._resolve_db_type(test_data, db_key, aggregate_metrics)
-        filtered_raw_samples = self._filter_metric_samples(metric_samples, db_key)
+
+        filtered_raw_samples = await self._fetch_metric_samples_for_db(test_id, db_key)
         latency_values = self._extract_latency_values(filtered_raw_samples)
         throughput_values = self._extract_aggregate_throughput_values(aggregate_metrics)
         throughput_comparison_values = self._extract_throughput_values(filtered_raw_samples)
         latency_source = "metric_samples" if latency_values else None
         throughput_source = "aggregated_metrics" if throughput_values else None
+        samples_truncated = False
+        expected_latency_count = self._expected_successful_ops(aggregate_metrics)
+
+        count_fn = getattr(self.repository, "count_metric_samples", None)
+        if callable(count_fn) and latency_values:
+            try:
+                total_latency = await count_fn(
+                    test_id,
+                    connection_key=db_key,
+                    sample_type="request_latency",
+                )
+                if (
+                    COMPARISON_METRIC_SAMPLE_LIMIT is not None
+                    and total_latency > len(latency_values)
+                ):
+                    samples_truncated = True
+                elif expected_latency_count and total_latency > len(latency_values):
+                    samples_truncated = True
+            except TypeError:
+                pass
+
+        if samples_truncated and aggregate_metrics:
+            latency_values = []
+            latency_source = None
 
         if not latency_values or not throughput_values:
             series_points = await self._load_time_series(test_id, db_type, db_key)
@@ -883,12 +1012,11 @@ class ComparisonService:
             if not throughput_values:
                 throughput_values = throughput_comparison_values
                 if not throughput_values:
-                    throughput_values = [
-                        p.get("throughput") for p in series_points
-                        if p.get("throughput") is not None
-                    ]
+                    throughput_values = self._extract_time_series_throughput(series_points)
                 if throughput_values:
-                    throughput_source = "metric_samples" if filtered_raw_samples else "time_series"
+                    throughput_source = (
+                        "metric_samples" if filtered_raw_samples else "time_series"
+                    )
 
         if not throughput_comparison_values:
             throughput_comparison_values = throughput_values
@@ -905,6 +1033,8 @@ class ComparisonService:
             "aggregate_metrics": aggregate_metrics,
             "latency_source": latency_source,
             "throughput_source": throughput_source,
+            "samples_truncated": samples_truncated,
+            "expected_latency_count": expected_latency_count,
             "source": self._resolve_data_source(
                 latency_source, throughput_source,
                 filtered_raw_samples, latency_values, throughput_values,
@@ -924,11 +1054,47 @@ class ComparisonService:
         return filtered
 
     def _extract_latency_values(self, metric_samples: List[Dict[str, Any]]) -> List[float]:
-        return [
-            p.get("latency_ms")
-            for p in metric_samples
-            if p.get("sample_type") == "request_latency" and p.get("latency_ms") is not None
-        ]
+        values = []
+        for p in metric_samples:
+            if p.get("sample_type") != "request_latency":
+                continue
+            phase = p.get("measurement_phase")
+            if phase is not None and phase != "measurement":
+                continue
+            if p.get("is_error"):
+                continue
+            latency = p.get("latency_ms")
+            if latency is not None:
+                values.append(float(latency))
+        return values
+
+    @staticmethod
+    def _extract_time_series_throughput(series_points: List[Dict[str, Any]]) -> List[float]:
+        """Успешная пропускная способность из time_series (tps, не legacy throughput/attempt_rate)."""
+        values = []
+        for p in series_points:
+            v = p.get("tps")
+            if v is None:
+                v = p.get("throughput")
+            if v is not None:
+                try:
+                    values.append(float(v))
+                except (TypeError, ValueError):
+                    continue
+        return values
+
+    @staticmethod
+    def _expected_successful_ops(metrics: Dict[str, Any]) -> Optional[int]:
+        if not metrics:
+            return None
+        for key in ("successful", "total_queries", "successful_transactions"):
+            value = metrics.get(key)
+            if value is not None:
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    continue
+        return None
 
     def _select_throughput_samples(self, metric_samples: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         batch = [p for p in metric_samples if p.get("sample_type") == "throughput_window"]
@@ -995,14 +1161,27 @@ class ComparisonService:
 
         return await self._build_series_from_metric_samples(test_id, db_key)
 
+    async def _fetch_throughput_samples_for_db(self, test_id: str, db_key: str) -> List[Dict[str, Any]]:
+        get_metric_samples = getattr(self.repository, "get_metric_samples", None)
+        if not callable(get_metric_samples):
+            return []
+        try:
+            return await get_metric_samples(
+                test_id,
+                connection_key=db_key,
+                limit=COMPARISON_METRIC_SAMPLE_LIMIT,
+            )
+        except TypeError:
+            raw = await get_metric_samples(test_id)
+            return self._filter_metric_samples(raw, db_key)
+        except Exception:
+            return []
+
     async def _build_series_from_metric_samples(
         self, test_id: str, db_key: str,
     ) -> List[Dict[str, Any]]:
-        get_samples = getattr(self.repository, "get_metric_samples", None)
-        if not callable(get_samples):
-            return []
         try:
-            raw = await get_samples(test_id)
+            raw = await self._fetch_throughput_samples_for_db(test_id, db_key)
         except Exception:
             return []
 
@@ -1060,6 +1239,33 @@ class ComparisonService:
                 return metrics
         return {}
 
+    @staticmethod
+    def _is_standard_mixed_source(
+        latency_source: Optional[str],
+        throughput_source: Optional[str],
+    ) -> bool:
+        return (
+            latency_source == STANDARD_LATENCY_SOURCE
+            and throughput_source == STANDARD_THROUGHPUT_SUMMARY_SOURCE
+        )
+
+    @staticmethod
+    def _is_degraded_data_source(
+        latency_source: Optional[str],
+        throughput_source: Optional[str],
+        samples_truncated: bool = False,
+    ) -> bool:
+        if samples_truncated:
+            return True
+        degraded = {"time_series", "aggregated_metrics"}
+        if latency_source in degraded:
+            return True
+        if throughput_source in degraded and throughput_source != STANDARD_THROUGHPUT_SUMMARY_SOURCE:
+            return True
+        if latency_source == "time_series" or throughput_source == "time_series":
+            return True
+        return False
+
     def _resolve_data_source(
         self,
         latency_source: Optional[str],
@@ -1070,6 +1276,8 @@ class ComparisonService:
     ) -> str:
         if latency_source and throughput_source and latency_source == throughput_source:
             return latency_source
+        if self._is_standard_mixed_source(latency_source, throughput_source):
+            return "standard_mixed"
         if latency_source or throughput_source:
             return "mixed_sources"
         if raw_samples:
@@ -1092,6 +1300,9 @@ class ComparisonService:
 
         latency_values = samples_info["latency_values"]
         throughput_values = samples_info["throughput_values"]
+        latency_source = samples_info.get("latency_source")
+        throughput_source = samples_info.get("throughput_source")
+        resolved_source = samples_info["source"]
 
         if latency_values:
             latency_stats = calculate_descriptive_stats(latency_values)
@@ -1115,6 +1326,61 @@ class ComparisonService:
                 f"Для {test_name}/{db_key} отсутствуют throughput samples; использованы агрегированные метрики",
             )
 
+        if samples_info.get("samples_truncated"):
+            sample_size_warning = (
+                f"Для {test_name}/{db_key} raw latency samples усечены; для p95 использованы агрегаты прогона"
+            )
+            if aggregate_metrics:
+                latency_stats = self._build_stats_from_aggregates(aggregate_metrics, "latency")
+            self._add_warning(
+                warnings,
+                f"Для {test_name}/{db_key} выборка request_latency усечена лимитом хранения; "
+                "перцентили latency взяты из итоговых метрик прогона",
+            )
+
+        if latency_source == "time_series":
+            self._add_warning(
+                warnings,
+                f"Для {test_name}/{db_key} latency рассчитана по time_series (секундные точки), "
+                "а не по отдельным запросам — сравнение менее точное",
+            )
+            if latency_values and latency_stats and latency_stats.count < MIN_SAMPLE_SIZE_FOR_TEST:
+                sample_size_warning = (
+                    f"Для {test_name}/{db_key} мало точек time_series для надёжных перцентилей "
+                    f"({latency_stats.count})"
+                )
+
+        if (
+            resolved_source == "mixed_sources"
+            and not self._is_standard_mixed_source(latency_source, throughput_source)
+        ):
+            self._add_warning(
+                warnings,
+                f"Для {test_name}/{db_key} latency и throughput взяты из несогласованных источников "
+                f"({latency_source or 'нет'} / {throughput_source or 'нет'})",
+                code="inconsistent_metric_sources",
+            )
+
+        data_quality = "degraded" if self._is_degraded_data_source(
+            latency_source, throughput_source, samples_info.get("samples_truncated", False),
+        ) else "standard"
+
+        inferential_reliability = "limited" if (
+            data_quality == "degraded"
+            or latency_source == "time_series"
+            or (
+                latency_stats is not None
+                and latency_stats.count >= REQUEST_LEVEL_DEPENDENT_OBSERVATION_THRESHOLD
+            )
+        ) else "high"
+
+        tp_comparison_values = samples_info.get("throughput_comparison_values") or []
+        throughput_semantics = None
+        if throughput_source == STANDARD_THROUGHPUT_SUMMARY_SOURCE:
+            throughput_semantics = "run_aggregate"
+        elif tp_comparison_values:
+            throughput_semantics = "window_samples"
+
         if sample_size_warning:
             self._add_warning(warnings, sample_size_warning)
 
@@ -1123,24 +1389,31 @@ class ComparisonService:
             throughput=throughput_stats,
             error_rate=self._resolve_error_rate(aggregate_metrics),
             total_duration_sec=self._resolve_total_duration(aggregate_metrics),
-            source=samples_info["source"],
+            source=resolved_source,
             sample_size_warning=sample_size_warning,
+            data_quality=data_quality,
+            inferential_reliability=inferential_reliability,
+            throughput_semantics=throughput_semantics,
         )
 
     @staticmethod
-    def _add_warning(warnings, message: str):
+    def _add_warning(warnings, message: str, code: str = "data_quality"):
         """Add a warning — works with both List[str] and List[AnalysisWarning]."""
         if warnings and isinstance(warnings, list):
             if warnings and isinstance(warnings[0], AnalysisWarning):
-                warnings.append(AnalysisWarning(severity="warn", code="data_quality", message=message))
+                warnings.append(AnalysisWarning(severity="warn", code=code, message=message))
             else:
                 warnings.append(message)
         elif isinstance(warnings, list):
-            warnings.append(AnalysisWarning(severity="warn", code="data_quality", message=message))
+            warnings.append(AnalysisWarning(severity="warn", code=code, message=message))
 
     def _build_stats_from_aggregates(self, metrics: Dict[str, Any], metric_kind: str):
         if metric_kind == "latency":
-            avg = float(metrics.get("avg_time_ms", 0) or 0)
+            avg = float(
+                metrics.get("avg_time_ms")
+                or metrics.get("avg_response_time_ms")
+                or 0
+            )
             mn = float(metrics.get("min_time_ms", avg) or avg)
             mx = float(metrics.get("max_time_ms", avg) or avg)
             p50 = float(metrics.get("p50_time_ms", avg) or avg)

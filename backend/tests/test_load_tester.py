@@ -155,6 +155,15 @@ class TestBuildMetricSamples:
     def test_build_metric_samples_empty_input(self, tester):
         assert tester.build_metric_samples([], "conn_pg") == []
 
+    def test_build_metric_samples_measurement_phase(self, tester):
+        results = [
+            {"query_id": "q1", "execution_time_ms": 10.0, "error": None},
+        ]
+        warmup = tester.build_metric_samples(results, "conn_pg", measurement_phase="warmup")
+        measure = tester.build_metric_samples(results, "conn_pg", measurement_phase="measurement")
+        assert all(s["measurement_phase"] == "warmup" for s in warmup)
+        assert all(s["measurement_phase"] == "measurement" for s in measure)
+
     def test_build_throughput_windows_empty_input(self):
         assert LoadTester._build_throughput_windows([], [], "postgresql", "conn_pg", None) == []
 

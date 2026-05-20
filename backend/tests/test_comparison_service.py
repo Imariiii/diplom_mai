@@ -13,6 +13,7 @@ import pytest
 
 from backend.comparison.schemas import AnalysisMode, ComparisonRequest
 from backend.comparison.service import ComparisonService
+from backend.comparison.statistics import calculate_descriptive_stats
 
 
 # ---------------------------------------------------------------------------
@@ -427,8 +428,8 @@ class TestSeriesAnalyze:
     async def test_series_explicit_baseline(self, mock_repo):
         id1, id2 = uuid.uuid4(), uuid.uuid4()
         test_data = {
-            str(id1): _make_test_data(id1, "A", db_keys=["conn_pg"]),
-            str(id2): _make_test_data(id2, "B", db_keys=["conn_pg"]),
+            str(id1): _make_test_data(id1, "A", virtual_users=4, db_keys=["conn_pg"]),
+            str(id2): _make_test_data(id2, "B", virtual_users=8, db_keys=["conn_pg"]),
         }
         samples = {
             str(id1): _make_metric_samples("conn_pg", seed=42),
@@ -446,8 +447,8 @@ class TestSeriesAnalyze:
     async def test_series_charts_populated(self, mock_repo):
         id1, id2 = uuid.uuid4(), uuid.uuid4()
         test_data = {
-            str(id1): _make_test_data(id1, "MySQL", db_keys=["conn_mysql"]),
-            str(id2): _make_test_data(id2, "PG", db_keys=["conn_pg"]),
+            str(id1): _make_test_data(id1, "MySQL", virtual_users=4, db_keys=["conn_mysql"]),
+            str(id2): _make_test_data(id2, "PG", virtual_users=8, db_keys=["conn_pg"]),
         }
         samples = {
             str(id1): _make_metric_samples("conn_mysql", seed=42),
@@ -531,3 +532,214 @@ class TestSeriesAnalyze:
         assert report.same_workload_mode is False
         assert report.is_valid_for_series is False
         assert any("transaction-level" in reason for reason in report.reasons)
+
+
+# ---------------------------------------------------------------------------
+# Sampling / source consistency regressions
+# ---------------------------------------------------------------------------
+
+def _make_latency_only_samples(db_key: str, n: int, base_ms: float = 10.0) -> List[Dict[str, Any]]:
+    return [
+        {
+            "sample_type": "request_latency",
+            "connection_key": db_key,
+            "db_type": "postgresql",
+            "latency_ms": base_ms + (i % 7),
+            "is_error": False,
+        }
+        for i in range(n)
+    ]
+
+
+class TestComparisonSampling:
+    @pytest.mark.asyncio
+    async def test_fetch_metric_samples_passes_connection_key(self, mock_repo):
+        id1 = uuid.uuid4()
+        run = _make_test_data(id1, "Multi", db_keys=["conn_mysql", "conn_pg"])
+        run["results"][0]["metrics"]["throughput"] = 100.0
+        run["results"][0]["metrics"]["p95_time_ms"] = 50.0
+        run["results"][0]["metrics"]["avg_time_ms"] = 30.0
+        run["results"][1]["metrics"]["throughput"] = 200.0
+        run["results"][1]["metrics"]["p95_time_ms"] = 40.0
+        run["results"][1]["metrics"]["avg_time_ms"] = 25.0
+        mock_repo.get_test_run_with_results = AsyncMock(return_value=run)
+        mock_repo.get_metric_samples = AsyncMock(return_value=_make_metric_samples("conn_pg", n=50))
+        mock_repo.count_metric_samples = AsyncMock(return_value=50)
+
+        svc = ComparisonService(repository=mock_repo)
+        await svc._collect_metric_samples(str(id1), "conn_pg", run)
+
+        mock_repo.get_metric_samples.assert_awaited()
+        call_kwargs = mock_repo.get_metric_samples.await_args.kwargs
+        assert call_kwargs.get("connection_key") == "conn_pg"
+        assert call_kwargs.get("limit") is None
+
+    @pytest.mark.asyncio
+    async def test_multi_db_global_limit_starves_other_db_without_connection_key(self, mock_repo):
+        """Регрессия: без фильтра по connection_key вторая СУБД не получает raw latency."""
+        id1 = uuid.uuid4()
+        run = _make_test_data(id1, "Heavy", db_keys=["conn_mysql", "conn_pg"], virtual_users=50, iterations=500)
+        for r in run["results"]:
+            r["metrics"]["throughput"] = 500.0
+            r["metrics"]["p95_time_ms"] = 60.0
+            r["metrics"]["avg_time_ms"] = 40.0
+            r["metrics"]["successful"] = 12000
+
+        mysql_samples = _make_latency_only_samples("conn_mysql", 10000, base_ms=5.0)
+        pg_samples = _make_latency_only_samples("conn_pg", 5000, base_ms=200.0)
+
+        async def legacy_get_samples(test_id, **kwargs):
+            if kwargs.get("connection_key"):
+                if kwargs["connection_key"] == "conn_mysql":
+                    return mysql_samples
+                if kwargs["connection_key"] == "conn_pg":
+                    return pg_samples
+                return []
+            return mysql_samples[:10000]
+
+        mock_repo.get_test_run_with_results = AsyncMock(return_value=run)
+        mock_repo.get_metric_samples = AsyncMock(side_effect=legacy_get_samples)
+        mock_repo.count_metric_samples = AsyncMock(return_value=5000)
+        mock_repo.get_time_series = AsyncMock(return_value=[])
+
+        svc = ComparisonService(repository=mock_repo)
+        pg_info = await svc._collect_metric_samples(str(id1), "conn_pg", run)
+        mysql_info = await svc._collect_metric_samples(str(id1), "conn_mysql", run)
+
+        assert len(mysql_info["latency_values"]) == 10000
+        assert len(pg_info["latency_values"]) == 5000
+        pg_p95 = calculate_descriptive_stats(pg_info["latency_values"]).p95
+        mysql_p95 = calculate_descriptive_stats(mysql_info["latency_values"]).p95
+        assert pg_p95 > 150.0
+        assert mysql_p95 < 20.0
+
+    @pytest.mark.asyncio
+    async def test_standard_mixed_sources_no_warning(self, mock_repo):
+        """Штатный режим: latency из metric_samples, throughput из итогов прогона."""
+        id1 = uuid.uuid4()
+        run = _make_test_data(id1, "Mixed", db_keys=["conn_pg"])
+        run["results"][0]["metrics"]["throughput"] = 400.0
+        run["results"][0]["metrics"]["tps"] = 400.0
+        mock_repo.get_test_run_with_results = AsyncMock(return_value=run)
+        mock_repo.get_metric_samples = AsyncMock(return_value=_make_metric_samples("conn_pg", n=30))
+        mock_repo.count_metric_samples = AsyncMock(return_value=30)
+
+        svc = ComparisonService(repository=mock_repo)
+        warnings: List = []
+        info = await svc._collect_metric_samples(str(id1), "conn_pg", run)
+        bundle = svc._build_metric_bundle(info, warnings, run["name"], "conn_pg")
+
+        assert bundle.source == "standard_mixed"
+        assert bundle.data_quality == "standard"
+        assert bundle.throughput_semantics == "run_aggregate"
+        assert not any("разных источников" in getattr(w, "message", str(w)) for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_degraded_mixed_sources_emits_warning(self, mock_repo):
+        id1 = uuid.uuid4()
+        run = _make_test_data(id1, "Degraded", db_keys=["conn_pg"])
+        mock_repo.get_test_run_with_results = AsyncMock(return_value=run)
+        mock_repo.get_metric_samples = AsyncMock(return_value=[])
+        mock_repo.count_metric_samples = AsyncMock(return_value=0)
+        mock_repo.get_time_series = AsyncMock(return_value=[
+            {"response_time": 50.0, "tps": 100.0},
+            {"response_time": 55.0, "tps": 110.0},
+        ])
+
+        svc = ComparisonService(repository=mock_repo)
+        warnings: List = []
+        info = await svc._collect_metric_samples(str(id1), "conn_pg", run)
+        bundle = svc._build_metric_bundle(info, warnings, run["name"], "conn_pg")
+
+        assert bundle.source == "mixed_sources"
+        assert bundle.data_quality == "degraded"
+        assert any("несогласованных источников" in getattr(w, "message", str(w)) for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_time_series_throughput_prefers_tps(self, mock_repo):
+        svc = ComparisonService(repository=AsyncMock())
+        points = [
+            {"tps": 120.0, "throughput": 999.0, "response_time": 10.0},
+            {"tps": 130.0, "throughput": 888.0, "response_time": 11.0},
+        ]
+        values = svc._extract_time_series_throughput(points)
+        assert values == [120.0, 130.0]
+
+    @pytest.mark.asyncio
+    async def test_latency_excludes_errors(self, mock_repo):
+        svc = ComparisonService(repository=AsyncMock())
+        samples = [
+            {"sample_type": "request_latency", "latency_ms": 10.0, "is_error": False},
+            {"sample_type": "request_latency", "latency_ms": 500.0, "is_error": True},
+        ]
+        values = svc._extract_latency_values(samples)
+        assert values == [10.0]
+
+    @pytest.mark.asyncio
+    async def test_series_duplicate_load_level_blocks_analysis(self, mock_repo):
+        id1, id2 = uuid.uuid4(), uuid.uuid4()
+        t1 = _make_test_data(id1, "A", virtual_users=10, iterations=100, db_keys=["conn_pg"])
+        t2 = _make_test_data(id2, "B", virtual_users=10, iterations=100, db_keys=["conn_pg"])
+        test_data = {str(id1): t1, str(id2): t2}
+        mock_repo.get_test_run_with_results = AsyncMock(side_effect=lambda tid: test_data.get(tid))
+        mock_repo.get_metric_samples = AsyncMock(
+            side_effect=lambda tid, **kw: _make_metric_samples("conn_pg", n=50)
+        )
+        mock_repo.count_metric_samples = AsyncMock(return_value=50)
+
+        svc = ComparisonService(repository=mock_repo)
+        request = ComparisonRequest(analysis_mode="series", test_ids=[id1, id2])
+        with pytest.raises(ValueError, match="несопоставимы"):
+            await svc.analyze(request)
+
+    def test_comparability_blocks_different_schema_profiles(self, mock_repo):
+        id1, id2 = uuid.uuid4(), uuid.uuid4()
+        t1 = _make_test_data(id1, "A", virtual_users=4, db_keys=["conn_pg"])
+        t2 = _make_test_data(id2, "B", virtual_users=8, db_keys=["conn_pg"])
+        t1["config"]["resolved_profile_id"] = "profile-a"
+        t2["config"]["resolved_profile_id"] = "profile-b"
+
+        svc = ComparisonService(repository=mock_repo)
+        report = svc._build_comparability_report([t1, t2])
+        assert report.same_schema_profile is False
+        assert report.is_valid_for_series is False
+        assert any("профил" in r.lower() for r in report.reasons)
+
+    def test_comparability_blocks_different_warmup_for_series(self, mock_repo):
+        id1, id2 = uuid.uuid4(), uuid.uuid4()
+        t1 = _make_test_data(id1, "A", virtual_users=4, db_keys=["conn_pg"])
+        t2 = _make_test_data(id2, "B", virtual_users=8, db_keys=["conn_pg"])
+        t1["config"]["warmup_mode"] = "active"
+        t2["config"]["warmup_mode"] = "skip"
+
+        svc = ComparisonService(repository=mock_repo)
+        report = svc._build_comparability_report([t1, t2])
+        assert report.is_valid_for_series is False
+        assert any("прогрев" in r.lower() for r in report.reasons)
+
+    @pytest.mark.asyncio
+    async def test_warmup_phase_excluded_from_latency(self, mock_repo):
+        svc = ComparisonService(repository=AsyncMock())
+        samples = [
+            {"sample_type": "request_latency", "latency_ms": 5.0, "measurement_phase": "warmup"},
+            {"sample_type": "request_latency", "latency_ms": 20.0, "measurement_phase": "measurement"},
+            {"sample_type": "request_latency", "latency_ms": 30.0},
+        ]
+        values = svc._extract_latency_values(samples)
+        assert values == [20.0, 30.0]
+
+    @pytest.mark.asyncio
+    async def test_inferential_reliability_limited_for_large_request_sample(self, mock_repo):
+        id1 = uuid.uuid4()
+        run = _make_test_data(id1, "Large", db_keys=["conn_pg"])
+        run["results"][0]["metrics"]["throughput"] = 400.0
+        mock_repo.get_test_run_with_results = AsyncMock(return_value=run)
+        mock_repo.get_metric_samples = AsyncMock(
+            return_value=_make_metric_samples("conn_pg", n=600)
+        )
+        mock_repo.count_metric_samples = AsyncMock(return_value=600)
+
+        svc = ComparisonService(repository=mock_repo)
+        info = await svc._collect_metric_samples(str(id1), "conn_pg", run)
+        bundle = svc._build_metric_bundle(info, [], run["name"], "conn_pg")
+        assert bundle.inferential_reliability == "limited"

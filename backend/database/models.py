@@ -371,6 +371,7 @@ class MetricSample(Base):
     connection_key = Column(String(255), nullable=True)
     query_id = Column(String(100), nullable=True)
     sample_type = Column(String(50), nullable=False)  # request_latency | throughput_window | throughput_realtime
+    measurement_phase = Column(String(32), nullable=True)  # warmup | measurement
     timestamp = Column(DateTime(timezone=True), nullable=False)
     latency_ms = Column(Float, nullable=True)
     throughput = Column(Float, nullable=True)
@@ -398,6 +399,7 @@ class MetricSample(Base):
             'connection_key': self.connection_key,
             'query_id': self.query_id,
             'sample_type': self.sample_type,
+            'measurement_phase': self.measurement_phase,
             'timestamp': self.timestamp.isoformat() if self.timestamp else None,
             'latency_ms': self.latency_ms,
             'throughput': self.throughput,

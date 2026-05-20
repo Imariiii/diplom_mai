@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 
-from sqlalchemy import select, func, desc
+from sqlalchemy import select, func, desc, or_
 from sqlalchemy.orm import joinedload
 
 from backend.database.models import Base, MetricSample, TestRun, TestResult, TimeSeries
@@ -388,6 +388,7 @@ class TestRepository(BaseRepository):
                     connection_key=sample_data.get('connection_key'),
                     query_id=sample_data.get('query_id'),
                     sample_type=sample_data.get('sample_type', 'request_latency'),
+                    measurement_phase=sample_data.get('measurement_phase'),
                     timestamp=sample_data.get('timestamp'),
                     latency_ms=sample_data.get('latency_ms'),
                     throughput=sample_data.get('throughput'),
@@ -400,14 +401,48 @@ class TestRepository(BaseRepository):
             await session.commit()
             return len(samples)
 
+    @staticmethod
+    def _metric_sample_db_key_filter(connection_key: str):
+        """Сопоставить connection_key с полями sample (как в ComparisonService)."""
+        return or_(
+            MetricSample.connection_key == connection_key,
+            MetricSample.db_type == connection_key,
+        )
+
+    async def count_metric_samples(
+        self,
+        test_run_id: str,
+        db_type: Optional[str] = None,
+        connection_key: Optional[str] = None,
+        sample_type: Optional[str] = None,
+    ) -> int:
+        """Подсчитать число sample-метрик (для проверки усечения выборки)."""
+        async with self.SessionLocal() as session:
+            query = select(func.count()).select_from(MetricSample).where(
+                MetricSample.test_run_id == uuid.UUID(test_run_id)
+            )
+            if db_type:
+                query = query.where(MetricSample.db_type == db_type)
+            if connection_key:
+                query = query.where(self._metric_sample_db_key_filter(connection_key))
+            if sample_type:
+                query = query.where(MetricSample.sample_type == sample_type)
+            result = await session.execute(query)
+            return int(result.scalar() or 0)
+
     async def get_metric_samples(
         self,
         test_run_id: str,
         db_type: Optional[str] = None,
+        connection_key: Optional[str] = None,
         sample_type: Optional[str] = None,
-        limit: int = 10000
+        limit: Optional[int] = 10000,
     ) -> List[Dict[str, Any]]:
-        """Получить raw/semiraw sample-метрики теста"""
+        """Получить raw/semiraw sample-метрики теста.
+
+        limit=None — без ограничения (для сравнительного анализа по одной СУБД).
+        connection_key фильтрует на стороне SQL, чтобы лимит не «съедался» другими БД.
+        """
         async with self.SessionLocal() as session:
             query = select(MetricSample).where(
                 MetricSample.test_run_id == uuid.UUID(test_run_id)
@@ -415,10 +450,13 @@ class TestRepository(BaseRepository):
 
             if db_type:
                 query = query.where(MetricSample.db_type == db_type)
+            if connection_key:
+                query = query.where(self._metric_sample_db_key_filter(connection_key))
             if sample_type:
                 query = query.where(MetricSample.sample_type == sample_type)
 
-            query = query.limit(limit)
+            if limit is not None:
+                query = query.limit(limit)
             result = await session.execute(query)
             samples = result.scalars().all()
             return [sample.to_dict() for sample in samples]
@@ -427,13 +465,15 @@ class TestRepository(BaseRepository):
         self,
         test_run_id: str,
         db_type: Optional[str] = None,
+        connection_key: Optional[str] = None,
         sample_type: Optional[str] = None,
-        limit: int = 10000
+        limit: Optional[int] = 10000,
     ) -> List[Dict[str, Any]]:
         """Получить raw метрики теста для сравнительного анализа"""
         return await self.get_metric_samples(
             test_run_id,
             db_type=db_type,
+            connection_key=connection_key,
             sample_type=sample_type,
             limit=limit,
         )

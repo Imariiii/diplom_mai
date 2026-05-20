@@ -188,6 +188,9 @@ class MetricStatsBundle(BaseModel):
     total_duration_sec: Optional[float] = None
     source: str = "unknown"
     sample_size_warning: Optional[str] = None
+    data_quality: Literal["standard", "degraded"] = "standard"
+    inferential_reliability: Literal["high", "limited"] = "high"
+    throughput_semantics: Optional[str] = None
 
 
 class PairwiseComparison(BaseModel):

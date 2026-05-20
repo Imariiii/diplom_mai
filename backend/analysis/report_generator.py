@@ -71,7 +71,7 @@ class _ReportBase:
     @staticmethod
     def _format_p_value(pair: PairwiseComparison) -> str:
         if pair.p_value_adjusted is not None:
-            return f"p(adj) = {pair.p_value_adjusted:.4f}"
+            return f"p (скорр.) = {pair.p_value_adjusted:.4f}"
         if pair.p_value is not None:
             return f"p = {pair.p_value:.4f}"
         return "p недоступно"
@@ -109,10 +109,10 @@ class _ReportBase:
         if metric in ("throughput", "throughput_mean", "throughput_per_thread"):
             return f"пропускная способность ({_ReportBase._throughput_rate_unit(workload_mode)})"
         return {
-            "latency_ms": "latency",
-            "latency_mean": "latency mean",
-            "latency_p95": "latency p95",
-            "latency_p99": "latency p99",
+            "latency_ms": "задержка",
+            "latency_mean": "средняя задержка",
+            "latency_p95": "задержка p95",
+            "latency_p99": "задержка p99",
         }.get(metric, metric)
 
     @staticmethod
@@ -157,7 +157,7 @@ class _ReportBase:
             effect = "большой" if p.effect_size_label == "large" else "средний"
             insights.append(
                 f"{label}: {metric_label} отличается практически значимо "
-                f"(Cohen's d = {abs(p.effect_size):.2f}, {effect} эффект, {self._format_p_value(p)})."
+                f"(d Кохена = {abs(p.effect_size):.2f}, {effect} эффект, {self._format_p_value(p)})."
             )
         return self._deduplicate(insights)
 
@@ -257,15 +257,15 @@ class PerTestReportGenerator(_ReportBase):
         chips: List[DbMetricChip] = []
         if bundle.throughput and bundle.throughput.mean is not None:
             chips.append(DbMetricChip(
-                label="throughput",
+                label="пропускная способность",
                 value=self._format_throughput_rate(bundle.throughput.mean, workload_mode),
                 tone="neutral",
             ))
         if bundle.latency_ms:
-            chips.append(DbMetricChip(label="p95", value=f"{bundle.latency_ms.p95:.1f} ms", tone="neutral"))
-            chips.append(DbMetricChip(label="p99", value=f"{bundle.latency_ms.p99:.1f} ms", tone="neutral"))
+            chips.append(DbMetricChip(label="p95", value=f"{bundle.latency_ms.p95:.1f} мс", tone="neutral"))
+            chips.append(DbMetricChip(label="p99", value=f"{bundle.latency_ms.p99:.1f} мс", tone="neutral"))
         if bundle.error_rate and bundle.error_rate > 0:
-            chips.append(DbMetricChip(label="errors", value=f"{bundle.error_rate:.2f}%", tone="negative"))
+            chips.append(DbMetricChip(label="ошибки", value=f"{bundle.error_rate:.2f}%", tone="negative"))
         return chips
 
     def _per_test_highlights(
@@ -283,9 +283,9 @@ class PerTestReportGenerator(_ReportBase):
         latency = bundle.latency_ms
         if latency:
             if latency.median > 0 and (latency.p99 / latency.median) > self.HIGH_TAIL_RATIO_THRESHOLD:
-                items.append(f"Длинный хвост latency: p99/median ×{latency.p99 / latency.median:.1f}.")
+                items.append(f"Длинный хвост задержки: p99/медиана ×{latency.p99 / latency.median:.1f}.")
             if latency.mean > 0 and (latency.std / latency.mean) > self.HIGH_VARIABILITY_THRESHOLD:
-                items.append(f"Высокая вариативность (CV = {latency.std / latency.mean:.2f}).")
+                items.append(f"Высокая вариативность (КВ = {latency.std / latency.mean:.2f}).")
         relevant = [
             p for p in pairwise
             if self._is_significant(p)
@@ -323,7 +323,7 @@ class PerTestReportGenerator(_ReportBase):
                 return (
                     f"Лидер по пропускной способности — {label} "
                     f"({self._format_throughput_rate(best.value, workload_mode, precision=1)}); "
-                    f"лучшая latency у {lat_label} ({lat_best.value:.2f} мс)."
+                    f"лучшая задержка у {lat_label} ({lat_best.value:.2f} мс)."
                 )
             return (
                 f"Лидер по пропускной способности — {label} "
@@ -335,11 +335,14 @@ class PerTestReportGenerator(_ReportBase):
         if sig:
             best = max(sig, key=lambda p: abs(p.pct_difference or 0))
             return (
-                f"Главное различие по throughput: {self._safe_label(best.db_key)}, "
+                f"Главное различие по пропускной способности: {self._safe_label(best.db_key)}, "
                 f"Δ = {abs(best.pct_difference or 0):.1f}% ({self._format_p_value(best)})."
             )
 
-        return "Явного лидера по throughput не выявлено: ключевые различия статистически не подтверждены."
+        return (
+            "Явного лидера по пропускной способности не выявлено: "
+            "ключевые различия статистически не подтверждены."
+        )
 
     def _facts(
         self,
@@ -377,9 +380,9 @@ class PerTestReportGenerator(_ReportBase):
         if errors:
             patterns.insert(0, f"Ошибки зафиксированы у: {', '.join(errors)}.")
         if high_tail:
-            patterns.append(f"Длинный хвост latency виден у: {', '.join(high_tail)}.")
+            patterns.append(f"Длинный хвост задержки виден у: {', '.join(high_tail)}.")
         if high_variability:
-            patterns.append(f"Высокая вариативность latency у: {', '.join(high_variability)}.")
+            patterns.append(f"Высокая вариативность задержки у: {', '.join(high_variability)}.")
         if not patterns:
             patterns.append("Критичных паттернов не видно.")
         return self._deduplicate(patterns)
@@ -416,7 +419,7 @@ class PerTestReportGenerator(_ReportBase):
             bundle.latency_ms and bundle.latency_ms.median > 0 and (bundle.latency_ms.p99 / bundle.latency_ms.median) > self.HIGH_TAIL_RATIO_THRESHOLD
             for bundle in descriptive_stats.values()
         ):
-            recs.append("Проверить p99 latency: планы запросов, блокировки, I/O.")
+            recs.append("Проверить p99 задержки: планы запросов, блокировки, I/O.")
         if not any(self._is_significant(p) for p in pairwise):
             recs.append("Увеличить выборку или повторить прогон для уверенного выбора.")
         if not recs:
@@ -487,22 +490,43 @@ class SeriesReportGenerator(_ReportBase):
             ))
         return findings
 
+    @staticmethod
+    def _series_latency_data_degraded(s: DbSeriesSummary) -> bool:
+        """Пониженное качество latency-данных по уровням серии."""
+        degraded_sources = {"time_series", "aggregated_metrics", "mixed_sources"}
+        for bundle in s.descriptive_stats_by_level.values():
+            if getattr(bundle, "data_quality", "standard") == "degraded":
+                return True
+            if bundle.source in degraded_sources:
+                return True
+            if bundle.sample_size_warning:
+                return True
+        return False
+
     def _series_status(self, s: DbSeriesSummary) -> Tuple[DbFindingStatus, str]:
         has_errors = any(
             bundle.error_rate and bundle.error_rate > 0
             for bundle in s.descriptive_stats_by_level.values()
         )
+        data_degraded = self._series_latency_data_degraded(s)
         if has_errors:
             return DbFindingStatus.CRITICAL, "ошибки запросов"
         if s.degradation.overall_p95 > self.DEGRADATION_CRITICAL_THRESHOLD:
+            if data_degraded:
+                return (
+                    DbFindingStatus.WARNING,
+                    f"деградация p95 +{s.degradation.overall_p95:.0f}% (оценка по усечённым/агрегированным данным)",
+                )
             return DbFindingStatus.CRITICAL, f"деградация p95 +{s.degradation.overall_p95:.0f}%"
         if s.saturation_point is not None and s.degradation.overall_p95 > 20:
+            if data_degraded:
+                return DbFindingStatus.WARNING, "насыщение + деградация (данные неполные)"
             return DbFindingStatus.CRITICAL, "насыщение + деградация"
         reasons: List[str] = []
         if s.degradation.overall_p95 > 20:
-            reasons.append(f"deg p95 +{s.degradation.overall_p95:.0f}%")
+            reasons.append(f"дегр. p95 +{s.degradation.overall_p95:.0f}%")
         if s.stability_index is not None and s.stability_index > 0.5:
-            reasons.append(f"нестабильна (CV {s.stability_index:.2f})")
+            reasons.append(f"нестабильна (КВ {s.stability_index:.2f})")
         tail_hit = any(
             b.latency_ms and b.latency_ms.median > 0 and (b.latency_ms.p99 / b.latency_ms.median) > self.HIGH_TAIL_RATIO_THRESHOLD
             for b in s.descriptive_stats_by_level.values()
@@ -519,18 +543,18 @@ class SeriesReportGenerator(_ReportBase):
             last = s.trajectory[-1]
             if last.throughput_mean is not None:
                 chips.append(DbMetricChip(
-                    label="peak throughput",
+                    label="пик. пропускная способность",
                     value=self._format_throughput_rate(last.throughput_mean, workload_mode),
                     tone="neutral",
                 ))
             if last.latency_p95 is not None:
-                chips.append(DbMetricChip(label="p95", value=f"{last.latency_p95:.1f} ms", tone="neutral"))
+                chips.append(DbMetricChip(label="p95", value=f"{last.latency_p95:.1f} мс", tone="neutral"))
         if s.degradation.overall_p95 > 0:
             tone = "negative" if s.degradation.overall_p95 > 20 else "neutral"
             chips.append(DbMetricChip(label="Δ p95", value=f"+{s.degradation.overall_p95:.0f}%", tone=tone))
         if s.elasticity is not None:
             tone = "negative" if s.elasticity < 0.3 else "positive" if s.elasticity > 0.7 else "neutral"
-            chips.append(DbMetricChip(label="elasticity", value=f"{s.elasticity:.2f}", tone=tone))
+            chips.append(DbMetricChip(label="эластичность", value=f"{s.elasticity:.2f}", tone=tone))
         return chips
 
     def _series_highlights(
@@ -553,17 +577,17 @@ class SeriesReportGenerator(_ReportBase):
             for key, tr in s.trend_tests.items()
         )
         if has_latency_trend:
-            items.append("Рост latency подтверждён трендом.")
+            items.append("Рост задержки подтверждён трендом.")
         has_tp_trend = any(
             tr.direction == "decreasing" and "throughput" in key
             for key, tr in s.trend_tests.items()
         )
         if has_tp_trend:
-            items.append("Снижение throughput подтверждено трендом.")
+            items.append("Снижение пропускной способности подтверждено трендом.")
         if s.elasticity is not None and s.elasticity < 0.3:
-            items.append(f"Слабая масштабируемость (elasticity = {s.elasticity:.2f}).")
+            items.append(f"Слабая масштабируемость (эластичность = {s.elasticity:.2f}).")
         if s.stability_index is not None and s.stability_index > 0.5:
-            items.append(f"Нестабильная траектория (CV = {s.stability_index:.2f}).")
+            items.append(f"Нестабильная траектория (КВ = {s.stability_index:.2f}).")
         has_errors = any(
             bundle.error_rate and bundle.error_rate > 0
             for bundle in s.descriptive_stats_by_level.values()
@@ -716,9 +740,11 @@ class SeriesReportGenerator(_ReportBase):
             worst = max(degraded_p99, key=lambda item: item[1])
             patterns.append(f"p99-хвост растёт у {worst[0]} (+{worst[1]:.0f}%).")
         if latency_trend:
-            patterns.append(f"Тренд роста latency подтверждён у: {', '.join(latency_trend)}.")
+            patterns.append(f"Тренд роста задержки подтверждён у: {', '.join(latency_trend)}.")
         if throughput_trend:
-            patterns.append(f"Тренд снижения throughput у: {', '.join(throughput_trend)}.")
+            patterns.append(
+                f"Тренд снижения пропускной способности у: {', '.join(throughput_trend)}."
+            )
         if not patterns:
             patterns.append("Критичных паттернов по серии не видно.")
         return self._deduplicate(patterns)

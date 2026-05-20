@@ -125,7 +125,7 @@ export function ComparisonPage() {
     () => [
       { value: "summary", label: "Траектории", icon: TrendingUp },
       { value: "degradation", label: "Деградация p95–p99", icon: Activity },
-      { value: "stability", label: "Устойчивость (CV)", icon: Target },
+      { value: "stability", label: "Устойчивость (КВ)", icon: Target },
       { value: "charts", label: "Графики", icon: BarChart3 },
       { value: "rankings", label: "Ранги по нагрузкам", icon: Award },
       { value: "report", label: "Отчёт", icon: FileText },
@@ -303,6 +303,12 @@ export function ComparisonPage() {
   )
 }
 
+const WARNING_SEVERITY_LABELS: Record<string, string> = {
+  warn: "предупреждение",
+  info: "информация",
+  block: "блокировка",
+}
+
 function WarningsCard({ warnings }: { warnings: AnalysisWarning[] }) {
   return (
     <div className="rounded-xl border border-warning/30 bg-warning/5 p-4">
@@ -321,7 +327,7 @@ function WarningsCard({ warnings }: { warnings: AnalysisWarning[] }) {
         {warnings.map((w, i) => (
           <li key={i} className="leading-relaxed">
             <Badge variant="outline" className="mr-1 text-[10px] px-1 py-0">
-              {w.severity}
+              {WARNING_SEVERITY_LABELS[w.severity] ?? w.severity}
             </Badge>
             {w.message}
           </li>

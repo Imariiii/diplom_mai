@@ -30,6 +30,8 @@ from backend.comparison.schemas import (
 
 
 MIN_SAMPLE_SIZE_FOR_TEST = 10
+# Порог: при request-level выборках больше этого n p-value может быть завышенно уверенным
+REQUEST_LEVEL_DEPENDENT_OBSERVATION_THRESHOLD = 500
 NORMALITY_SAMPLE_LIMIT = 5000
 SIGNIFICANCE_LEVEL = 0.05
 
@@ -246,6 +248,7 @@ def compare_two_samples(
     compared_id: str,
     db_key: str,
     metric: str,
+    warn_dependent_observations: bool = False,
 ) -> PairwiseComparison:
     """Сравнить две выборки и рассчитать статистическую значимость"""
     _ensure_dependencies_available()
@@ -317,6 +320,16 @@ def compare_two_samples(
     comparison.interpretation = interpret_result(
         pct_diff, float(p_value), metric, comparison.effect_size_label,
     )
+    if warn_dependent_observations and metric == "latency_ms":
+        n_max = max(len(sample_a), len(sample_b))
+        if n_max >= REQUEST_LEVEL_DEPENDENT_OBSERVATION_THRESHOLD:
+            dep_msg = (
+                "Выборки request-level зависимы по времени; "
+                "статистическая значимость может быть завышенно уверенной"
+            )
+            comparison.warning = (
+                f"{comparison.warning}; {dep_msg}" if comparison.warning else dep_msg
+            )
     return comparison
 
 

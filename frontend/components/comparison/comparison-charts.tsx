@@ -417,7 +417,7 @@ function PercentilesChart({
   }))
 
   const config: ChartConfig = {
-    p50: { label: "p50 (median)", color: "var(--chart-3)" },
+    p50: { label: "p50 (медиана)", color: "var(--chart-3)" },
     p95: { label: "p95", color: "var(--chart-4)" },
     p99: { label: "p99", color: "var(--chart-5)" },
   }
@@ -464,10 +464,10 @@ function DistributionChart({
   }))
 
   const config: ChartConfig = {
-    q1Offset: { label: "min → Q1", color: "var(--chart-2)" },
-    medianOffset: { label: "Q1 → median", color: "var(--chart-3)" },
-    q3Offset: { label: "median → Q3", color: "var(--chart-3)" },
-    maxOffset: { label: "Q3 → max", color: "var(--chart-2)" },
+    q1Offset: { label: "мин → Q1", color: "var(--chart-2)" },
+    medianOffset: { label: "Q1 → медиана", color: "var(--chart-3)" },
+    q3Offset: { label: "медиана → Q3", color: "var(--chart-3)" },
+    maxOffset: { label: "Q3 → макс", color: "var(--chart-2)" },
   }
 
   return (
@@ -761,7 +761,7 @@ function StabilityIndexChart({
   return (
     <ChartCard
       title="Стабильность и эластичность"
-      description="CV-индекс стабильности и эластичность пропускной способности"
+      description="Индекс стабильности (КВ) и эластичность пропускной способности"
       icon={Activity}
     >
       <ChartContainer config={config} className="h-full w-full">

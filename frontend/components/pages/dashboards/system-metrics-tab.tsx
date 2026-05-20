@@ -2,13 +2,13 @@
 
 import { Cpu, HardDrive, Network } from "lucide-react"
 import { DB_NAMES, getDbColor } from "@/lib/chart-colors"
-import type { ChartTimelineMode } from "@/lib/time-series-chart-data"
+import type { ChartRow, ChartTimelineMode } from "@/lib/time-series-chart-data"
 import { ChartTimelineModeToggle } from "./shared/chart-timeline-mode-toggle"
 import { TimeSeriesChart } from "./shared/time-series-chart"
 
 interface SystemMetricsTabProps {
   databases: string[]
-  chartData: Record<string, unknown>[]
+  chartData: ChartRow[]
   getDbType?: (dbKey: string) => string
   getDbDisplayName?: (dbKey: string) => string
   chartXAxisTitle?: string

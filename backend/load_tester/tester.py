@@ -654,7 +654,8 @@ class LoadTester:
         self,
         results: List[Dict[str, Any]],
         db_key: str,
-        query_id: Optional[str] = None
+        query_id: Optional[str] = None,
+        measurement_phase: str = "measurement",
     ) -> List[Dict[str, Any]]:
         """Преобразовать raw результаты выполнения в sample-метрики для БД истории.
 
@@ -689,6 +690,7 @@ class LoadTester:
                 'connection_key': db_key,
                 'query_id': query_id or result.get('query_id') or result.get('scenario'),
                 'sample_type': 'request_latency',
+                'measurement_phase': measurement_phase,
                 'timestamp': timestamp,
                 'latency_ms': result.get('execution_time_ms'),
                 'throughput': None,
@@ -700,6 +702,7 @@ class LoadTester:
         samples.extend(
             self._build_throughput_windows(
                 results, parsed_timestamps, db_type, db_key, query_id,
+                measurement_phase=measurement_phase,
             )
         )
 
@@ -712,6 +715,7 @@ class LoadTester:
         db_type: str,
         db_key: str,
         query_id: Optional[str],
+        measurement_phase: str = "measurement",
     ) -> List[Dict[str, Any]]:
         """Агрегировать результаты в 1-секундные окна: throughput — успехи/с, attempt_rate — запросов/с."""
         if not timestamps:
@@ -745,6 +749,7 @@ class LoadTester:
                 'connection_key': db_key,
                 'query_id': query_id,
                 'sample_type': 'throughput_window',
+                'measurement_phase': measurement_phase,
                 'timestamp': bucket_ts,
                 'latency_ms': avg_latency,
                 'throughput': float(success_count),

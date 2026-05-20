@@ -14,6 +14,7 @@ from scipy import stats as sp_stats
 from backend.comparison.statistics import (
     SIGNIFICANCE_LEVEL,
     MIN_SAMPLE_SIZE_FOR_TEST,
+    REQUEST_LEVEL_DEPENDENT_OBSERVATION_THRESHOLD,
     _sanitize_numeric_data,
     calculate_box_plot_stats,
     calculate_cohens_d,
@@ -406,3 +407,17 @@ class TestCompareTwoSamples:
         )
         assert result.pct_difference is not None
         assert result.pct_difference > 0
+
+    def test_dependent_observations_warning_for_large_latency_samples(self):
+        baseline_id, compared_id = self._make_ids()
+        rng = np.random.RandomState(42)
+        n = REQUEST_LEVEL_DEPENDENT_OBSERVATION_THRESHOLD
+        a = rng.normal(40.0, 5.0, n).tolist()
+        b = rng.normal(45.0, 5.0, n).tolist()
+
+        result = compare_two_samples(
+            a, b, baseline_id, compared_id, "db1", "latency_ms",
+            warn_dependent_observations=True,
+        )
+        assert result.warning is not None
+        assert "зависимы" in result.warning

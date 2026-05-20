@@ -13,7 +13,7 @@ import type { HistoryTestResult, HistoryTestRun } from "@/lib/api"
 import { DB_NAMES } from "@/lib/chart-colors"
 import { mapRawDbmsCacheFields } from "@/lib/dbms-cache-metrics"
 import { getVisibleSelfCheckWarnings } from "@/lib/self-check"
-import type { TestResult, TimeSeriesPoint } from "@/lib/types"
+import type { DBMSInternalMetrics, TestResult, TimeSeriesPoint } from "@/lib/types"
 import {
   buildChartDataFromTimeSeries,
   CHART_TIMELINE_AXIS_TITLE,
@@ -69,8 +69,11 @@ type DashboardResult = {
     errorRate: number
   }
   dbmsMetrics?: {
-    cacheHitRatio: number
-    bufferPoolHitRatio: number
+    cacheHitRatio: number | null
+    bufferPoolHitRatio: number | null
+    cacheHitRatioStatus?: "ok" | "no_activity" | "invalid_counter" | "unavailable" | "error"
+    cacheHitRatioNote?: string
+    cacheHitRatioMode?: "delta" | string
     bufferSizeMB?: number
     bufferSizeLabel?: string
     lockWaits: number
@@ -125,9 +128,9 @@ function mapDbmsMetrics(raw: Record<string, unknown> | null | undefined): Dashbo
   return {
     cacheHitRatio: cache.cacheHitRatio,
     bufferPoolHitRatio: cache.bufferPoolHitRatio ?? cache.cacheHitRatio,
-    cacheHitRatioStatus: cache.cacheHitRatioStatus,
-    cacheHitRatioNote: cache.cacheHitRatioNote,
-    cacheHitRatioMode: cache.cacheHitRatioMode,
+    cacheHitRatioStatus: (cache.cacheHitRatioStatus ?? undefined) as DBMSInternalMetrics["cacheHitRatioStatus"],
+    cacheHitRatioNote: cache.cacheHitRatioNote ?? undefined,
+    cacheHitRatioMode: (cache.cacheHitRatioMode ?? undefined) as DBMSInternalMetrics["cacheHitRatioMode"],
     bufferSizeMB: Number(raw.buffer_size_mb) || 0,
     bufferSizeLabel: typeof raw.buffer_size_label === "string" ? raw.buffer_size_label : undefined,
     lockWaits: Number(raw.lock_waits) || 0,
@@ -356,6 +359,8 @@ export function HistoryTestDashboard({
     [realtimeData, chartTimelineMode],
   )
   const chartXAxisTitle = CHART_TIMELINE_AXIS_TITLE[chartTimelineMode]
+  const workloadMode = test.summary?.workload_mode || test.config?.workload_mode
+  const primaryRateUnit = test.summary?.primary_rate_unit || test.config?.primary_rate_unit
 
   const chartDatabases = useMemo(() => {
     if (Object.keys(realtimeData).length > 0) {
@@ -472,6 +477,8 @@ export function HistoryTestDashboard({
           chartXAxisTitle={chartXAxisTitle}
           chartTimelineMode={chartTimelineMode}
           onChartTimelineModeChange={setChartTimelineMode}
+          workloadMode={workloadMode}
+          primaryRateUnit={primaryRateUnit}
         />
       </TabsContent>
 

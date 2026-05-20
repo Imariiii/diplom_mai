@@ -120,7 +120,10 @@ class TestPerTestReport:
             assert f.status_reason
             assert len(f.chips) > 0
             for chip in f.chips:
-                assert any(u in chip.value for u in ("req/s", "ms", "%")), f"Chip без единиц: {chip.value}"
+                assert any(
+                    u in chip.value
+                    for u in ("req/s", "ед/с", "запросов/с", "транзакций/с", "мс", "%")
+                ), f"Chip без единиц: {chip.value}"
 
         assert len(_section(report, "Что важно").items) <= 4
         assert len(_section(report, "Что делать дальше").items) <= 3
@@ -322,6 +325,16 @@ class TestSeriesReport:
         finding = report.per_db_findings[0]
         assert finding.status == DbFindingStatus.CRITICAL
 
+    def test_degraded_db_with_time_series_source_is_warning(self):
+        summary = self._degraded_summary()
+        for bundle in summary.descriptive_stats_by_level.values():
+            bundle.source = "time_series"
+        data = self._make_data(per_db={"conn_pg": summary}, load_levels=self._load_levels())
+        report = self._gen().generate(**data)
+        finding = report.per_db_findings[0]
+        assert finding.status == DbFindingStatus.WARNING
+        assert "агрегированным" in finding.status_reason or "усечённым" in finding.status_reason
+
     def test_stable_db_is_good(self):
         data = self._make_data(
             per_db={"conn_mysql": self._stable_summary()},
@@ -356,7 +369,7 @@ class TestSeriesReport:
         report = self._gen().generate(**data)
         for f in report.per_db_findings:
             for chip in f.chips:
-                has_unit = any(u in chip.value for u in ("req/s", "ms", "%"))
+                has_unit = any(u in chip.value for u in ("req/s", "ед/с", "запросов/с", "транзакций/с", "мс", "%"))
                 has_number = any(c.isdigit() for c in chip.value)
                 assert has_unit or has_number, f"Chip без единиц/чисел: {chip.label}={chip.value}"
 
@@ -375,7 +388,7 @@ class TestSeriesReport:
         )
         report = self._gen().generate(**data)
         important_text = " ".join(_section(report, "Что важно").items)
-        assert important_text.count("Тренд роста latency") == 1
+        assert important_text.count("Тренд роста задержки") == 1
         assert "spearman" not in important_text.lower()
         assert "mann_kendall" not in important_text.lower()
 

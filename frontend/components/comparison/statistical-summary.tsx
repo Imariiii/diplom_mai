@@ -46,6 +46,11 @@ function buildMetricLabels(workloadMode?: string | null): Record<string, string>
   }
 }
 
+const TEST_USED_LABELS: Record<string, string> = {
+  welch_ttest: "t-тест Уэлча",
+  mann_whitney_u: "U Манна–Уитни",
+}
+
 const EFFECT_VARIANTS: Record<
   string,
   { cls: string; dotCls: string; label: string }
@@ -135,7 +140,7 @@ export function StatisticalSummary({ result }: StatisticalSummaryProps) {
     : "Статистические тесты"
   const sectionDesc = isSeriesResult(result)
     ? "Попарные сравнения метрик между соседними уровнями нагрузки"
-    : "Попарные сравнения с базовым · p-value · Cohen\u2019s d · 95% CI"
+    : "Попарные сравнения с базовым · p-value · d Кохена · 95% ДИ"
 
   return (
     <section className="space-y-4">
@@ -287,7 +292,7 @@ function CompactTable({
             <th className="px-3 py-2 text-left font-medium">СУБД</th>
             <th className="px-3 py-2 text-left font-medium">Метрика</th>
             <th className="px-3 py-2 text-center font-medium">p-value</th>
-            <th className="px-3 py-2 text-center font-medium">Cohen&apos;s d</th>
+            <th className="px-3 py-2 text-center font-medium">d Кохена</th>
             <th className="px-3 py-2 text-center font-medium">Δ%</th>
             <th className="px-3 py-2 text-center font-medium">Эффект</th>
           </tr>
@@ -397,7 +402,7 @@ function ComparisonCard({
 
           {item.ci_lower != null && item.ci_upper != null && (
             <p className="mt-1.5 pl-6 font-mono text-[11px] text-muted-foreground">
-              95% CI: [{item.ci_lower.toFixed(2)}, {item.ci_upper.toFixed(2)}] {unit}
+              95% ДИ: [{item.ci_lower.toFixed(2)}, {item.ci_upper.toFixed(2)}] {unit}
             </p>
           )}
 
@@ -414,7 +419,7 @@ function ComparisonCard({
         {item.effect_size != null && item.effect_size_label && (
           <Badge variant="outline" className={`gap-1 font-mono text-[10px] ${effectCfg.cls}`}>
             <span className={`h-1.5 w-1.5 rounded-full ${effectCfg.dotCls}`} />
-            d = {Math.abs(item.effect_size).toFixed(2)} · {effectCfg.label}
+            d Кохена = {Math.abs(item.effect_size).toFixed(2)} · {effectCfg.label}
           </Badge>
         )}
         <Badge variant="outline" className="font-mono text-[10px]">
@@ -422,7 +427,7 @@ function ComparisonCard({
         </Badge>
         {item.test_used && (
           <Badge variant="outline" className="text-[10px]">
-            {item.test_used}
+            {TEST_USED_LABELS[item.test_used] ?? item.test_used}
           </Badge>
         )}
       </div>

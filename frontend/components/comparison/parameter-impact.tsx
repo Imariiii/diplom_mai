@@ -44,7 +44,7 @@ export function ParameterImpact({ result }: ParameterImpactProps) {
     throughput: formatComparisonThroughputTitle(workloadMode),
     latency_mean: "Задержка (среднее)",
     latency_p99: "Задержка p99",
-    latency_cv: "Стабильность (CV)",
+    latency_cv: "Стабильность (КВ)",
   }
   const metricUnits: Record<string, string> = {
     throughput: throughputUnit,
@@ -126,7 +126,7 @@ function ImpactCard({
       {/* Header: test vs baseline + changed param badges */}
       <div className="flex flex-wrap items-center gap-2">
         <p className="font-mono text-sm font-medium">{summary.test_name}</p>
-        <span className="text-xs text-muted-foreground">vs</span>
+        <span className="text-xs text-muted-foreground">против</span>
         <Badge variant="outline" className="font-mono text-[11px]">
           {summary.vs_baseline}
         </Badge>
