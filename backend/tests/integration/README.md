@@ -65,7 +65,7 @@ docker compose -f backend/tests/integration/docker-compose.backup-restore.yml \
 - MariaDB: dump с `DEFINER`, restore пользователем без `SET USER`, проверка
   удаления `DEFINER` перед импортом.
 
-## Preflight logical database сценариев
+## Preflight database group сценариев
 
 Отдельный opt-in тест проверяет, что реальные logical DB `Sakila` и
 `Brazilian E-com` готовы к запуску нагрузочного тестирования: все три
@@ -75,9 +75,9 @@ docker compose -f backend/tests/integration/docker-compose.backup-restore.yml \
 
 ```bash
 set -a && source .env && set +a
-LOGICAL_PREFLIGHT_ENABLED=1 \
-LOGICAL_PREFLIGHT_HISTORY_DATABASE_URL="postgresql+asyncpg://postgres:history123@localhost:5433/project_data" \
-python -m pytest backend/tests/integration/test_logical_database_preflight.py -m integration -v
+DATABASE_GROUP_PREFLIGHT_ENABLED=1 \
+DATABASE_GROUP_PREFLIGHT_HISTORY_DATABASE_URL="postgresql+asyncpg://postgres:history123@localhost:5433/project_data" \
+python -m pytest backend/tests/integration/test_database_group_preflight.py -m integration -v
 ```
 
 По умолчанию проверяются все builtin-сценарии, поддерживаемые генератором
@@ -85,7 +85,7 @@ python -m pytest backend/tests/integration/test_logical_database_preflight.py -m
 Список logical DB и сценариев можно переопределить:
 
 ```bash
-LOGICAL_PREFLIGHT_DATABASES="Sakila,Brazilian E-com" \
-LOGICAL_PREFLIGHT_SCENARIOS="mixed_light,read_only" \
-python -m pytest backend/tests/integration/test_logical_database_preflight.py -m integration -v
+DATABASE_GROUP_PREFLIGHT_DATABASES="Sakila,Brazilian E-com" \
+DATABASE_GROUP_PREFLIGHT_SCENARIOS="mixed_light,read_only" \
+python -m pytest backend/tests/integration/test_database_group_preflight.py -m integration -v
 ```

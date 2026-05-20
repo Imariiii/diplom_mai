@@ -24,7 +24,7 @@ class BaseTestRequest(BaseModel):
     use_indexes: Optional[bool] = False
     warmup_time: int = 5
     test_name: Optional[str] = None
-    logical_database_id: Optional[str] = None
+    database_group_id: Optional[str] = None
 
     @field_validator("iterations")
     @classmethod

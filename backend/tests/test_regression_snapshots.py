@@ -45,7 +45,7 @@ def _make_test_data(test_id, name, db_keys, virtual_users=4, iterations=100, cre
         "created_at": created_at or datetime.now(timezone.utc).isoformat(),
         "started_at": datetime.now(timezone.utc).isoformat(),
         "finished_at": datetime.now(timezone.utc).isoformat(),
-        "logical_database_id": None,
+        "database_group_id": None,
     }
 
 

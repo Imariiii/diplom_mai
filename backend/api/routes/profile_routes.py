@@ -301,12 +301,12 @@ async def generate_profile_bundles(profile_id: str, request: ProfileBundleGenera
     connection_repo = get_connection_repository()
 
     profile = await _get_profile_or_404(profile_id)
-    logical_db_repo = getattr(initialize, "logical_database_repository", None)
-    if logical_db_repo:
-        logical_databases = await logical_db_repo.get_all_with_connections()
-        logical_database = next(
+    database_group_repo = getattr(initialize, "database_group_repository", None)
+    if database_group_repo:
+        database_groups = await database_group_repo.get_all_with_connections()
+        database_group = next(
             (
-                item for item in logical_databases
+                item for item in database_groups
                 if (
                     item.schema_profile_id
                     and str(item.schema_profile_id) == profile_id
@@ -316,13 +316,13 @@ async def generate_profile_bundles(profile_id: str, request: ProfileBundleGenera
             ),
             None,
         )
-        if logical_database:
+        if database_group:
             generator = ScenarioGenerator(
                 connection_repo=connection_repo,
                 bundle_repository=bundle_repo,
             )
-            bundles = await generator.generate_bundles_for_logical_database(
-                logical_database_id=str(logical_database.id),
+            bundles = await generator.generate_bundles_for_database_group(
+                database_group_id=str(database_group.id),
                 scenario_types=request.scenario_template_ids,
             )
             refreshed_profile = await profile_repo.get_profile_by_id(profile_id)

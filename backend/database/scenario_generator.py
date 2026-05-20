@@ -117,9 +117,9 @@ class ScenarioGenerator:
 
         return generated_bundles
 
-    async def generate_bundles_for_logical_database(
+    async def generate_bundles_for_database_group(
         self,
-        logical_database_id: str,
+        database_group_id: str,
         scenario_types: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Сгенерировать bundles по пересечению capabilities всех active-подключений logical DB."""
@@ -130,28 +130,28 @@ class ScenarioGenerator:
 
         from backend import initialize
 
-        logical_db_repo = getattr(initialize, "logical_database_repository", None)
-        if logical_db_repo is None:
-            raise ValueError("LogicalDatabaseRepository не инициализирован")
+        database_group_repo = getattr(initialize, "database_group_repository", None)
+        if database_group_repo is None:
+            raise ValueError("DatabaseGroupRepository не инициализирован")
 
-        logical_database = await logical_db_repo.get_by_id(logical_database_id)
-        if not logical_database:
-            raise ValueError("Логическая БД не найдена")
-        if not logical_database.schema_profile_id:
-            raise ValueError("Для logical database сначала назначьте schema_profile")
+        database_group = await database_group_repo.get_by_id(database_group_id)
+        if not database_group:
+            raise ValueError("Группа баз данных не найдена")
+        if not database_group.schema_profile_id:
+            raise ValueError("Для database group сначала назначьте schema_profile")
 
         active_connections = [
             connection
-            for connection in (logical_database.connections or [])
+            for connection in (database_group.connections or [])
             if connection.is_active == 't'
         ]
         if not active_connections:
-            raise ValueError("Для logical database нет активных подключений")
+            raise ValueError("Для database group нет активных подключений")
 
         connection_ids = [str(connection.id) for connection in active_connections]
         reference_connection_id = (
-            str(logical_database.reference_connection_id)
-            if getattr(logical_database, "reference_connection_id", None)
+            str(database_group.reference_connection_id)
+            if getattr(database_group, "reference_connection_id", None)
             else connection_ids[0]
         )
         if reference_connection_id not in connection_ids:
@@ -189,17 +189,17 @@ class ScenarioGenerator:
             if not validation.get("valid"):
                 print(
                     f"[SCENARIO_GENERATOR] Bundle {scenario_type} для logical DB "
-                    f"{logical_database.name} не прошёл preflight: {validation.get('errors')}"
+                    f"{database_group.name} не прошёл preflight: {validation.get('errors')}"
                 )
                 continue
 
             bundle = await self.bundle_repository.upsert_generated_bundle(
-                schema_profile_id=str(logical_database.schema_profile_id),
+                schema_profile_id=str(database_group.schema_profile_id),
                 scenario_template_id=scenario_type,
-                name=f"{scenario_type}::{logical_database.name}::common",
+                name=f"{scenario_type}::{database_group.name}::common",
                 description=(
                     f"Bundle, сгенерированный по общему безопасному subset "
-                    f"logical database '{logical_database.name}'"
+                    f"database group '{database_group.name}'"
                 ),
                 generation_source=SCENARIO_GENERATOR_VERSION,
                 generated_from_connection_id=reference_connection_id,

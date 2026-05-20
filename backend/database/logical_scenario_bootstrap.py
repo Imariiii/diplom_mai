@@ -3,10 +3,10 @@ Bootstrap нового profile-centric слоя сценариев.
 """
 from typing import List, Optional
 
-from backend.database.logical_database_provisioner import LogicalDatabaseProvisioner
-from backend.database.logical_database_validator import LogicalDatabaseValidator
+from backend.database.database_group_provisioner import DatabaseGroupProvisioner
+from backend.database.database_group_validator import DatabaseGroupValidator
 from backend.database.repository.connection_repository import ConnectionRepository
-from backend.database.repository.logical_database_repository import LogicalDatabaseRepository
+from backend.database.repository.database_group_repository import DatabaseGroupRepository
 from backend.database.repository.profile_repository import ProfileRepository
 from backend.database.repository.scenario_bundle_repository import ScenarioBundleRepository
 from backend.database.scenario_generator import SCENARIO_GENERATOR_VERSION, ScenarioGenerator
@@ -26,76 +26,76 @@ class LogicalScenarioBootstrap:
         connection_repository: ConnectionRepository,
         profile_repository: ProfileRepository,
         bundle_repository: ScenarioBundleRepository,
-        logical_database_repository: Optional[LogicalDatabaseRepository] = None,
+        database_group_repository: Optional[DatabaseGroupRepository] = None,
     ):
         self.connection_repository = connection_repository
         self.profile_repository = profile_repository
         self.bundle_repository = bundle_repository
-        self.logical_database_repository = logical_database_repository
+        self.database_group_repository = database_group_repository
         self.generator = ScenarioGenerator(
             connection_repo=connection_repository,
             bundle_repository=bundle_repository,
         )
         self.provisioner = (
-            LogicalDatabaseProvisioner(
+            DatabaseGroupProvisioner(
                 connection_repository=connection_repository,
-                logical_database_repository=logical_database_repository,
+                database_group_repository=database_group_repository,
                 profile_repository=profile_repository,
                 bundle_repository=bundle_repository,
             )
-            if logical_database_repository else None
+            if database_group_repository else None
         )
-        self.validator = LogicalDatabaseValidator(connection_repository)
+        self.validator = DatabaseGroupValidator(connection_repository)
 
     async def bootstrap(self) -> None:
         """Запустить seed и мягкую миграцию существующих сущностей."""
         await self.profile_repository.seed_builtin_templates()
-        await self._auto_provision_existing_logical_databases()
-        await self._sync_logical_databases_profiles()
-        await self._ensure_logical_database_reference_state()
+        await self._auto_provision_existing_database_groups()
+        await self._sync_database_groups_profiles()
+        await self._ensure_database_group_reference_state()
         await self._ensure_reference_connections()
         await self._ensure_builtin_bundles()
 
-    async def _auto_provision_existing_logical_databases(self) -> None:
-        """Автоматически создать profile/bundle для уже существующих logical database."""
-        if not self.provisioner or not self.logical_database_repository:
+    async def _auto_provision_existing_database_groups(self) -> None:
+        """Автоматически создать profile/bundle для уже существующих database group."""
+        if not self.provisioner or not self.database_group_repository:
             return
 
-        logical_databases = await self.logical_database_repository.get_all_with_connections()
-        for logical_database in logical_databases:
+        database_groups = await self.database_group_repository.get_all_with_connections()
+        for database_group in database_groups:
             if any(
                 connection.is_active == 't' and connection.profile_source == "pending_review"
-                for connection in logical_database.connections
+                for connection in database_group.connections
             ):
                 continue
             active_connections = [
                 connection
-                for connection in logical_database.connections
+                for connection in database_group.connections
                 if connection.is_active == 't'
             ]
             if not active_connections:
                 continue
-            if logical_database.schema_profile_id:
+            if database_group.schema_profile_id:
                 continue
 
             try:
-                await self.provisioner.ensure_logical_database_ready(str(logical_database.id))
+                await self.provisioner.ensure_database_group_ready(str(database_group.id))
             except Exception as exc:
                 print(
                     f"[LOGICAL_BOOTSTRAP] Не удалось автоматически подготовить "
-                    f"{logical_database.name}: {exc}"
+                    f"{database_group.name}: {exc}"
                 )
 
-    async def _sync_logical_databases_profiles(self) -> None:
+    async def _sync_database_groups_profiles(self) -> None:
         """Синхронизировать profile_id только если strict validation подтверждает совместимость."""
-        if not self.logical_database_repository:
+        if not self.database_group_repository:
             return
 
-        logical_databases = await self.logical_database_repository.get_all_with_connections()
-        for logical_database in logical_databases:
+        database_groups = await self.database_group_repository.get_all_with_connections()
+        for database_group in database_groups:
             active_connections = [
                 connection
-                for connection in logical_database.connections
+                for connection in database_group.connections
                 if (
                     connection.is_active == 't'
                     and connection.schema_profile_id
@@ -107,7 +107,7 @@ class LogicalScenarioBootstrap:
                 continue
 
             target_profile_id = next(iter(profile_ids))
-            if str(logical_database.schema_profile_id) == target_profile_id:
+            if str(database_group.schema_profile_id) == target_profile_id:
                 continue
 
             reference_connection = next(
@@ -126,16 +126,16 @@ class LogicalScenarioBootstrap:
                     mode="strict",
                 )
                 if not compatibility.get("valid"):
-                    await self.logical_database_repository.update_profile_state(
-                        logical_db_id=str(logical_database.id),
+                    await self.database_group_repository.update_profile_state(
+                        database_group_id=str(database_group.id),
                         profile_status="incompatible",
                         compatibility_status="invalid",
                         compatibility_report=compatibility,
                         reference_connection_id=str(reference_connection.id),
                     )
                     continue
-                await self.logical_database_repository.assign_profile(
-                    logical_db_id=str(logical_database.id),
+                await self.database_group_repository.assign_profile(
+                    database_group_id=str(database_group.id),
                     schema_profile_id=target_profile_id,
                     schema_profile_name=(
                         reference_connection.schema_profile.name
@@ -153,25 +153,25 @@ class LogicalScenarioBootstrap:
             except Exception as exc:
                 print(
                     f"[LOGICAL_BOOTSTRAP] Не удалось синхронизировать профиль "
-                    f"{logical_database.name}: {exc}"
+                    f"{database_group.name}: {exc}"
                 )
 
-    async def _ensure_logical_database_reference_state(self) -> None:
-        """Восстановить reference/status для существующих logical database без слепой синхронизации."""
-        if not self.logical_database_repository:
+    async def _ensure_database_group_reference_state(self) -> None:
+        """Восстановить reference/status для существующих database group без слепой синхронизации."""
+        if not self.database_group_repository:
             return
 
-        logical_databases = await self.logical_database_repository.get_all_with_connections()
-        for logical_database in logical_databases:
+        database_groups = await self.database_group_repository.get_all_with_connections()
+        for database_group in database_groups:
             active_connections = [
                 connection
-                for connection in logical_database.connections
+                for connection in database_group.connections
                 if connection.is_active == 't'
             ]
             if not active_connections:
                 continue
 
-            reference_connection = self._pick_logical_database_reference(logical_database, active_connections)
+            reference_connection = self._pick_database_group_reference(database_group, active_connections)
             if not reference_connection:
                 continue
 
@@ -185,9 +185,9 @@ class LogicalScenarioBootstrap:
                     connection.profile_source == "pending_review"
                     for connection in active_connections
                 )
-                has_profile = bool(logical_database.schema_profile_id)
-                await self.logical_database_repository.update_profile_state(
-                    logical_db_id=str(logical_database.id),
+                has_profile = bool(database_group.schema_profile_id)
+                await self.database_group_repository.update_profile_state(
+                    database_group_id=str(database_group.id),
                     profile_status=(
                         "confirmed"
                         if compatibility.get("valid") and has_profile and not has_pending_review
@@ -203,8 +203,8 @@ class LogicalScenarioBootstrap:
                 )
             except Exception as exc:
                 print(
-                    f"[LOGICAL_BOOTSTRAP] Не удалось проверить logical database "
-                    f"{logical_database.name}: {exc}"
+                    f"[LOGICAL_BOOTSTRAP] Не удалось проверить database group "
+                    f"{database_group.name}: {exc}"
                 )
 
     async def _ensure_reference_connections(self) -> None:
@@ -235,38 +235,38 @@ class LogicalScenarioBootstrap:
         ]
 
         logical_profile_ids = set()
-        if self.logical_database_repository:
-            logical_databases = await self.logical_database_repository.get_all_with_connections()
-            for logical_database in logical_databases:
-                if not logical_database.schema_profile_id:
+        if self.database_group_repository:
+            database_groups = await self.database_group_repository.get_all_with_connections()
+            for database_group in database_groups:
+                if not database_group.schema_profile_id:
                     continue
-                if getattr(logical_database, "profile_status", None) != "confirmed":
+                if getattr(database_group, "profile_status", None) != "confirmed":
                     continue
-                if getattr(logical_database, "compatibility_status", None) == "invalid":
+                if getattr(database_group, "compatibility_status", None) == "invalid":
                     continue
 
-                profile_id = str(logical_database.schema_profile_id)
+                profile_id = str(database_group.schema_profile_id)
                 logical_profile_ids.add(profile_id)
                 existing_bundles = await self.bundle_repository.list_bundles(schema_profile_id=profile_id)
                 missing_or_incomplete_template_ids = self._missing_or_incomplete_template_ids(
                     templates=templates,
                     existing_bundles=existing_bundles,
                     expected_name_builder=(
-                        lambda template_id, name=logical_database.name: f"{template_id}::{name}::common"
+                        lambda template_id, name=database_group.name: f"{template_id}::{name}::common"
                     ),
                 )
                 if not missing_or_incomplete_template_ids:
                     continue
 
                 try:
-                    await self.generator.generate_bundles_for_logical_database(
-                        logical_database_id=str(logical_database.id),
+                    await self.generator.generate_bundles_for_database_group(
+                        database_group_id=str(database_group.id),
                         scenario_types=missing_or_incomplete_template_ids,
                     )
                 except Exception as exc:
                     print(
                         f"[LOGICAL_BOOTSTRAP] Не удалось сгенерировать common bundles "
-                        f"для logical database {logical_database.name}: {exc}"
+                        f"для database group {database_group.name}: {exc}"
                     )
 
         for profile in profiles:
@@ -341,15 +341,15 @@ class LogicalScenarioBootstrap:
                 return lower_map[preferred_name.lower()]
         return sorted(connections, key=lambda item: item.name)[0]
 
-    def _pick_logical_database_reference(self, logical_database, active_connections: List) -> Optional[object]:
+    def _pick_database_group_reference(self, database_group, active_connections: List) -> Optional[object]:
         if not active_connections:
             return None
-        if getattr(logical_database, "reference_connection_id", None):
+        if getattr(database_group, "reference_connection_id", None):
             for connection in active_connections:
-                if str(connection.id) == str(logical_database.reference_connection_id):
+                if str(connection.id) == str(database_group.reference_connection_id):
                     return connection
-        if logical_database.schema_profile and logical_database.schema_profile.reference_connection_id:
+        if database_group.schema_profile and database_group.schema_profile.reference_connection_id:
             for connection in active_connections:
-                if str(connection.id) == str(logical_database.schema_profile.reference_connection_id):
+                if str(connection.id) == str(database_group.schema_profile.reference_connection_id):
                     return connection
         return sorted(active_connections, key=lambda item: item.name)[0]

@@ -1,5 +1,5 @@
 """
-API маршруты для управления логическими базами данных
+API маршруты для управления группами баз данных
 """
 from typing import Any, Dict
 
@@ -7,36 +7,36 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import inspect
 
 from backend import initialize
-from backend.api.schemas.logical_database_schemas import (
-    LogicalDatabaseBundlesGenerateResponse,
-    LogicalDatabaseConnectionSummary,
-    LogicalDatabaseCreateRequest,
-    LogicalDatabaseDetailResponse,
-    LogicalDatabaseListResponse,
-    LogicalDatabaseProfileAssignRequest,
-    LogicalDatabaseReferenceUpdateRequest,
-    LogicalDatabaseResponse,
-    LogicalDatabaseUpdateRequest,
-    LogicalDatabaseValidationResponse,
+from backend.api.schemas.database_group_schemas import (
+    DatabaseGroupBundlesGenerateResponse,
+    DatabaseGroupConnectionSummary,
+    DatabaseGroupCreateRequest,
+    DatabaseGroupDetailResponse,
+    DatabaseGroupListResponse,
+    DatabaseGroupProfileAssignRequest,
+    DatabaseGroupReferenceUpdateRequest,
+    DatabaseGroupResponse,
+    DatabaseGroupUpdateRequest,
+    DatabaseGroupValidationResponse,
 )
 from backend.api.schemas.profile_schemas import (
     ProfileBundleGenerateRequest,
     ScenarioBundleSummaryResponse,
 )
-from backend.database.repository.logical_database_repository import LogicalDatabaseRepository
-from backend.database.logical_database_validator import LogicalDatabaseValidator
+from backend.database.repository.database_group_repository import DatabaseGroupRepository
+from backend.database.database_group_validator import DatabaseGroupValidator
 from backend.database.scenario_bundle_resolver import ScenarioBundleResolver
 from backend.database.scenario_bundle_validator import ScenarioBundleValidator
 from backend.database.scenario_generator import DEFAULT_SCENARIO_TYPES, ScenarioGenerator
 
-router = APIRouter(prefix="/api/logical-databases", tags=["logical-databases"])
+router = APIRouter(prefix="/api/database-groups", tags=["database-groups"])
 
 
-def get_logical_db_repo() -> LogicalDatabaseRepository:
-    """Получить LogicalDatabaseRepository (lazy инициализация)."""
-    if not hasattr(initialize, 'logical_database_repository') or initialize.logical_database_repository is None:
-        raise HTTPException(status_code=500, detail="LogicalDatabaseRepository не инициализирован")
-    return initialize.logical_database_repository
+def get_database_group_repo() -> DatabaseGroupRepository:
+    """Получить DatabaseGroupRepository (lazy инициализация)."""
+    if not hasattr(initialize, 'database_group_repository') or initialize.database_group_repository is None:
+        raise HTTPException(status_code=500, detail="DatabaseGroupRepository не инициализирован")
+    return initialize.database_group_repository
 
 
 def get_profile_repo():
@@ -68,7 +68,7 @@ def _serialize_connections(db, connections=None):
         state = inspect(db)
         conn_list = [] if 'connections' in state.unloaded else (db.connections or [])
     return [
-        LogicalDatabaseConnectionSummary(
+        DatabaseGroupConnectionSummary(
             id=str(connection.id),
             name=connection.name,
             dbms_type=connection.dbms_type,
@@ -88,9 +88,9 @@ def _serialize_connections(db, connections=None):
     ]
 
 
-def _to_response(db, connections=None) -> LogicalDatabaseResponse:
-    """Конвертировать logical database в базовый ответ."""
-    return LogicalDatabaseResponse(
+def _to_response(db, connections=None) -> DatabaseGroupResponse:
+    """Конвертировать database group в базовый ответ."""
+    return DatabaseGroupResponse(
         id=str(db.id),
         name=db.name,
         description=db.description,
@@ -110,10 +110,10 @@ def _to_response(db, connections=None) -> LogicalDatabaseResponse:
     )
 
 
-def _to_detail_response(db, bundles=None, connections=None) -> LogicalDatabaseDetailResponse:
-    """Конвертировать logical database в детальный ответ."""
+def _to_detail_response(db, bundles=None, connections=None) -> DatabaseGroupDetailResponse:
+    """Конвертировать database group в детальный ответ."""
     base = _to_response(db, connections=connections)
-    return LogicalDatabaseDetailResponse(
+    return DatabaseGroupDetailResponse(
         **base.model_dump(),
         bundles=[
             ScenarioBundleSummaryResponse(**bundle.to_dict())
@@ -122,33 +122,33 @@ def _to_detail_response(db, bundles=None, connections=None) -> LogicalDatabaseDe
     )
 
 
-@router.get("/", response_model=LogicalDatabaseListResponse)
-async def list_logical_databases(
-    repo: LogicalDatabaseRepository = Depends(get_logical_db_repo),
+@router.get("/", response_model=DatabaseGroupListResponse)
+async def list_database_groups(
+    repo: DatabaseGroupRepository = Depends(get_database_group_repo),
 ):
-    """Получить список всех logical database с active-подключениями."""
+    """Получить список всех database group с active-подключениями."""
     try:
         databases = await repo.get_all_with_connections()
-        return LogicalDatabaseListResponse(
-            databases=[_to_response(db) for db in databases]
+        return DatabaseGroupListResponse(
+            groups=[_to_response(db) for db in databases]
         )
     except Exception as e:
-        print(f"[LOGICAL_DB] Ошибка получения списка логических БД: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка получения списка логических БД: {e}")
+        print(f"[DATABASE_GROUP] Ошибка получения списка групп баз данных: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка получения списка групп баз данных: {e}")
 
 
-@router.post("/", response_model=LogicalDatabaseResponse, status_code=201)
-async def create_logical_database(
-    data: LogicalDatabaseCreateRequest,
-    repo: LogicalDatabaseRepository = Depends(get_logical_db_repo),
+@router.post("/", response_model=DatabaseGroupResponse, status_code=201)
+async def create_database_group(
+    data: DatabaseGroupCreateRequest,
+    repo: DatabaseGroupRepository = Depends(get_database_group_repo),
 ):
-    """Создать новую logical database."""
+    """Создать новую database group."""
     try:
         existing = await repo.get_by_name(data.name)
         if existing:
             raise HTTPException(
                 status_code=400,
-                detail=f"Логическая БД с именем '{data.name}' уже существует",
+                detail=f"Группа баз данных с именем '{data.name}' уже существует",
             )
         db = await repo.create(
             name=data.name,
@@ -159,20 +159,20 @@ async def create_logical_database(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[LOGICAL_DB] Ошибка создания логической БД: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка создания логической БД: {e}")
+        print(f"[DATABASE_GROUP] Ошибка создания группы баз данных: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка создания группы баз данных: {e}")
 
 
-@router.get("/{logical_db_id}", response_model=LogicalDatabaseDetailResponse)
-async def get_logical_database(
-    logical_db_id: str,
-    repo: LogicalDatabaseRepository = Depends(get_logical_db_repo),
+@router.get("/{database_group_id}", response_model=DatabaseGroupDetailResponse)
+async def get_database_group(
+    database_group_id: str,
+    repo: DatabaseGroupRepository = Depends(get_database_group_repo),
 ):
-    """Получить logical database по ID вместе с её bundle'ами."""
+    """Получить database group по ID вместе с её bundle'ами."""
     try:
-        db = await repo.get_by_id(logical_db_id)
+        db = await repo.get_by_id(database_group_id)
         if not db:
-            raise HTTPException(status_code=404, detail="Логическая БД не найдена")
+            raise HTTPException(status_code=404, detail="Группа баз данных не найдена")
         bundles = []
         if db.schema_profile_id:
             bundles = await get_bundle_repo().list_bundles(schema_profile_id=str(db.schema_profile_id))
@@ -180,37 +180,37 @@ async def get_logical_database(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[LOGICAL_DB] Ошибка получения логической БД: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка получения логической БД: {e}")
+        print(f"[DATABASE_GROUP] Ошибка получения группы баз данных: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка получения группы баз данных: {e}")
 
 
-@router.put("/{logical_db_id}", response_model=LogicalDatabaseResponse)
-async def update_logical_database(
-    logical_db_id: str,
-    data: LogicalDatabaseUpdateRequest,
-    repo: LogicalDatabaseRepository = Depends(get_logical_db_repo),
+@router.put("/{database_group_id}", response_model=DatabaseGroupResponse)
+async def update_database_group(
+    database_group_id: str,
+    data: DatabaseGroupUpdateRequest,
+    repo: DatabaseGroupRepository = Depends(get_database_group_repo),
 ):
-    """Обновить logical database."""
+    """Обновить database group."""
     try:
         if data.name is not None:
             existing = await repo.get_by_name(data.name)
-            if existing and str(existing.id) != logical_db_id:
+            if existing and str(existing.id) != database_group_id:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Логическая БД с именем '{data.name}' уже существует",
+                    detail=f"Группа баз данных с именем '{data.name}' уже существует",
                 )
         db = await repo.update(
-            logical_db_id=logical_db_id,
+            database_group_id=database_group_id,
             name=data.name,
             description=data.description,
             schema_profile_id=data.schema_profile_id,
         )
         if not db:
-            raise HTTPException(status_code=404, detail="Логическая БД не найдена")
+            raise HTTPException(status_code=404, detail="Группа баз данных не найдена")
         if data.schema_profile_id is not None:
             profile = await get_profile_repo().get_profile_by_id(data.schema_profile_id) if data.schema_profile_id else None
             db = await repo.assign_profile(
-                logical_db_id=logical_db_id,
+                database_group_id=database_group_id,
                 schema_profile_id=data.schema_profile_id,
                 schema_profile_name=profile.name if profile else None,
                 profile_source='inherited',
@@ -219,21 +219,21 @@ async def update_logical_database(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[LOGICAL_DB] Ошибка обновления логической БД: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка обновления логической БД: {e}")
+        print(f"[DATABASE_GROUP] Ошибка обновления группы баз данных: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка обновления группы баз данных: {e}")
 
 
-@router.put("/{logical_db_id}/profile", response_model=LogicalDatabaseDetailResponse)
-async def assign_logical_database_profile(
-    logical_db_id: str,
-    data: LogicalDatabaseProfileAssignRequest,
-    repo: LogicalDatabaseRepository = Depends(get_logical_db_repo),
+@router.put("/{database_group_id}/profile", response_model=DatabaseGroupDetailResponse)
+async def assign_database_group_profile(
+    database_group_id: str,
+    data: DatabaseGroupProfileAssignRequest,
+    repo: DatabaseGroupRepository = Depends(get_database_group_repo),
 ):
-    """Назначить schema_profile logical database и синхронизировать её подключения."""
+    """Назначить schema_profile database group и синхронизировать её подключения."""
     try:
-        db = await repo.get_by_id(logical_db_id)
+        db = await repo.get_by_id(database_group_id)
         if not db:
-            raise HTTPException(status_code=404, detail="Логическая БД не найдена")
+            raise HTTPException(status_code=404, detail="Группа баз данных не найдена")
 
         profile_repo = get_profile_repo()
         bundle_repo = get_bundle_repo()
@@ -279,9 +279,9 @@ async def assign_logical_database_profile(
             if target_reference_connection_id not in active_ids:
                 raise HTTPException(
                     status_code=400,
-                    detail="reference_connection_id должен принадлежать выбранной logical database",
+                    detail="reference_connection_id должен принадлежать выбранной database group",
                 )
-            validator = LogicalDatabaseValidator(get_connection_repo())
+            validator = DatabaseGroupValidator(get_connection_repo())
             compatibility = await validator.validate_connections(
                 [str(connection.id) for connection in active_connections],
                 reference_connection_id=target_reference_connection_id,
@@ -289,7 +289,7 @@ async def assign_logical_database_profile(
             )
             if not compatibility.get("valid"):
                 await repo.update_profile_state(
-                    logical_db_id=logical_db_id,
+                    database_group_id=database_group_id,
                     profile_status="incompatible",
                     compatibility_status="invalid",
                     compatibility_report=compatibility,
@@ -298,7 +298,7 @@ async def assign_logical_database_profile(
                 raise HTTPException(
                     status_code=400,
                     detail=(
-                        "Подключения logical database несовместимы: "
+                        "Подключения database group несовместимы: "
                         + "; ".join(compatibility.get("errors", []))
                     ),
                 )
@@ -306,7 +306,7 @@ async def assign_logical_database_profile(
             compatibility = None
 
         updated = await repo.assign_profile(
-            logical_db_id=logical_db_id,
+            database_group_id=database_group_id,
             schema_profile_id=str(profile.id),
             schema_profile_name=profile.name,
             profile_source='inherited',
@@ -320,47 +320,47 @@ async def assign_logical_database_profile(
             compatibility_report=compatibility,
         )
         if not updated:
-            raise HTTPException(status_code=404, detail="Логическая БД не найдена")
+            raise HTTPException(status_code=404, detail="Группа баз данных не найдена")
 
         bundles = await bundle_repo.list_bundles(schema_profile_id=str(profile.id))
         return _to_detail_response(updated, bundles=bundles)
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[LOGICAL_DB] Ошибка назначения профиля logical database: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка назначения профиля logical database: {e}")
+        print(f"[DATABASE_GROUP] Ошибка назначения профиля database group: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка назначения профиля database group: {e}")
 
 
-@router.post("/{logical_db_id}/bundles/generate", response_model=LogicalDatabaseBundlesGenerateResponse)
-async def generate_logical_database_bundles(
-    logical_db_id: str,
+@router.post("/{database_group_id}/bundles/generate", response_model=DatabaseGroupBundlesGenerateResponse)
+async def generate_database_group_bundles(
+    database_group_id: str,
     data: ProfileBundleGenerateRequest,
-    repo: LogicalDatabaseRepository = Depends(get_logical_db_repo),
+    repo: DatabaseGroupRepository = Depends(get_database_group_repo),
 ):
-    """Сгенерировать bundle'ы для logical database через её schema_profile."""
+    """Сгенерировать bundle'ы для database group через её schema_profile."""
     try:
-        db = await repo.get_by_id(logical_db_id)
+        db = await repo.get_by_id(database_group_id)
         if not db:
-            raise HTTPException(status_code=404, detail="Логическая БД не найдена")
+            raise HTTPException(status_code=404, detail="Группа баз данных не найдена")
         if not db.schema_profile_id:
-            raise HTTPException(status_code=400, detail="Для logical database сначала назначьте schema_profile")
+            raise HTTPException(status_code=400, detail="Для database group сначала назначьте schema_profile")
         if db.profile_status in {"draft", "needs_review", "incompatible"}:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "Перед генерацией bundle'ов подтвердите профиль logical database "
+                    "Перед генерацией bundle'ов подтвердите профиль database group "
                     f"(profile_status={db.profile_status})"
                 ),
             )
         if db.compatibility_status == "invalid":
             raise HTTPException(
                 status_code=400,
-                detail="Перед генерацией bundle'ов исправьте несовместимость logical database",
+                detail="Перед генерацией bundle'ов исправьте несовместимость database group",
             )
 
         active_connections = [connection for connection in db.connections if connection.is_active == 't']
         if not active_connections:
-            raise HTTPException(status_code=400, detail="Для logical database нет активных подключений")
+            raise HTTPException(status_code=400, detail="Для database group нет активных подключений")
         pending_review_connections = [
             connection.name
             for connection in active_connections
@@ -387,10 +387,10 @@ async def generate_logical_database_bundles(
         if reference_connection_id not in reference_connection_ids:
             raise HTTPException(
                 status_code=400,
-                detail="reference_connection_id должен принадлежать выбранной logical database",
+                detail="reference_connection_id должен принадлежать выбранной database group",
             )
 
-        validator = LogicalDatabaseValidator(get_connection_repo())
+        validator = DatabaseGroupValidator(get_connection_repo())
         compatibility = await validator.validate_connections(
             [str(connection.id) for connection in active_connections],
             reference_connection_id=reference_connection_id,
@@ -398,7 +398,7 @@ async def generate_logical_database_bundles(
         )
         if not compatibility.get("valid"):
             await repo.update_profile_state(
-                logical_db_id=logical_db_id,
+                database_group_id=database_group_id,
                 profile_status="incompatible",
                 compatibility_status="invalid",
                 compatibility_report=compatibility,
@@ -407,13 +407,13 @@ async def generate_logical_database_bundles(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "Подключения logical database несовместимы: "
+                    "Подключения database group несовместимы: "
                     + "; ".join(compatibility.get("errors", []))
                 ),
             )
 
         await repo.update_profile_state(
-            logical_db_id=logical_db_id,
+            database_group_id=database_group_id,
             profile_status="confirmed",
             compatibility_status="valid_with_warnings" if compatibility.get("warnings") else "valid",
             compatibility_report=compatibility,
@@ -424,42 +424,42 @@ async def generate_logical_database_bundles(
             connection_repo=get_connection_repo(),
             bundle_repository=get_bundle_repo(),
         )
-        bundles = await generator.generate_bundles_for_logical_database(
-            logical_database_id=logical_db_id,
+        bundles = await generator.generate_bundles_for_database_group(
+            database_group_id=database_group_id,
             scenario_types=data.scenario_template_ids,
         )
 
-        detail_db = await repo.get_by_id(logical_db_id)
+        detail_db = await repo.get_by_id(database_group_id)
         detail_bundles = await get_bundle_repo().list_bundles(schema_profile_id=str(db.schema_profile_id))
-        return LogicalDatabaseBundlesGenerateResponse(
-            logical_database=_to_detail_response(detail_db, bundles=detail_bundles),
+        return DatabaseGroupBundlesGenerateResponse(
+            database_group=_to_detail_response(detail_db, bundles=detail_bundles),
             generated_count=len(bundles),
         )
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[LOGICAL_DB] Ошибка генерации bundle'ов logical database: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка генерации bundle'ов logical database: {e}")
+        print(f"[DATABASE_GROUP] Ошибка генерации bundle'ов database group: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка генерации bundle'ов database group: {e}")
 
 
-@router.get("/{logical_db_id}/validate", response_model=LogicalDatabaseValidationResponse)
-async def validate_logical_database(
-    logical_db_id: str,
+@router.get("/{database_group_id}/validate", response_model=DatabaseGroupValidationResponse)
+async def validate_database_group(
+    database_group_id: str,
     reference_connection_id: str | None = Query(default=None),
     mode: str = Query(default="lenient", pattern="^(lenient|strict)$"),
-    repo: LogicalDatabaseRepository = Depends(get_logical_db_repo),
+    repo: DatabaseGroupRepository = Depends(get_database_group_repo),
 ) -> Dict[str, Any]:
-    """Проверить совместимость active-подключений logical database."""
+    """Проверить совместимость active-подключений database group."""
     try:
-        db = await repo.get_by_id(logical_db_id)
+        db = await repo.get_by_id(database_group_id)
         if not db:
-            raise HTTPException(status_code=404, detail="Логическая БД не найдена")
+            raise HTTPException(status_code=404, detail="Группа баз данных не найдена")
 
         active_connections = [connection for connection in db.connections if connection.is_active == 't']
         if not active_connections:
-            raise HTTPException(status_code=400, detail="Для logical database нет активных подключений")
+            raise HTTPException(status_code=400, detail="Для database group нет активных подключений")
 
-        validator = LogicalDatabaseValidator(get_connection_repo())
+        validator = DatabaseGroupValidator(get_connection_repo())
         effective_reference_connection_id = (
             reference_connection_id
             or (str(db.reference_connection_id) if getattr(db, "reference_connection_id", None) else None)
@@ -511,7 +511,7 @@ async def validate_logical_database(
             profile_status = "needs_review"
 
         await repo.update_profile_state(
-            logical_db_id=logical_db_id,
+            database_group_id=database_group_id,
             profile_status=profile_status,
             compatibility_status=(
                 "invalid"
@@ -525,21 +525,21 @@ async def validate_logical_database(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[LOGICAL_DB] Ошибка проверки logical database: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка проверки logical database: {e}")
+        print(f"[DATABASE_GROUP] Ошибка проверки database group: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка проверки database group: {e}")
 
 
-@router.put("/{logical_db_id}/reference-connection", response_model=LogicalDatabaseResponse)
-async def update_logical_database_reference(
-    logical_db_id: str,
-    data: LogicalDatabaseReferenceUpdateRequest,
-    repo: LogicalDatabaseRepository = Depends(get_logical_db_repo),
+@router.put("/{database_group_id}/reference-connection", response_model=DatabaseGroupResponse)
+async def update_database_group_reference(
+    database_group_id: str,
+    data: DatabaseGroupReferenceUpdateRequest,
+    repo: DatabaseGroupRepository = Depends(get_database_group_repo),
 ):
-    """Назначить эталонное подключение logical database."""
+    """Назначить эталонное подключение database group."""
     try:
-        db = await repo.get_by_id(logical_db_id)
+        db = await repo.get_by_id(database_group_id)
         if not db:
-            raise HTTPException(status_code=404, detail="Логическая БД не найдена")
+            raise HTTPException(status_code=404, detail="Группа баз данных не найдена")
         active_ids = {
             str(connection.id)
             for connection in (db.connections or [])
@@ -548,10 +548,10 @@ async def update_logical_database_reference(
         if data.reference_connection_id not in active_ids:
             raise HTTPException(
                 status_code=400,
-                detail="reference_connection_id должен принадлежать выбранной logical database",
+                detail="reference_connection_id должен принадлежать выбранной database group",
             )
         updated = await repo.update_profile_state(
-            logical_db_id=logical_db_id,
+            database_group_id=database_group_id,
             reference_connection_id=data.reference_connection_id,
             compatibility_status="unknown",
         )
@@ -559,25 +559,25 @@ async def update_logical_database_reference(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[LOGICAL_DB] Ошибка назначения reference connection: {e}")
+        print(f"[DATABASE_GROUP] Ошибка назначения reference connection: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка назначения reference connection: {e}")
 
 
-@router.post("/{logical_db_id}/connections/{connection_id}/confirm-profile", response_model=LogicalDatabaseDetailResponse)
-async def confirm_logical_database_connection_profile(
-    logical_db_id: str,
+@router.post("/{database_group_id}/connections/{connection_id}/confirm-profile", response_model=DatabaseGroupDetailResponse)
+async def confirm_database_group_connection_profile(
+    database_group_id: str,
     connection_id: str,
-    repo: LogicalDatabaseRepository = Depends(get_logical_db_repo),
+    repo: DatabaseGroupRepository = Depends(get_database_group_repo),
 ):
     """Подтвердить подключение через strict compatibility и синхронизировать профиль logical DB."""
     try:
-        db = await repo.get_by_id(logical_db_id)
+        db = await repo.get_by_id(database_group_id)
         if not db:
-            raise HTTPException(status_code=404, detail="Логическая БД не найдена")
+            raise HTTPException(status_code=404, detail="Группа баз данных не найдена")
         if not db.schema_profile_id:
-            raise HTTPException(status_code=400, detail="Для logical database сначала назначьте schema_profile")
+            raise HTTPException(status_code=400, detail="Для database group сначала назначьте schema_profile")
         if connection_id not in {str(connection.id) for connection in (db.connections or [])}:
-            raise HTTPException(status_code=400, detail="Подключение не принадлежит logical database")
+            raise HTTPException(status_code=400, detail="Подключение не принадлежит database group")
 
         active_connections = [connection for connection in db.connections if connection.is_active == 't']
         reference_connection_id = (
@@ -585,7 +585,7 @@ async def confirm_logical_database_connection_profile(
             if getattr(db, "reference_connection_id", None)
             else connection_id
         )
-        validator = LogicalDatabaseValidator(get_connection_repo())
+        validator = DatabaseGroupValidator(get_connection_repo())
         compatibility = await validator.validate_connections(
             [str(connection.id) for connection in active_connections],
             reference_connection_id=reference_connection_id,
@@ -593,7 +593,7 @@ async def confirm_logical_database_connection_profile(
         )
         if not compatibility.get("valid"):
             await repo.update_profile_state(
-                logical_db_id=logical_db_id,
+                database_group_id=database_group_id,
                 profile_status="incompatible",
                 compatibility_status="invalid",
                 compatibility_report=compatibility,
@@ -602,13 +602,13 @@ async def confirm_logical_database_connection_profile(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "Подключения logical database несовместимы: "
+                    "Подключения database group несовместимы: "
                     + "; ".join(compatibility.get("errors", []))
                 ),
             )
 
         updated = await repo.assign_profile(
-            logical_db_id=logical_db_id,
+            database_group_id=database_group_id,
             schema_profile_id=str(db.schema_profile_id),
             schema_profile_name=db.schema_profile.name if db.schema_profile else None,
             profile_source="inherited",
@@ -622,23 +622,23 @@ async def confirm_logical_database_connection_profile(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[LOGICAL_DB] Ошибка подтверждения подключения logical database: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка подтверждения подключения logical database: {e}")
+        print(f"[DATABASE_GROUP] Ошибка подтверждения подключения database group: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка подтверждения подключения database group: {e}")
 
 
-@router.delete("/{logical_db_id}")
-async def delete_logical_database(
-    logical_db_id: str,
-    repo: LogicalDatabaseRepository = Depends(get_logical_db_repo),
+@router.delete("/{database_group_id}")
+async def delete_database_group(
+    database_group_id: str,
+    repo: DatabaseGroupRepository = Depends(get_database_group_repo),
 ):
-    """Удалить logical database (подключения сохраняются, но теряют привязку)."""
+    """Удалить database group (подключения сохраняются, но теряют привязку)."""
     try:
-        deleted = await repo.delete(logical_db_id)
+        deleted = await repo.delete(database_group_id)
         if not deleted:
-            raise HTTPException(status_code=404, detail="Логическая БД не найдена")
-        return {"message": "Логическая БД удалена"}
+            raise HTTPException(status_code=404, detail="Группа баз данных не найдена")
+        return {"message": "Группа баз данных удалена"}
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[LOGICAL_DB] Ошибка удаления логической БД: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка удаления логической БД: {e}")
+        print(f"[DATABASE_GROUP] Ошибка удаления группы баз данных: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка удаления группы баз данных: {e}")

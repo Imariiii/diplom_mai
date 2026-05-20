@@ -1,5 +1,5 @@
 """
-Тесты API logical database для reference connection и compatibility state.
+Тесты API database group для reference connection и compatibility state.
 """
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -8,7 +8,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from backend.main import app
-from backend.api.routes.logical_database_routes import get_connection_repo, get_logical_db_repo
+from backend.api.routes.database_group_routes import get_connection_repo, get_database_group_repo
 
 
 @pytest.fixture
@@ -63,7 +63,7 @@ def _logical_db_with_status(profile_status="confirmed", compatibility_status="va
     return db
 
 
-class TestLogicalDatabaseRoutes:
+class TestDatabaseGroupRoutes:
     @pytest.mark.asyncio
     async def test_validate_uses_reference_and_updates_compatibility_state(self, client):
         repo = AsyncMock()
@@ -84,16 +84,16 @@ class TestLogicalDatabaseRoutes:
                 "connections": [{"id": "conn-1", "name": "PostgreSQL", "dbms_type": "postgresql"}],
             }
 
-        app.dependency_overrides[get_logical_db_repo] = lambda: repo
+        app.dependency_overrides[get_database_group_repo] = lambda: repo
         app.dependency_overrides[get_connection_repo] = lambda: AsyncMock()
         with (
             patch(
-                "backend.api.routes.logical_database_routes.LogicalDatabaseValidator.validate_connections",
+                "backend.api.routes.database_group_routes.DatabaseGroupValidator.validate_connections",
                 fake_validate,
             ),
         ):
             response = await client.get(
-                "/api/logical-databases/logical-1/validate?reference_connection_id=conn-1&mode=strict"
+                "/api/database-groups/logical-1/validate?reference_connection_id=conn-1&mode=strict"
             )
 
         assert response.status_code == 200
@@ -102,13 +102,13 @@ class TestLogicalDatabaseRoutes:
         assert repo.update_profile_state.await_args.kwargs["compatibility_status"] == "valid"
 
     @pytest.mark.asyncio
-    async def test_reference_connection_must_belong_to_logical_database(self, client):
+    async def test_reference_connection_must_belong_to_database_group(self, client):
         repo = AsyncMock()
         repo.get_by_id = AsyncMock(return_value=_logical_db(connections=[_connection("conn-1")]))
 
-        app.dependency_overrides[get_logical_db_repo] = lambda: repo
+        app.dependency_overrides[get_database_group_repo] = lambda: repo
         response = await client.put(
-            "/api/logical-databases/logical-1/reference-connection",
+            "/api/database-groups/logical-1/reference-connection",
             json={"reference_connection_id": "external"},
         )
 
@@ -120,9 +120,9 @@ class TestLogicalDatabaseRoutes:
         repo = AsyncMock()
         repo.get_by_id = AsyncMock(return_value=_logical_db_with_status(profile_status="needs_review"))
 
-        app.dependency_overrides[get_logical_db_repo] = lambda: repo
+        app.dependency_overrides[get_database_group_repo] = lambda: repo
         response = await client.post(
-            "/api/logical-databases/logical-1/bundles/generate",
+            "/api/database-groups/logical-1/bundles/generate",
             json={"scenario_template_ids": ["mixed_light"]},
         )
 

@@ -1,32 +1,32 @@
 """
-Автопровижининг logical database:
+Автопровижининг database group:
 первое подключение -> анализ -> auto profile -> auto bundle generation.
 """
 import re
 from typing import Any, Dict, List, Optional
 
 from backend.database.logical_scenarios import LOGICAL_SCENARIO_TEMPLATE_IDS
-from backend.database.logical_database_validator import LogicalDatabaseValidator
+from backend.database.database_group_validator import DatabaseGroupValidator
 from backend.database.repository.connection_repository import ConnectionRepository
-from backend.database.repository.logical_database_repository import LogicalDatabaseRepository
+from backend.database.repository.database_group_repository import DatabaseGroupRepository
 from backend.database.repository.profile_repository import ProfileRepository
 from backend.database.repository.scenario_bundle_repository import ScenarioBundleRepository
 from backend.database.schema_profile_resolver import SchemaProfileResolver
 from backend.database.scenario_generator import SCENARIO_GENERATOR_VERSION, ScenarioGenerator
 
 
-class LogicalDatabaseProvisioner:
-    """Обеспечивает автоматическое создание профиля и bundle'ов для logical database."""
+class DatabaseGroupProvisioner:
+    """Обеспечивает автоматическое создание профиля и bundle'ов для database group."""
 
     def __init__(
         self,
         connection_repository: ConnectionRepository,
-        logical_database_repository: LogicalDatabaseRepository,
+        database_group_repository: DatabaseGroupRepository,
         profile_repository: ProfileRepository,
         bundle_repository: ScenarioBundleRepository,
     ):
         self.connection_repository = connection_repository
-        self.logical_database_repository = logical_database_repository
+        self.database_group_repository = database_group_repository
         self.profile_repository = profile_repository
         self.bundle_repository = bundle_repository
         self.profile_resolver = SchemaProfileResolver(
@@ -37,26 +37,26 @@ class LogicalDatabaseProvisioner:
             connection_repo=connection_repository,
             bundle_repository=bundle_repository,
         )
-        self.validator = LogicalDatabaseValidator(connection_repository)
+        self.validator = DatabaseGroupValidator(connection_repository)
 
-    async def ensure_logical_database_ready(
+    async def ensure_database_group_ready(
         self,
-        logical_database_id: str,
+        database_group_id: str,
         reference_connection_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Автоматически подготовить logical database к запуску сценариев."""
-        logical_database = await self.logical_database_repository.get_by_id(logical_database_id)
-        if not logical_database:
-            raise ValueError("Логическая БД не найдена")
+        """Автоматически подготовить database group к запуску сценариев."""
+        database_group = await self.database_group_repository.get_by_id(database_group_id)
+        if not database_group:
+            raise ValueError("Группа баз данных не найдена")
 
         active_connections = [
             connection
-            for connection in (logical_database.connections or [])
+            for connection in (database_group.connections or [])
             if connection.is_active == 't'
         ]
         if not active_connections:
             return {
-                "logical_database": logical_database,
+                "database_group": database_group,
                 "profile": None,
                 "bundles": [],
                 "generated_count": 0,
@@ -65,15 +65,15 @@ class LogicalDatabaseProvisioner:
 
         profile = None
         profile_was_created = False
-        if logical_database.schema_profile_id:
+        if database_group.schema_profile_id:
             profile = await self.profile_repository.get_profile_by_id(
-                str(logical_database.schema_profile_id)
+                str(database_group.schema_profile_id)
             )
 
         reference_connection = self._pick_reference_connection(
             active_connections=active_connections,
             reference_connection_id=reference_connection_id,
-            logical_database=logical_database,
+            database_group=database_group,
             profile=profile,
         )
 
@@ -85,15 +85,15 @@ class LogicalDatabaseProvisioner:
                 mode="strict",
             )
             if not compatibility.get("valid"):
-                await self.logical_database_repository.update_profile_state(
-                    logical_db_id=str(logical_database.id),
+                await self.database_group_repository.update_profile_state(
+                    database_group_id=str(database_group.id),
                     profile_status="incompatible",
                     compatibility_status="invalid",
                     compatibility_report=compatibility,
                     reference_connection_id=str(reference_connection.id),
                 )
                 raise ValueError(
-                    "Подключения logical database несовместимы: "
+                    "Подключения database group несовместимы: "
                     + "; ".join(compatibility.get("errors", []))
                 )
         else:
@@ -115,11 +115,11 @@ class LogicalDatabaseProvisioner:
 
         if not profile:
             profile, profile_was_created = await self._resolve_or_create_profile(
-                logical_database=logical_database,
+                database_group=database_group,
                 reference_connection=reference_connection,
             )
-            logical_database = await self.logical_database_repository.assign_profile(
-                logical_db_id=str(logical_database.id),
+            database_group = await self.database_group_repository.assign_profile(
+                database_group_id=str(database_group.id),
                 schema_profile_id=str(profile.id),
                 schema_profile_name=profile.name,
                 profile_source='auto',
@@ -129,8 +129,8 @@ class LogicalDatabaseProvisioner:
                 compatibility_report=compatibility,
             )
         else:
-            logical_database = await self.logical_database_repository.assign_profile(
-                logical_db_id=str(logical_database.id),
+            database_group = await self.database_group_repository.assign_profile(
+                database_group_id=str(database_group.id),
                 schema_profile_id=str(profile.id),
                 schema_profile_name=profile.name,
                 profile_source='inherited',
@@ -153,14 +153,14 @@ class LogicalDatabaseProvisioner:
         )
         generated_bundles: List[Dict[str, Any]] = []
         if should_generate:
-            generated_bundles = await self.generator.generate_bundles_for_logical_database(
-                logical_database_id=str(logical_database.id),
+            generated_bundles = await self.generator.generate_bundles_for_database_group(
+                database_group_id=str(database_group.id),
                 scenario_types=None,
             )
 
-        logical_database = await self.logical_database_repository.get_by_id(str(logical_database.id))
+        database_group = await self.database_group_repository.get_by_id(str(database_group.id))
         return {
-            "logical_database": logical_database,
+            "database_group": database_group,
             "profile": profile,
             "bundles": generated_bundles,
             "generated_count": len(generated_bundles),
@@ -168,20 +168,20 @@ class LogicalDatabaseProvisioner:
             "compatibility": compatibility if len(active_connections) > 1 else None,
         }
 
-    async def _resolve_or_create_profile(self, logical_database, reference_connection):
+    async def _resolve_or_create_profile(self, database_group, reference_connection):
         """Создать logical-DB scoped профиль по анализу схемы reference connection."""
         preview = await self.profile_resolver.build_connection_profile_preview(str(reference_connection.id))
         suggestion = preview["suggested_profile"]
 
-        profile_name = self._build_profile_name_from_logical_db(
-            logical_database.name,
-            logical_database_id=str(logical_database.id),
+        profile_name = self._build_profile_name_from_database_group(
+            database_group.name,
+            database_group_id=str(database_group.id),
             detected_name=suggestion["name"],
         )
         if suggestion.get("confidence", 0) < 0.45:
-            profile_name = self._build_profile_name_from_logical_db(
-                logical_database.name,
-                logical_database_id=str(logical_database.id),
+            profile_name = self._build_profile_name_from_database_group(
+                database_group.name,
+                database_group_id=str(database_group.id),
             )
 
         existing_profile = await self.profile_repository.get_profile_by_name(profile_name)
@@ -191,7 +191,7 @@ class LogicalDatabaseProvisioner:
         profile = await self.profile_repository.create_profile(
             name=profile_name,
             description=self._build_profile_description(
-                logical_database_name=logical_database.name,
+                database_group_name=database_group.name,
                 suggested_description=suggestion.get("description"),
             ),
             reference_connection_id=str(reference_connection.id),
@@ -220,7 +220,7 @@ class LogicalDatabaseProvisioner:
         self,
         active_connections,
         reference_connection_id: Optional[str] = None,
-        logical_database=None,
+        database_group=None,
         profile=None,
     ):
         """Выбрать эталонное подключение для анализа и генерации bundle'ов."""
@@ -228,10 +228,10 @@ class LogicalDatabaseProvisioner:
             for connection in active_connections:
                 if str(connection.id) == reference_connection_id:
                     return connection
-            raise ValueError("reference_connection_id не принадлежит logical database")
-        if logical_database and logical_database.reference_connection_id:
+            raise ValueError("reference_connection_id не принадлежит database group")
+        if database_group and database_group.reference_connection_id:
             for connection in active_connections:
-                if str(connection.id) == str(logical_database.reference_connection_id):
+                if str(connection.id) == str(database_group.reference_connection_id):
                     return connection
         if profile and profile.reference_connection_id:
             for connection in active_connections:
@@ -239,21 +239,21 @@ class LogicalDatabaseProvisioner:
                     return connection
         return sorted(active_connections, key=lambda connection: connection.name)[0]
 
-    def _build_profile_name_from_logical_db(
+    def _build_profile_name_from_database_group(
         self,
-        logical_database_name: str,
-        logical_database_id: Optional[str] = None,
+        database_group_name: str,
+        database_group_id: Optional[str] = None,
         detected_name: Optional[str] = None,
     ) -> str:
-        """Построить machine-friendly имя профиля из названия logical database."""
-        base = detected_name or logical_database_name
+        """Построить machine-friendly имя профиля из названия database group."""
+        base = detected_name or database_group_name
         normalized = re.sub(r"[^a-z0-9]+", "_", base.lower()).strip("_")
         if not normalized:
             normalized = "custom_schema"
         if not normalized.endswith("_like"):
             normalized = f"{normalized}_like"
-        if logical_database_id:
-            suffix = logical_database_id.replace("-", "")[:8]
+        if database_group_id:
+            suffix = database_group_id.replace("-", "")[:8]
             normalized = f"{normalized}_{suffix}"
         return normalized[:100]
 
@@ -268,13 +268,13 @@ class LogicalDatabaseProvisioner:
 
     def _build_profile_description(
         self,
-        logical_database_name: str,
+        database_group_name: str,
         suggested_description: Optional[str],
     ) -> str:
         """Построить описание автоматически созданного профиля."""
         if suggested_description and "Автоопределение не смогло" not in suggested_description:
             return suggested_description
         return (
-            f"Автоматически созданный профиль модели данных для logical database "
-            f"'{logical_database_name}'."
+            f"Автоматически созданный профиль модели данных для database group "
+            f"'{database_group_name}'."
         )

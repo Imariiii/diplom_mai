@@ -1,5 +1,5 @@
 """
-LogicalDatabaseRepository — управление логическими базами данных
+DatabaseGroupRepository — управление группами баз данных
 """
 import uuid
 from datetime import datetime, timezone
@@ -8,21 +8,21 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
-from backend.database.models import LogicalDatabase, DatabaseConnectionConfig
+from backend.database.models import DatabaseGroup, DatabaseConnectionConfig
 from backend.database.repository.base import BaseRepository, get_local_now
 
 
-class LogicalDatabaseRepository(BaseRepository):
-    """Репозиторий для управления логическими базами данных"""
+class DatabaseGroupRepository(BaseRepository):
+    """Репозиторий для управления группами баз данных"""
 
     def _with_connections_query(self):
-        """Базовый запрос логической БД с eager-loaded подключениями."""
+        """Базовый запрос группы баз данных с eager-loaded подключениями."""
         return (
-            select(LogicalDatabase)
+            select(DatabaseGroup)
             .options(
-                joinedload(LogicalDatabase.schema_profile),
-                joinedload(LogicalDatabase.reference_connection),
-                joinedload(LogicalDatabase.connections).joinedload(
+                joinedload(DatabaseGroup.schema_profile),
+                joinedload(DatabaseGroup.reference_connection),
+                joinedload(DatabaseGroup.connections).joinedload(
                     DatabaseConnectionConfig.schema_profile
                 )
             )
@@ -43,20 +43,20 @@ class LogicalDatabaseRepository(BaseRepository):
         name: str,
         description: Optional[str] = None,
         schema_profile_id: Optional[str] = None,
-    ) -> LogicalDatabase:
+    ) -> DatabaseGroup:
         """
-        Создать новую логическую базу данных
+        Создать новую группу баз данных
 
         Args:
             name: Уникальное название
             description: Описание датасета / модели данных
 
         Returns:
-            Созданный объект LogicalDatabase
+            Созданный объект DatabaseGroup
         """
         created_id: Optional[str] = None
         async with self.SessionLocal() as session:
-            db = LogicalDatabase(
+            db = DatabaseGroup(
                 id=uuid.uuid4(),
                 name=name,
                 description=description,
@@ -69,56 +69,56 @@ class LogicalDatabaseRepository(BaseRepository):
 
         return await self.get_by_id(created_id)
 
-    async def get_by_id(self, logical_db_id: str) -> Optional[LogicalDatabase]:
-        """Получить логическую БД по ID"""
+    async def get_by_id(self, database_group_id: str) -> Optional[DatabaseGroup]:
+        """Получить группу баз данных по ID"""
         try:
-            db_uuid = uuid.UUID(logical_db_id)
+            db_uuid = uuid.UUID(database_group_id)
         except (ValueError, TypeError, AttributeError):
             return None
 
         async with self.SessionLocal() as session:
             result = await session.execute(
-                self._with_connections_query().where(LogicalDatabase.id == db_uuid)
+                self._with_connections_query().where(DatabaseGroup.id == db_uuid)
             )
             return result.unique().scalar_one_or_none()
 
-    async def get_by_name(self, name: str) -> Optional[LogicalDatabase]:
-        """Получить логическую БД по имени"""
+    async def get_by_name(self, name: str) -> Optional[DatabaseGroup]:
+        """Получить группу баз данных по имени"""
         async with self.SessionLocal() as session:
             result = await session.execute(
-                self._with_connections_query().where(LogicalDatabase.name == name)
+                self._with_connections_query().where(DatabaseGroup.name == name)
             )
             return result.unique().scalar_one_or_none()
 
-    async def get_all(self) -> List[LogicalDatabase]:
-        """Получить все логические базы данных"""
+    async def get_all(self) -> List[DatabaseGroup]:
+        """Получить все группы баз данных"""
         async with self.SessionLocal() as session:
             result = await session.execute(
-                self._with_connections_query().order_by(LogicalDatabase.name)
+                self._with_connections_query().order_by(DatabaseGroup.name)
             )
             return list(result.unique().scalars().all())
 
-    async def get_all_with_connections(self) -> List[LogicalDatabase]:
-        """Получить все логические БД вместе с подключениями"""
+    async def get_all_with_connections(self) -> List[DatabaseGroup]:
+        """Получить все группы баз данных вместе с подключениями"""
         async with self.SessionLocal() as session:
             result = await session.execute(
                 self._with_connections_query()
-                .order_by(LogicalDatabase.name)
+                .order_by(DatabaseGroup.name)
             )
             return list(result.unique().scalars().all())
 
     async def update(
         self,
-        logical_db_id: str,
+        database_group_id: str,
         name: Optional[str] = None,
         description: Optional[str] = None,
         schema_profile_id: Optional[str] = None,
-    ) -> Optional[LogicalDatabase]:
+    ) -> Optional[DatabaseGroup]:
         """
-        Обновить логическую базу данных
+        Обновить группу баз данных
 
         Args:
-            logical_db_id: ID логической БД
+            database_group_id: ID группы баз данных
             name: Новое название (None — не менять)
             description: Новое описание (None — не менять)
 
@@ -128,8 +128,8 @@ class LogicalDatabaseRepository(BaseRepository):
         updated_id: Optional[str] = None
         async with self.SessionLocal() as session:
             result = await session.execute(
-                select(LogicalDatabase).where(
-                    LogicalDatabase.id == uuid.UUID(logical_db_id)
+                select(DatabaseGroup).where(
+                    DatabaseGroup.id == uuid.UUID(database_group_id)
                 )
             )
             db = result.scalar_one_or_none()
@@ -150,13 +150,13 @@ class LogicalDatabaseRepository(BaseRepository):
 
         return await self.get_by_id(updated_id)
 
-    async def get_connections_by_logical_database(
+    async def get_connections_by_database_group(
         self,
-        logical_db_id: str,
+        database_group_id: str,
     ) -> List[DatabaseConnectionConfig]:
-        """Получить все подключения, привязанные к логической БД."""
+        """Получить все подключения, привязанные к группы баз данных."""
         try:
-            db_uuid = uuid.UUID(logical_db_id)
+            db_uuid = uuid.UUID(database_group_id)
         except (ValueError, TypeError, AttributeError):
             return []
 
@@ -165,18 +165,18 @@ class LogicalDatabaseRepository(BaseRepository):
                 select(DatabaseConnectionConfig)
                 .options(
                     joinedload(DatabaseConnectionConfig.schema_profile),
-                    joinedload(DatabaseConnectionConfig.logical_database).joinedload(
-                        LogicalDatabase.schema_profile
+                    joinedload(DatabaseConnectionConfig.database_group).joinedload(
+                        DatabaseGroup.schema_profile
                     ),
                 )
-                .where(DatabaseConnectionConfig.logical_database_id == db_uuid)
+                .where(DatabaseConnectionConfig.database_group_id == db_uuid)
                 .order_by(DatabaseConnectionConfig.name)
             )
             return list(result.scalars().all())
 
     async def assign_profile(
         self,
-        logical_db_id: str,
+        database_group_id: str,
         schema_profile_id: Optional[str],
         schema_profile_name: Optional[str] = None,
         profile_source: str = "inherited",
@@ -184,9 +184,9 @@ class LogicalDatabaseRepository(BaseRepository):
         profile_status: Optional[str] = None,
         compatibility_status: Optional[str] = None,
         compatibility_report: Optional[Dict[str, Any]] = None,
-    ) -> Optional[LogicalDatabase]:
-        """Назначить профиль логической БД и каскадно синхронизировать её подключения."""
-        logical_db_uuid = self._parse_uuid(logical_db_id)
+    ) -> Optional[DatabaseGroup]:
+        """Назначить профиль группы баз данных и каскадно синхронизировать её подключения."""
+        logical_db_uuid = self._parse_uuid(database_group_id)
         if logical_db_uuid is None:
             return None
 
@@ -195,7 +195,7 @@ class LogicalDatabaseRepository(BaseRepository):
 
         async with self.SessionLocal() as session:
             result = await session.execute(
-                self._with_connections_query().where(LogicalDatabase.id == logical_db_uuid)
+                self._with_connections_query().where(DatabaseGroup.id == logical_db_uuid)
             )
             db = result.unique().scalar_one_or_none()
             if not db:
@@ -227,21 +227,21 @@ class LogicalDatabaseRepository(BaseRepository):
 
     async def update_profile_state(
         self,
-        logical_db_id: str,
+        database_group_id: str,
         profile_status: Optional[str] = None,
         compatibility_status: Optional[str] = None,
         compatibility_report: Optional[Dict[str, Any]] = None,
         reference_connection_id: Optional[str] = None,
-    ) -> Optional[LogicalDatabase]:
-        """Обновить статус профиля/совместимости logical database без каскада на подключения."""
-        logical_db_uuid = self._parse_uuid(logical_db_id)
+    ) -> Optional[DatabaseGroup]:
+        """Обновить статус профиля/совместимости database group без каскада на подключения."""
+        logical_db_uuid = self._parse_uuid(database_group_id)
         if logical_db_uuid is None:
             return None
 
         updated_id: Optional[str] = None
         async with self.SessionLocal() as session:
             result = await session.execute(
-                select(LogicalDatabase).where(LogicalDatabase.id == logical_db_uuid)
+                select(DatabaseGroup).where(DatabaseGroup.id == logical_db_uuid)
             )
             db = result.scalar_one_or_none()
             if not db:
@@ -265,29 +265,29 @@ class LogicalDatabaseRepository(BaseRepository):
 
     async def set_reference_connection(
         self,
-        logical_db_id: str,
+        database_group_id: str,
         reference_connection_id: Optional[str],
-    ) -> Optional[LogicalDatabase]:
-        """Назначить эталонное подключение logical database."""
+    ) -> Optional[DatabaseGroup]:
+        """Назначить эталонное подключение database group."""
         return await self.update_profile_state(
-            logical_db_id=logical_db_id,
+            database_group_id=database_group_id,
             reference_connection_id=reference_connection_id or "",
         )
 
-    async def delete(self, logical_db_id: str) -> bool:
+    async def delete(self, database_group_id: str) -> bool:
         """
-        Удалить логическую базу данных (подключения получают logical_database_id = NULL)
+        Удалить группу баз данных (подключения получают database_group_id = NULL)
 
         Args:
-            logical_db_id: ID логической БД
+            database_group_id: ID группы баз данных
 
         Returns:
             True если удалено, False если не найдено
         """
         async with self.SessionLocal() as session:
             result = await session.execute(
-                select(LogicalDatabase).where(
-                    LogicalDatabase.id == uuid.UUID(logical_db_id)
+                select(DatabaseGroup).where(
+                    DatabaseGroup.id == uuid.UUID(database_group_id)
                 )
             )
             db = result.scalar_one_or_none()

@@ -17,7 +17,7 @@ from backend.comparison.service import ComparisonService
 def _make_test_data(
     test_id, name="Test", virtual_users=4, iterations=100,
     scenario="mixed_light", db_keys=None,
-    logical_database_id=None, scenario_template_id=None,
+    database_group_id=None, scenario_template_id=None,
     created_at=None, status="completed",
 ):
     db_keys = db_keys or ["conn_pg"]
@@ -51,7 +51,7 @@ def _make_test_data(
         "created_at": created_at or datetime.now(timezone.utc).isoformat(),
         "started_at": datetime.now(timezone.utc).isoformat(),
         "finished_at": datetime.now(timezone.utc).isoformat(),
-        "logical_database_id": logical_database_id,
+        "database_group_id": database_group_id,
     }
 
 
@@ -132,12 +132,12 @@ class TestFairComparisonWarnings:
     async def test_different_logical_db_rejected(self):
         id1, id2 = uuid.uuid4(), uuid.uuid4()
         td = {
-            str(id1): _make_test_data(id1, "A", logical_database_id="ldb1", db_keys=["c1"]),
-            str(id2): _make_test_data(id2, "B", logical_database_id="ldb2", db_keys=["c1"]),
+            str(id1): _make_test_data(id1, "A", database_group_id="ldb1", db_keys=["c1"]),
+            str(id2): _make_test_data(id2, "B", database_group_id="ldb2", db_keys=["c1"]),
         }
         svc = ComparisonService(repository=_mock_repo(td))
         request = ComparisonRequest(analysis_mode="series", test_ids=[id1, id2])
-        with pytest.raises(ValueError, match="одной логической"):
+        with pytest.raises(ValueError, match="одной группе баз"):
             await svc.analyze(request)
 
     @pytest.mark.asyncio

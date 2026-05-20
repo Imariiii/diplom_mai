@@ -159,7 +159,7 @@ class ComparisonTestInfo(BaseModel):
     finished_at: Optional[str] = None
     scenario_info: Optional[ScenarioInfo] = None
     connections: List[ConnectionInfo] = Field(default_factory=list)
-    logical_database_id: Optional[str] = None
+    database_group_id: Optional[str] = None
     use_indexes: Optional[bool] = None
 
 

@@ -19,7 +19,7 @@ from backend.websocket_manager import manager, TestStreamingCallback, TestStatus
 router = APIRouter(prefix="/test", tags=["test"])
 
 
-BLOCKING_LOGICAL_PROFILE_STATUSES = {"draft", "needs_review", "incompatible"}
+BLOCKING_DATABASE_GROUP_PROFILE_STATUSES = {"draft", "needs_review", "incompatible"}
 TERMINAL_TEST_STATUSES = {"completed", "failed", "cancelled"}
 ACTIVE_TEST_TTL = timedelta(hours=6)
 RUNTIME_ONLY_KEYS = {"_task", "_tester"}
@@ -108,13 +108,13 @@ def _public_test_info(test_info: Dict) -> Dict:
     return {k: v for k, v in test_info.items() if k not in RUNTIME_ONLY_KEYS}
 
 
-async def _validate_logical_database_run_request(request: AsyncTestRequest, scenario: str) -> None:
+async def _validate_database_group_run_request(request: AsyncTestRequest, scenario: str) -> None:
     """Серверная проверка logical DB state до постановки теста в фон."""
     if scenario == "custom" or not request.connection_ids:
         return
 
-    from backend.initialize import connection_repository, logical_database_repository
-    from backend.database.logical_database_validator import LogicalDatabaseValidator
+    from backend.initialize import connection_repository, database_group_repository
+    from backend.database.database_group_validator import DatabaseGroupValidator
 
     if not connection_repository:
         return
@@ -123,49 +123,49 @@ async def _validate_logical_database_run_request(request: AsyncTestRequest, scen
     if len(connections) != len(request.connection_ids):
         raise HTTPException(status_code=400, detail="Не удалось загрузить все выбранные подключения")
 
-    logical_database_ids = {
-        str(connection.logical_database_id)
+    database_group_ids = {
+        str(connection.database_group_id)
         for connection in connections
-        if connection.logical_database_id
+        if connection.database_group_id
     }
-    if not logical_database_ids:
+    if not database_group_ids:
         return
-    if len(logical_database_ids) != 1 or any(not connection.logical_database_id for connection in connections):
+    if len(database_group_ids) != 1 or any(not connection.database_group_id for connection in connections):
         raise HTTPException(
             status_code=400,
             detail=(
-                "Нельзя запускать scenario test сразу для нескольких logical database "
-                "или смешивать их с подключениями без logical database"
+                "Нельзя запускать scenario test сразу для нескольких database group "
+                "или смешивать их с подключениями без database group"
             ),
         )
 
-    logical_database_id = next(iter(logical_database_ids))
-    if request.logical_database_id and request.logical_database_id != logical_database_id:
+    database_group_id = next(iter(database_group_ids))
+    if request.database_group_id and request.database_group_id != database_group_id:
         raise HTTPException(
             status_code=400,
-            detail="logical_database_id запроса не соответствует выбранным подключениям",
+            detail="database_group_id запроса не соответствует выбранным подключениям",
         )
 
-    logical_database = connections[0].logical_database
-    if logical_database_repository:
-        logical_database = await logical_database_repository.get_by_id(logical_database_id)
-    if not logical_database:
-        raise HTTPException(status_code=400, detail="Логическая БД не найдена")
+    database_group = connections[0].database_group
+    if database_group_repository:
+        database_group = await database_group_repository.get_by_id(database_group_id)
+    if not database_group:
+        raise HTTPException(status_code=400, detail="Группа баз данных не найдена")
 
-    profile_status = getattr(logical_database, "profile_status", "confirmed")
-    compatibility_status = getattr(logical_database, "compatibility_status", "unknown")
-    if profile_status in BLOCKING_LOGICAL_PROFILE_STATUSES:
+    profile_status = getattr(database_group, "profile_status", "confirmed")
+    compatibility_status = getattr(database_group, "compatibility_status", "unknown")
+    if profile_status in BLOCKING_DATABASE_GROUP_PROFILE_STATUSES:
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Logical database '{logical_database.name}' требует проверки профиля "
+                f"Database group '{database_group.name}' требует проверки профиля "
                 f"(profile_status={profile_status})"
             ),
         )
     if compatibility_status == "invalid":
         raise HTTPException(
             status_code=400,
-            detail=f"Logical database '{logical_database.name}' помечена как несовместимая",
+            detail=f"Database group '{database_group.name}' помечена как несовместимая",
         )
 
     pending_review_connections = [
@@ -182,10 +182,10 @@ async def _validate_logical_database_run_request(request: AsyncTestRequest, scen
             ),
         )
 
-    validator = LogicalDatabaseValidator(connection_repository)
+    validator = DatabaseGroupValidator(connection_repository)
     reference_connection_id = (
-        str(logical_database.reference_connection_id)
-        if getattr(logical_database, "reference_connection_id", None)
+        str(database_group.reference_connection_id)
+        if getattr(database_group, "reference_connection_id", None)
         else None
     )
     compatibility = await validator.validate_connections(
@@ -193,9 +193,9 @@ async def _validate_logical_database_run_request(request: AsyncTestRequest, scen
         reference_connection_id=reference_connection_id,
         mode="strict",
     )
-    if logical_database_repository:
-        await logical_database_repository.update_profile_state(
-            logical_db_id=logical_database_id,
+    if database_group_repository:
+        await database_group_repository.update_profile_state(
+            database_group_id=database_group_id,
             profile_status="confirmed" if compatibility.get("valid") else "incompatible",
             compatibility_status=(
                 "invalid"
@@ -209,7 +209,7 @@ async def _validate_logical_database_run_request(request: AsyncTestRequest, scen
         raise HTTPException(
             status_code=400,
             detail=(
-                "Подключения logical database несовместимы: "
+                "Подключения database group несовместимы: "
                 + "; ".join(compatibility.get("errors", []))
             ),
         )
@@ -237,7 +237,7 @@ async def run_async_test(request: AsyncTestRequest):
                 detail="Невалидный SQL-запрос: " + "; ".join(validation_errors),
             )
 
-    await _validate_logical_database_run_request(request, scenario)
+    await _validate_database_group_run_request(request, scenario)
 
     from backend.initialize import HISTORY_ENABLED, test_repository
     
@@ -267,7 +267,7 @@ async def run_async_test(request: AsyncTestRequest):
                 config=request.model_dump(),
                 status='pending',
                 test_run_id=test_id,
-                logical_database_id=request.logical_database_id,
+                database_group_id=request.database_group_id,
             )
         except Exception as e:
             print(f"[HISTORY_DB] ❌ Ошибка создания записи в БД истории: {e}")
@@ -494,8 +494,8 @@ async def run_test_with_streaming(test_id: str, request: AsyncTestRequest):
                     + "; ".join(preflight.get("errors", []))
                     + ". Для PostgreSQL/Pagila убедитесь, что на PK настроены sequence "
                     "(см. ../pagila_new/rebuild.sh). Перегенерируйте common bundle: "
-                    "POST /api/logical-databases/{id}/bundles/generate. "
-                    "Проверка: GET /api/logical-databases/{id}/validate."
+                    "POST /api/database-groups/{id}/bundles/generate. "
+                    "Проверка: GET /api/database-groups/{id}/validate."
                 )
             if preflight.get("warnings"):
                 print(f"[TEST] Предупреждения preflight: {preflight['warnings']}")

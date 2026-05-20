@@ -24,15 +24,15 @@ import type {
   ProfileBundleGenerateRequest,
   ProfileBundleGenerateResponse,
   SchemaProfileSummary,
-  LogicalDatabaseListResponse,
-  LogicalDatabaseDetail,
-  LogicalDatabaseBundlesGenerateResponse,
-  LogicalDatabaseProfileAssignRequest,
-  LogicalDatabaseReferenceUpdateRequest,
-  LogicalDatabaseCompatibilityReport,
-  LogicalDatabaseWithConnections,
-  LogicalDatabaseCreateRequest,
-  LogicalDatabaseUpdateRequest,
+  DatabaseGroupListResponse,
+  DatabaseGroupDetail,
+  DatabaseGroupBundlesGenerateResponse,
+  DatabaseGroupProfileAssignRequest,
+  DatabaseGroupReferenceUpdateRequest,
+  DatabaseGroupCompatibilityReport,
+  DatabaseGroupWithConnections,
+  DatabaseGroupCreateRequest,
+  DatabaseGroupUpdateRequest,
 } from '@/lib/types'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
@@ -137,13 +137,13 @@ class ApiClient {
     limit?: number
     offset?: number
     status?: string
-    logical_database_id?: string
+    database_group_id?: string
   }): Promise<{ tests: any[]; total: number }> {
     const queryParams = new URLSearchParams()
     if (params?.limit) queryParams.set('limit', params.limit.toString())
     if (params?.offset) queryParams.set('offset', params.offset.toString())
     if (params?.status) queryParams.set('status', params.status)
-    if (params?.logical_database_id) queryParams.set('logical_database_id', params.logical_database_id)
+    if (params?.database_group_id) queryParams.set('database_group_id', params.database_group_id)
 
     const queryString = queryParams.toString()
     return this.request(`/history/tests${queryString ? `?${queryString}` : ''}`)
@@ -296,87 +296,87 @@ class ApiClient {
     })
   }
 
-  // ==================== Логические базы данных ====================
+  // ==================== Группы баз данных ====================
 
-  async getLogicalDatabases(): Promise<LogicalDatabaseListResponse> {
-    return this.request<LogicalDatabaseListResponse>('/api/logical-databases/')
+  async getDatabaseGroups(): Promise<DatabaseGroupListResponse> {
+    return this.request<DatabaseGroupListResponse>('/api/database-groups/')
   }
 
-  async getLogicalDatabaseDetail(id: string): Promise<LogicalDatabaseDetail> {
-    return this.request<LogicalDatabaseDetail>(`/api/logical-databases/${id}`)
+  async getDatabaseGroupDetail(id: string): Promise<DatabaseGroupDetail> {
+    return this.request<DatabaseGroupDetail>(`/api/database-groups/${id}`)
   }
 
-  async createLogicalDatabase(data: LogicalDatabaseCreateRequest): Promise<LogicalDatabaseWithConnections> {
-    return this.request<LogicalDatabaseWithConnections>('/api/logical-databases/', {
+  async createDatabaseGroup(data: DatabaseGroupCreateRequest): Promise<DatabaseGroupWithConnections> {
+    return this.request<DatabaseGroupWithConnections>('/api/database-groups/', {
       method: 'POST',
       body: JSON.stringify(data),
     })
   }
 
-  async updateLogicalDatabase(id: string, data: LogicalDatabaseUpdateRequest): Promise<LogicalDatabaseWithConnections> {
-    return this.request<LogicalDatabaseWithConnections>(`/api/logical-databases/${id}`, {
+  async updateDatabaseGroup(id: string, data: DatabaseGroupUpdateRequest): Promise<DatabaseGroupWithConnections> {
+    return this.request<DatabaseGroupWithConnections>(`/api/database-groups/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     })
   }
 
-  async deleteLogicalDatabase(id: string): Promise<{ message: string }> {
-    return this.request<{ message: string }>(`/api/logical-databases/${id}`, {
+  async deleteDatabaseGroup(id: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/api/database-groups/${id}`, {
       method: 'DELETE',
     })
   }
 
-  async assignLogicalDatabaseProfile(
+  async assignDatabaseGroupProfile(
     id: string,
-    data: LogicalDatabaseProfileAssignRequest
-  ): Promise<LogicalDatabaseDetail> {
-    return this.request<LogicalDatabaseDetail>(`/api/logical-databases/${id}/profile`, {
+    data: DatabaseGroupProfileAssignRequest
+  ): Promise<DatabaseGroupDetail> {
+    return this.request<DatabaseGroupDetail>(`/api/database-groups/${id}/profile`, {
       method: 'PUT',
       body: JSON.stringify(data),
     })
   }
 
-  async generateLogicalDatabaseBundles(
+  async generateDatabaseGroupBundles(
     id: string,
     data: ProfileBundleGenerateRequest
-  ): Promise<LogicalDatabaseBundlesGenerateResponse> {
-    return this.request<LogicalDatabaseBundlesGenerateResponse>(`/api/logical-databases/${id}/bundles/generate`, {
+  ): Promise<DatabaseGroupBundlesGenerateResponse> {
+    return this.request<DatabaseGroupBundlesGenerateResponse>(`/api/database-groups/${id}/bundles/generate`, {
       method: 'POST',
       body: JSON.stringify(data),
     })
   }
 
-  async validateLogicalDatabase(
+  async validateDatabaseGroup(
     id: string,
     params?: { reference_connection_id?: string; mode?: 'lenient' | 'strict' }
-  ): Promise<LogicalDatabaseCompatibilityReport> {
+  ): Promise<DatabaseGroupCompatibilityReport> {
     const queryParams = new URLSearchParams()
     if (params?.reference_connection_id) {
       queryParams.set('reference_connection_id', params.reference_connection_id)
     }
     if (params?.mode) queryParams.set('mode', params.mode)
     const qs = queryParams.toString()
-    return this.request<LogicalDatabaseCompatibilityReport>(
-      `/api/logical-databases/${id}/validate${qs ? `?${qs}` : ''}`
+    return this.request<DatabaseGroupCompatibilityReport>(
+      `/api/database-groups/${id}/validate${qs ? `?${qs}` : ''}`
     )
   }
 
-  async updateLogicalDatabaseReference(
+  async updateDatabaseGroupReference(
     id: string,
-    data: LogicalDatabaseReferenceUpdateRequest
-  ): Promise<LogicalDatabaseWithConnections> {
-    return this.request<LogicalDatabaseWithConnections>(`/api/logical-databases/${id}/reference-connection`, {
+    data: DatabaseGroupReferenceUpdateRequest
+  ): Promise<DatabaseGroupWithConnections> {
+    return this.request<DatabaseGroupWithConnections>(`/api/database-groups/${id}/reference-connection`, {
       method: 'PUT',
       body: JSON.stringify(data),
     })
   }
 
-  async confirmLogicalDatabaseConnectionProfile(
+  async confirmDatabaseGroupConnectionProfile(
     logicalDatabaseId: string,
     connectionId: string
-  ): Promise<LogicalDatabaseDetail> {
-    return this.request<LogicalDatabaseDetail>(
-      `/api/logical-databases/${logicalDatabaseId}/connections/${connectionId}/confirm-profile`,
+  ): Promise<DatabaseGroupDetail> {
+    return this.request<DatabaseGroupDetail>(
+      `/api/database-groups/${logicalDatabaseId}/connections/${connectionId}/confirm-profile`,
       { method: 'POST' },
     )
   }

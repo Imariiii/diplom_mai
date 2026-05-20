@@ -2,11 +2,11 @@
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Database } from "lucide-react"
-import type { LogicalDatabaseWithConnections } from "@/lib/types"
+import type { DatabaseGroupWithConnections } from "@/lib/types"
 import { useAppStore } from "@/lib/store"
 
-interface LogicalDbSelectorCardProps {
-  databases: LogicalDatabaseWithConnections[]
+interface DatabaseGroupSelectorCardProps {
+  databases: DatabaseGroupWithConnections[]
   selectedId: string | null
   onSelect: (id: string) => void
 }
@@ -17,7 +17,7 @@ function connectionCountLabel(count: number): string {
   return `${count} подключений`
 }
 
-export function LogicalDbSelectorCard({ databases, selectedId, onSelect }: LogicalDbSelectorCardProps) {
+export function DatabaseGroupSelectorCard({ databases, selectedId, onSelect }: DatabaseGroupSelectorCardProps) {
   const { setCurrentPage } = useAppStore()
 
   if (databases.length === 0) {
@@ -26,10 +26,10 @@ export function LogicalDbSelectorCard({ databases, selectedId, onSelect }: Logic
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Database className="h-5 w-5 text-primary" />
-            Выбор базы данных
+            Группа баз данных
           </CardTitle>
           <CardDescription>
-            Нет настроенных баз данных.{" "}
+            Нет настроенных групп баз данных.{" "}
             <button
               onClick={() => setCurrentPage("connections")}
               className="underline text-primary hover:opacity-80"
@@ -48,10 +48,10 @@ export function LogicalDbSelectorCard({ databases, selectedId, onSelect }: Logic
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Database className="h-5 w-5 text-primary" />
-          Выбор базы данных
+          Группа баз данных
         </CardTitle>
         <CardDescription>
-          Выберите базу данных для нагрузочного тестирования
+          Выберите группу совместимых баз данных для нагрузочного тестирования
         </CardDescription>
       </CardHeader>
       <CardContent>

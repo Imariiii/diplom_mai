@@ -1,7 +1,7 @@
 """
-Тесты валидаторов logical database и scenario bundle.
+Тесты валидаторов database group и scenario bundle.
 """
-from backend.database.logical_database_validator import LogicalDatabaseValidator
+from backend.database.database_group_validator import DatabaseGroupValidator
 from backend.database.scenario_bundle_validator import ScenarioBundleValidator
 from backend.database.schema_analyzer import ColumnInfo, SchemaMetadata, TableInfo
 
@@ -25,7 +25,7 @@ def _metadata(connection_id, tables):
     )
 
 
-class TestLogicalDatabaseValidator:
+class TestDatabaseGroupValidator:
     def test_compare_metadata_reports_missing_column_as_warning(self):
         reference = _metadata("ref", [
             _table(
@@ -46,7 +46,7 @@ class TestLogicalDatabaseValidator:
                 primary_key=["payment_id"],
             )
         ])
-        validator = LogicalDatabaseValidator.__new__(LogicalDatabaseValidator)
+        validator = DatabaseGroupValidator.__new__(DatabaseGroupValidator)
         errors = []
         warnings = []
 
@@ -72,7 +72,7 @@ class TestLogicalDatabaseValidator:
                 row_count=100,
             )
         ])
-        validator = LogicalDatabaseValidator.__new__(LogicalDatabaseValidator)
+        validator = DatabaseGroupValidator.__new__(DatabaseGroupValidator)
         errors = []
         warnings = []
 

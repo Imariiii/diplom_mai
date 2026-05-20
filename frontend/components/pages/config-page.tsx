@@ -18,10 +18,10 @@ import type {
   TestRun,
   ScenarioTemplate,
   DatabaseConnection,
-  LogicalDatabaseWithConnections,
-  LogicalDatabaseDetail,
+  DatabaseGroupWithConnections,
+  DatabaseGroupDetail,
 } from "@/lib/types"
-import { LogicalDbSelectorCard } from "./config/logical-db-selector-card"
+import { DatabaseGroupSelectorCard } from "./config/database-group-selector-card"
 import { DatabaseSelectionCard, type ConnectionCheckResult } from "./config/database-selection-card"
 import { TestModeSelectorCard } from "./config/test-mode-selector-card"
 import { ScenarioSelectorCard } from "./config/scenario-selector-card"
@@ -42,16 +42,16 @@ export function ConfigPage() {
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false)
   const [scenarios, setScenarios] = useState<ScenarioTemplate[]>([])
   const [scenariosLoading, setScenariosLoading] = useState(true)
-  const [logicalDatabases, setLogicalDatabases] = useState<LogicalDatabaseWithConnections[]>([])
-  const [selectedLogicalDbId, setSelectedLogicalDbId] = useState<string | null>(null)
-  const [selectedLogicalDatabaseDetail, setSelectedLogicalDatabaseDetail] = useState<LogicalDatabaseDetail | null>(null)
+  const [databaseGroups, setDatabaseGroups] = useState<DatabaseGroupWithConnections[]>([])
+  const [selectedDatabaseGroupId, setSelectedDatabaseGroupId] = useState<string | null>(null)
+  const [selectedDatabaseGroupDetail, setSelectedDatabaseGroupDetail] = useState<DatabaseGroupDetail | null>(null)
   const [connectionChecks, setConnectionChecks] = useState<Record<string, ConnectionCheckResult>>({})
   const [checksPending, setChecksPending] = useState(false)
 
   const connections: DatabaseConnection[] = useMemo(() => {
-    if (!selectedLogicalDbId) return []
-    return logicalDatabases.find((db) => db.id === selectedLogicalDbId)?.connections ?? []
-  }, [selectedLogicalDbId, logicalDatabases])
+    if (!selectedDatabaseGroupId) return []
+    return databaseGroups.find((db) => db.id === selectedDatabaseGroupId)?.connections ?? []
+  }, [selectedDatabaseGroupId, databaseGroups])
 
   useEffect(() => {
     apiClient
@@ -70,58 +70,58 @@ export function ConfigPage() {
         setScenariosLoading(false)
       })
 
-    loadLogicalDatabases()
+    loadDatabaseGroups()
   }, [])
 
-  const loadLogicalDatabases = () => {
+  const loadDatabaseGroups = () => {
     apiClient
-      .getLogicalDatabases()
+      .getDatabaseGroups()
       .then((response) => {
-        const dbs = response.databases
-        setLogicalDatabases(dbs)
+        const dbs = response.groups
+        setDatabaseGroups(dbs)
 
         // Автовыбор первой БД, если она одна
-        if (dbs.length === 1 && !selectedLogicalDbId) {
-          setSelectedLogicalDbId(dbs[0].id)
+        if (dbs.length === 1 && !selectedDatabaseGroupId) {
+          setSelectedDatabaseGroupId(dbs[0].id)
         }
       })
       .catch((error) => {
-        console.error("Ошибка загрузки логических баз данных:", error)
+        console.error("Ошибка загрузки групп баз данных:", error)
         toast.error("Не удалось загрузить список баз данных")
       })
   }
 
-  const reloadLogicalDatabaseDetail = useCallback(async () => {
-    if (!selectedLogicalDbId) {
-      setSelectedLogicalDatabaseDetail(null)
+  const reloadDatabaseGroupDetail = useCallback(async () => {
+    if (!selectedDatabaseGroupId) {
+      setSelectedDatabaseGroupDetail(null)
       return
     }
     try {
-      const detail = await apiClient.getLogicalDatabaseDetail(selectedLogicalDbId)
-      setSelectedLogicalDatabaseDetail(detail)
+      const detail = await apiClient.getDatabaseGroupDetail(selectedDatabaseGroupId)
+      setSelectedDatabaseGroupDetail(detail)
     } catch {
-      setSelectedLogicalDatabaseDetail(null)
+      setSelectedDatabaseGroupDetail(null)
     }
-  }, [selectedLogicalDbId])
+  }, [selectedDatabaseGroupId])
 
   useEffect(() => {
-    void reloadLogicalDatabaseDetail()
-  }, [reloadLogicalDatabaseDetail])
+    void reloadDatabaseGroupDetail()
+  }, [reloadDatabaseGroupDetail])
 
   const currentPage = useAppStore((state) => state.currentPage)
   useEffect(() => {
     if (currentPage === "config") {
-      void reloadLogicalDatabaseDetail()
+      void reloadDatabaseGroupDetail()
     }
-  }, [currentPage, reloadLogicalDatabaseDetail])
+  }, [currentPage, reloadDatabaseGroupDetail])
 
   useEffect(() => {
     const onFocus = () => {
-      void reloadLogicalDatabaseDetail()
+      void reloadDatabaseGroupDetail()
     }
     window.addEventListener("focus", onFocus)
     return () => window.removeEventListener("focus", onFocus)
-  }, [reloadLogicalDatabaseDetail])
+  }, [reloadDatabaseGroupDetail])
 
   /** Проверка сохранённых подключений выбранной БД (результат — в карточке выбора СУБД) */
   useEffect(() => {
@@ -167,12 +167,12 @@ export function ConfigPage() {
   }, [connections])
 
   const handleLogicalDbSelect = (id: string) => {
-    if (id === selectedLogicalDbId) return
+    if (id === selectedDatabaseGroupId) return
 
-    setSelectedLogicalDbId(id)
+    setSelectedDatabaseGroupId(id)
 
     // Сбрасываем выбранные подключения, если они не принадлежат новой БД
-    const newDb = logicalDatabases.find((db) => db.id === id)
+    const newDb = databaseGroups.find((db) => db.id === id)
     if (newDb) {
       const validIds = new Set(newDb.connections.map((c) => c.id))
       const filtered = testConfig.databases.filter((dbId) => validIds.has(dbId))
@@ -219,15 +219,15 @@ export function ConfigPage() {
       return false
     }
 
-    if (selectedLogicalDatabaseDetail?.profile_status &&
-      ["draft", "needs_review", "incompatible"].includes(selectedLogicalDatabaseDetail.profile_status)
+    if (selectedDatabaseGroupDetail?.profile_status &&
+      ["draft", "needs_review", "incompatible"].includes(selectedDatabaseGroupDetail.profile_status)
     ) {
-      toast.error("Logical database требует проверки профиля перед запуском сценария")
+      toast.error("Database group требует проверки профиля перед запуском сценария")
       return false
     }
 
-    if (selectedLogicalDatabaseDetail?.compatibility_status === "invalid") {
-      toast.error("Logical database несовместима: проверьте profile и reference connection")
+    if (selectedDatabaseGroupDetail?.compatibility_status === "invalid") {
+      toast.error("Database group несовместима: проверьте profile и reference connection")
       return false
     }
 
@@ -276,7 +276,7 @@ export function ConfigPage() {
         use_indexes: testConfig.testMode === "scenario" ? testConfig.useIndexes : false,
         warmup_time: testConfig.warmupTime,
         test_name: testName,
-        logical_database_id: selectedLogicalDbId ?? undefined,
+        database_group_id: selectedDatabaseGroupId ?? undefined,
       })
       const testRunConfig = testConfig.testMode === "scenario" && selectedBundle
         ? {
@@ -340,16 +340,16 @@ export function ConfigPage() {
   const hasMissingProfiles = selectedConnections.some((connection) => !connection.schema_profile_id)
   const hasPendingReview = selectedConnections.some((connection) => connection.profile_source === "pending_review")
   const hasMixedProfiles = selectedProfileIds.length > 1
-  const selectedLogicalProfileStatus = selectedLogicalDatabaseDetail?.profile_status
+  const selectedLogicalProfileStatus = selectedDatabaseGroupDetail?.profile_status
   const hasBlockingLogicalProfile = selectedLogicalProfileStatus
     ? ["draft", "needs_review", "incompatible"].includes(selectedLogicalProfileStatus)
     : false
   const hasInvalidLogicalDb =
     hasBlockingLogicalProfile ||
-    selectedLogicalDatabaseDetail?.compatibility_status === "invalid"
-  const selectedBundles = selectedLogicalDatabaseDetail?.bundles || []
+    selectedDatabaseGroupDetail?.compatibility_status === "invalid"
+  const selectedBundles = selectedDatabaseGroupDetail?.bundles || []
   const selectedProfileName =
-    selectedLogicalDatabaseDetail?.schema_profile_name ||
+    selectedDatabaseGroupDetail?.schema_profile_name ||
     selectedConnections[0]?.schema_profile_name ||
     null
   const selectedBundle = findActiveScenarioBundle(selectedBundles, testConfig.scenario)
@@ -397,9 +397,9 @@ export function ConfigPage() {
         <p className="text-muted-foreground">Настройте параметры нагрузочного тестирования</p>
       </div>
 
-      <LogicalDbSelectorCard
-        databases={logicalDatabases}
-        selectedId={selectedLogicalDbId}
+      <DatabaseGroupSelectorCard
+        databases={databaseGroups}
+        selectedId={selectedDatabaseGroupId}
         onSelect={handleLogicalDbSelect}
       />
 
@@ -429,18 +429,18 @@ export function ConfigPage() {
         </div>
       )}
 
-      {selectedLogicalDatabaseDetail && (
+      {selectedDatabaseGroupDetail && (
         <div className="rounded-lg border border-border bg-card p-4 text-sm">
-          <div className="font-medium">Состояние logical database</div>
+          <div className="font-medium">Состояние database group</div>
           <div className="mt-1 text-muted-foreground">
-            Профиль: {selectedLogicalDatabaseDetail.schema_profile_name || "не назначен"} ·
-            Статус профиля: {selectedLogicalDatabaseDetail.profile_status || "unknown"} ·
-            Reference: {selectedLogicalDatabaseDetail.reference_connection_name || "не выбран"} ·
-            Совместимость: {selectedLogicalDatabaseDetail.compatibility_status || "unknown"}
+            Профиль: {selectedDatabaseGroupDetail.schema_profile_name || "не назначен"} ·
+            Статус профиля: {selectedDatabaseGroupDetail.profile_status || "unknown"} ·
+            Reference: {selectedDatabaseGroupDetail.reference_connection_name || "не выбран"} ·
+            Совместимость: {selectedDatabaseGroupDetail.compatibility_status || "unknown"}
           </div>
-          {selectedLogicalDatabaseDetail.compatibility_report?.errors?.length ? (
+          {selectedDatabaseGroupDetail.compatibility_report?.errors?.length ? (
             <div className="mt-2 text-red-700">
-              {selectedLogicalDatabaseDetail.compatibility_report.errors[0]}
+              {selectedDatabaseGroupDetail.compatibility_report.errors[0]}
             </div>
           ) : null}
         </div>
@@ -448,7 +448,7 @@ export function ConfigPage() {
 
       {testConfig.databases.length > 0 && hasInvalidLogicalDb && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700">
-          Запуск заблокирован: logical database не подтверждена или помечена как несовместимая. Проверьте профиль, отчёт совместимости и reference connection.
+          Запуск заблокирован: database group не подтверждена или помечена как несовместимая. Проверьте профиль, отчёт совместимости и reference connection.
         </div>
       )}
 

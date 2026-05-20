@@ -3,7 +3,7 @@
 """
 from typing import Any, Dict, List, Optional
 
-from backend.database.logical_database_validator import LogicalDatabaseValidator
+from backend.database.database_group_validator import DatabaseGroupValidator
 from backend.database.repository.connection_repository import ConnectionRepository
 from backend.database.repository.scenario_bundle_repository import ScenarioBundleRepository
 
@@ -35,36 +35,36 @@ class ScenarioBundleResolver:
         if len(connections) != len(connection_ids):
             raise ValueError("Не удалось загрузить все выбранные подключения")
 
-        logical_database_ids = {
-            str(connection.logical_database_id)
+        database_group_ids = {
+            str(connection.database_group_id)
             for connection in connections
-            if connection.logical_database_id
+            if connection.database_group_id
         }
-        if logical_database_ids:
-            if len(logical_database_ids) != 1 or any(not connection.logical_database_id for connection in connections):
+        if database_group_ids:
+            if len(database_group_ids) != 1 or any(not connection.database_group_id for connection in connections):
                 raise ValueError(
-                    "Нельзя запускать тест сразу для нескольких logical database "
-                    "или смешивать их с подключениями без logical database"
+                    "Нельзя запускать тест сразу для нескольких database group "
+                    "или смешивать их с подключениями без database group"
                 )
 
-            logical_database = connections[0].logical_database
-            if not logical_database or not logical_database.schema_profile_id:
+            database_group = connections[0].database_group
+            if not database_group or not database_group.schema_profile_id:
                 raise ValueError(
-                    f"Для logical database '{connections[0].logical_database.name if connections[0].logical_database else logical_database_ids.pop()}' "
+                    f"Для database group '{connections[0].database_group.name if connections[0].database_group else database_group_ids.pop()}' "
                     "не назначен schema_profile"
                 )
 
-            schema_profile_id = str(logical_database.schema_profile_id)
-            profile_status = getattr(logical_database, "profile_status", "confirmed")
-            compatibility_status = getattr(logical_database, "compatibility_status", "unknown")
+            schema_profile_id = str(database_group.schema_profile_id)
+            profile_status = getattr(database_group, "profile_status", "confirmed")
+            compatibility_status = getattr(database_group, "compatibility_status", "unknown")
             if profile_status in {"draft", "needs_review", "incompatible"}:
                 raise ValueError(
-                    f"Logical database '{logical_database.name}' требует проверки профиля "
+                    f"Database group '{database_group.name}' требует проверки профиля "
                     f"(profile_status={profile_status})"
                 )
             if compatibility_status == "invalid":
                 raise ValueError(
-                    f"Logical database '{logical_database.name}' помечена как несовместимая"
+                    f"Database group '{database_group.name}' помечена как несовместимая"
                 )
             inconsistent_connections = [
                 connection.name
@@ -77,7 +77,7 @@ class ScenarioBundleResolver:
             ]
             if inconsistent_connections:
                 raise ValueError(
-                    "Для части подключений logical database не синхронизирован schema_profile: "
+                    "Для части подключений database group не синхронизирован schema_profile: "
                     + ", ".join(inconsistent_connections)
                 )
         else:
@@ -113,13 +113,13 @@ class ScenarioBundleResolver:
 
         compatibility = None
         if len(connections) > 1:
-            validator = LogicalDatabaseValidator(self.connection_repository)
+            validator = DatabaseGroupValidator(self.connection_repository)
             reference_connection_id = None
-            if logical_database_ids:
-                logical_database = connections[0].logical_database
+            if database_group_ids:
+                database_group = connections[0].database_group
                 reference_connection_id = (
-                    str(logical_database.reference_connection_id)
-                    if logical_database and getattr(logical_database, "reference_connection_id", None)
+                    str(database_group.reference_connection_id)
+                    if database_group and getattr(database_group, "reference_connection_id", None)
                     else None
                 )
             try:
@@ -132,17 +132,17 @@ class ScenarioBundleResolver:
                 await validator.schema_analyzer.db_connection.close_all()
             if not compatibility.get("valid"):
                 raise ValueError(
-                    "Подключения logical database несовместимы: "
+                    "Подключения database group несовместимы: "
                     + "; ".join(compatibility.get("errors", []))
                 )
 
         bundle = None
         preferred_bundle_name = None
-        if logical_database_ids and scenario_template_id and len(connections) >= 2:
-            logical_database = connections[0].logical_database
-            if logical_database:
+        if database_group_ids and scenario_template_id and len(connections) >= 2:
+            database_group = connections[0].database_group
+            if database_group:
                 preferred_bundle_name = (
-                    f"{scenario_template_id}::{logical_database.name}::common"
+                    f"{scenario_template_id}::{database_group.name}::common"
                 )
 
         if bundle_id:
@@ -161,15 +161,15 @@ class ScenarioBundleResolver:
                     preferred_name=preferred_bundle_name,
                 )
                 if not bundle:
-                    logical_database = connections[0].logical_database
-                    logical_db_name = logical_database.name if logical_database else "logical database"
+                    database_group = connections[0].database_group
+                    logical_db_name = database_group.name if database_group else "database group"
                     generate_hint = (
-                        f"POST /api/logical-databases/{logical_database.id}/bundles/generate"
-                        if logical_database
-                        else "POST /api/logical-databases/{id}/bundles/generate"
+                        f"POST /api/database-groups/{database_group.id}/bundles/generate"
+                        if database_group
+                        else "POST /api/database-groups/{id}/bundles/generate"
                     )
                     raise ValueError(
-                        f"Для logical database '{logical_db_name}' не найден common bundle "
+                        f"Для database group '{logical_db_name}' не найден common bundle "
                         f"'{preferred_bundle_name}'. Сгенерируйте bundles: {generate_hint}"
                     )
             else:

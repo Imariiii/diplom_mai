@@ -24,7 +24,7 @@ from backend.database.state_manager import DatabaseStateManager
 
 # Импорт роутов из api модуля
 from backend.api.routes import test_routes, database_state_routes, history_routes, settings_routes, connection_routes, comparison_routes, profile_routes
-from backend.api.routes import logical_database_routes
+from backend.api.routes import database_group_routes
 
 # Используем централизованную инициализацию
 from backend import initialize
@@ -54,7 +54,7 @@ async def lifespan(app: FastAPI):
                     connection_repository=initialize.connection_repository,
                     profile_repository=initialize.profile_repository,
                     bundle_repository=initialize.scenario_bundle_repository,
-                    logical_database_repository=initialize.logical_database_repository,
+                    database_group_repository=initialize.database_group_repository,
                 )
                 await bootstrap.bootstrap()
                 print("[STARTUP] Logical scenario bootstrap завершён")
@@ -186,8 +186,8 @@ app.include_router(profile_routes.router)
 # Роуты сравнительного анализа
 app.include_router(comparison_routes.router)
 
-# Роуты логических баз данных
-app.include_router(logical_database_routes.router)
+# Роуты групп баз данных
+app.include_router(database_group_routes.router)
 
 
 if __name__ == "__main__":

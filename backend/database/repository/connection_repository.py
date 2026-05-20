@@ -7,7 +7,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
-from backend.database.models import Base, DatabaseConnectionConfig, LogicalDatabase
+from backend.database.models import Base, DatabaseConnectionConfig, DatabaseGroup
 from backend.database.repository.base import BaseRepository, get_local_now
 from backend.core.crypto import encrypt_password, decrypt_password
 
@@ -21,8 +21,8 @@ class ConnectionRepository(BaseRepository):
             select(DatabaseConnectionConfig)
             .options(
                 joinedload(DatabaseConnectionConfig.schema_profile),
-                joinedload(DatabaseConnectionConfig.logical_database).joinedload(
-                    LogicalDatabase.schema_profile
+                joinedload(DatabaseConnectionConfig.database_group).joinedload(
+                    DatabaseGroup.schema_profile
                 ),
             )
         )
@@ -37,16 +37,16 @@ class ConnectionRepository(BaseRepository):
         except (ValueError, TypeError, AttributeError):
             return None
 
-    async def _get_logical_database(self, session, logical_database_id: Optional[str]):
-        """Получить logical_database вместе с её schema_profile."""
-        logical_db_uuid = self._parse_uuid(logical_database_id)
+    async def _get_database_group(self, session, database_group_id: Optional[str]):
+        """Получить database_group вместе с её schema_profile."""
+        logical_db_uuid = self._parse_uuid(database_group_id)
         if logical_db_uuid is None:
             return None
 
         result = await session.execute(
-            select(LogicalDatabase)
-            .options(joinedload(LogicalDatabase.schema_profile))
-            .where(LogicalDatabase.id == logical_db_uuid)
+            select(DatabaseGroup)
+            .options(joinedload(DatabaseGroup.schema_profile))
+            .where(DatabaseGroup.id == logical_db_uuid)
         )
         return result.unique().scalar_one_or_none()
 
@@ -65,7 +65,7 @@ class ConnectionRepository(BaseRepository):
         password: str,
         database: str,
         group: str = 'default',
-        logical_database_id: Optional[str] = None,
+        database_group_id: Optional[str] = None,
         extra_params: Optional[Dict[str, Any]] = None,
     ) -> DatabaseConnectionConfig:
         """
@@ -80,7 +80,7 @@ class ConnectionRepository(BaseRepository):
             password: Пароль (в открытом виде, будет зашифрован)
             database: Имя базы данных
             group: Группа подключений
-            logical_database_id: ID логической базы данных
+            database_group_id: ID группы баз данных
             extra_params: Дополнительные параметры
 
         Returns:
@@ -90,7 +90,7 @@ class ConnectionRepository(BaseRepository):
 
         created_id: Optional[str] = None
         async with self.SessionLocal() as session:
-            logical_db = await self._get_logical_database(session, logical_database_id)
+            logical_db = await self._get_database_group(session, database_group_id)
             config = DatabaseConnectionConfig(
                 id=uuid.uuid4(),
                 name=name,
@@ -101,7 +101,7 @@ class ConnectionRepository(BaseRepository):
                 password_encrypted=encrypted_password,
                 database=database,
                 group=group,
-                logical_database_id=logical_db.id if logical_db else self._parse_uuid(logical_database_id),
+                database_group_id=logical_db.id if logical_db else self._parse_uuid(database_group_id),
                 schema_profile_id=None,
                 detected_profile_name=(
                     logical_db.schema_profile.name
@@ -195,7 +195,7 @@ class ConnectionRepository(BaseRepository):
         password: Optional[str] = None,
         database: Optional[str] = None,
         group: Optional[str] = None,
-        logical_database_id: Optional[str] = None,
+        database_group_id: Optional[str] = None,
         is_active: Optional[bool] = None,
         extra_params: Optional[Dict[str, Any]] = None,
         schema_profile_id: Optional[str] = None,
@@ -241,10 +241,10 @@ class ConnectionRepository(BaseRepository):
                 config.database = database
             if group is not None:
                 config.group = group
-            if logical_database_id is not None:
-                target_logical_db = await self._get_logical_database(session, logical_database_id)
-                config.logical_database_id = (
-                    target_logical_db.id if target_logical_db else self._parse_uuid(logical_database_id)
+            if database_group_id is not None:
+                target_logical_db = await self._get_database_group(session, database_group_id)
+                config.database_group_id = (
+                    target_logical_db.id if target_logical_db else self._parse_uuid(database_group_id)
                 )
                 config.schema_profile_id = None
                 config.detected_profile_name = (

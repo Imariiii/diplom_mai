@@ -21,7 +21,7 @@ import {
 import { apiClient } from "@/lib/api"
 import type {
   BundleWorkloadMode,
-  LogicalDatabase,
+  DatabaseGroup,
   ScenarioBundleSummary,
   ScenarioBundleSaveRequest,
   ScenarioIndex,
@@ -203,8 +203,8 @@ function Hint({ text }: { text: string }) {
 export function LogicalScenariosBrowser() {
   const [templates, setTemplates] = useState<ScenarioTemplate[]>([])
   const [profiles, setProfiles] = useState<SchemaProfileSummary[]>([])
-  const [logicalDatabases, setLogicalDatabases] = useState<LogicalDatabase[]>([])
-  const [selectedLogicalDbId, setSelectedLogicalDbId] = useState<string>("")
+  const [databaseGroups, setDatabaseGroups] = useState<DatabaseGroup[]>([])
+  const [selectedDatabaseGroupId, setSelectedDatabaseGroupId] = useState<string>("")
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("")
   const [selectedProfileId, setSelectedProfileId] = useState<string>("")
   const [selectedProfileDetail, setSelectedProfileDetail] = useState<SchemaProfileDetail | null>(null)
@@ -230,9 +230,9 @@ export function LogicalScenariosBrowser() {
     [templates, selectedTemplateId]
   )
 
-  const selectedLogicalDatabase = useMemo(
-    () => logicalDatabases.find((db) => db.id === selectedLogicalDbId) || null,
-    [logicalDatabases, selectedLogicalDbId]
+  const selectedDatabaseGroup = useMemo(
+    () => databaseGroups.find((db) => db.id === selectedDatabaseGroupId) || null,
+    [databaseGroups, selectedDatabaseGroupId]
   )
 
   const variants = useMemo(() => {
@@ -241,10 +241,10 @@ export function LogicalScenariosBrowser() {
   }, [selectedProfileDetail, selectedTemplateId])
 
   const selectedLogicalDbBlocksBundles = Boolean(
-    selectedLogicalDatabase &&
+    selectedDatabaseGroup &&
     (
-      ["draft", "needs_review", "incompatible"].includes(selectedLogicalDatabase.profile_status || "") ||
-      selectedLogicalDatabase.compatibility_status === "invalid"
+      ["draft", "needs_review", "incompatible"].includes(selectedDatabaseGroup.profile_status || "") ||
+      selectedDatabaseGroup.compatibility_status === "invalid"
     )
   )
 
@@ -314,29 +314,29 @@ export function LogicalScenariosBrowser() {
   ) => {
     setLoading(true)
     try {
-      const [templatesResp, profilesResp, logicalDbResp] = await Promise.all([
+      const [templatesResp, profilesResp, databaseGroupResp] = await Promise.all([
         apiClient.getScenarioTemplates(),
         apiClient.getSchemaProfiles(),
-        apiClient.getLogicalDatabases(),
+        apiClient.getDatabaseGroups(),
       ])
       const nextTemplates = templatesResp.templates
       const nextProfiles = profilesResp.profiles
-      const nextLogicalDbs = logicalDbResp.databases
+      const nextDatabaseGroups = databaseGroupResp.groups
       setTemplates(nextTemplates)
       setProfiles(nextProfiles)
-      setLogicalDatabases(nextLogicalDbs)
+      setDatabaseGroups(nextDatabaseGroups)
 
       const nextTemplateId = preferredTemplateId || nextTemplates[0]?.id || ""
       // Prefer explicit arg → current selection → first available logical DB → empty
       const nextLogicalDbId =
         preferredLogicalDbId !== undefined
           ? preferredLogicalDbId
-          : selectedLogicalDbId || nextLogicalDbs[0]?.id || ""
-      const logicalDbProfileId = nextLogicalDbs.find((db) => db.id === nextLogicalDbId)?.schema_profile_id
+          : selectedDatabaseGroupId || nextDatabaseGroups[0]?.id || ""
+      const logicalDbProfileId = nextDatabaseGroups.find((db) => db.id === nextLogicalDbId)?.schema_profile_id
       // Profile comes from logical DB if bound; otherwise fall back to explicit arg or first profile
       const nextProfileId = logicalDbProfileId || preferredProfileId || nextProfiles[0]?.id || ""
       setSelectedTemplateId(nextTemplateId)
-      setSelectedLogicalDbId(nextLogicalDbId)
+      setSelectedDatabaseGroupId(nextLogicalDbId)
       setSelectedProfileId(nextProfileId)
       if (nextProfileId) {
         await loadProfile(nextProfileId, nextTemplateId, preferredBundleId)
@@ -369,10 +369,10 @@ export function LogicalScenariosBrowser() {
     await loadProfile(profileId, selectedTemplateId)
   }
 
-  const handleLogicalDatabaseChange = async (logicalDbId: string) => {
-    const nextId = logicalDbId
-    setSelectedLogicalDbId(nextId)
-    const db = logicalDatabases.find((d) => d.id === nextId)
+  const handleDatabaseGroupChange = async (databaseGroupId: string) => {
+    const nextId = databaseGroupId
+    setSelectedDatabaseGroupId(nextId)
+    const db = databaseGroups.find((d) => d.id === nextId)
     const nextProfileId = db?.schema_profile_id || ""
     setSelectedProfileId(nextProfileId)
     if (nextProfileId) {
@@ -837,7 +837,7 @@ export function LogicalScenariosBrowser() {
 
   // ==================== Render ====================
 
-  const profileName = selectedLogicalDatabase?.schema_profile_name || selectedProfileDetail?.name || null
+  const profileName = selectedDatabaseGroup?.schema_profile_name || selectedProfileDetail?.name || null
   const bundleSubtitle = draftBundle
     ? `${draftBundle.name} · ${formatWorkloadModeLabel(draftBundle.workload_mode)} · ${draftBundle.generation_source || "manual"}`
     : null
@@ -1044,46 +1044,46 @@ export function LogicalScenariosBrowser() {
                 </p>
 
                 <Select
-                  value={selectedLogicalDbId || ""}
-                  onValueChange={(v) => void handleLogicalDatabaseChange(v)}
+                  value={selectedDatabaseGroupId || ""}
+                  onValueChange={(v) => void handleDatabaseGroupChange(v)}
                 >
                   <SelectTrigger className="h-10 w-full">
                     <div className="flex items-center gap-2 min-w-0">
                       <Database className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      <SelectValue placeholder="Выберите logical database..." />
+                      <SelectValue placeholder="Выберите database group..." />
                     </div>
                   </SelectTrigger>
                   <SelectContent>
-                    {logicalDatabases.length === 0 ? (
+                    {databaseGroups.length === 0 ? (
                       <div className="px-3 py-4 text-center text-xs text-muted-foreground">
-                        Нет доступных logical databases
+                        Нет доступных database groups
                       </div>
                     ) : (
-                      logicalDatabases.map((db) => (
+                      databaseGroups.map((db) => (
                         <SelectItem key={db.id} value={db.id}>{db.name}</SelectItem>
                       ))
                     )}
                   </SelectContent>
                 </Select>
 
-                {selectedLogicalDatabase && (
+                {selectedDatabaseGroup && (
                   <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs">
                     {profileName && (
                       <span className="text-muted-foreground">
                         Профиль:&nbsp;<span className="font-medium text-foreground">{profileName}</span>
                       </span>
                     )}
-                    {selectedLogicalDatabase.reference_connection_name && (
+                    {selectedDatabaseGroup.reference_connection_name && (
                       <span className="text-muted-foreground">
-                        Reference:&nbsp;<span className="font-medium text-foreground">{selectedLogicalDatabase.reference_connection_name}</span>
+                        Reference:&nbsp;<span className="font-medium text-foreground">{selectedDatabaseGroup.reference_connection_name}</span>
                       </span>
                     )}
                     <div className="ml-auto flex gap-1.5">
-                      <Badge variant="outline" className={cn("text-[10px]", statusTone(selectedLogicalDatabase.profile_status))}>
-                        {statusLabel(selectedLogicalDatabase.profile_status)}
+                      <Badge variant="outline" className={cn("text-[10px]", statusTone(selectedDatabaseGroup.profile_status))}>
+                        {statusLabel(selectedDatabaseGroup.profile_status)}
                       </Badge>
-                      <Badge variant="outline" className={cn("text-[10px]", statusTone(selectedLogicalDatabase.compatibility_status))}>
-                        {statusLabel(selectedLogicalDatabase.compatibility_status)}
+                      <Badge variant="outline" className={cn("text-[10px]", statusTone(selectedDatabaseGroup.compatibility_status))}>
+                        {statusLabel(selectedDatabaseGroup.compatibility_status)}
                       </Badge>
                     </div>
                   </div>
@@ -1093,7 +1093,7 @@ export function LogicalScenariosBrowser() {
                   <Alert variant="destructive">
                     <AlertTriangle className="h-4 w-4" />
                     <AlertDescription>
-                      Logical database требует подтверждения профиля или несовместима.
+                      Database group требует подтверждения профиля или несовместима.
                     </AlertDescription>
                   </Alert>
                 )}
@@ -1113,7 +1113,7 @@ export function LogicalScenariosBrowser() {
                     </EmptyMedia>
                     <EmptyTitle>Нужен профиль данных</EmptyTitle>
                     <EmptyDescription>
-                      Выберите logical database или профиль модели данных.
+                      Выберите database group или профиль модели данных.
                     </EmptyDescription>
                   </EmptyHeader>
                 </Empty>

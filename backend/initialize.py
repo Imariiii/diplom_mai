@@ -15,7 +15,7 @@ test_repository = None
 connection_repository = None
 profile_repository = None
 scenario_bundle_repository = None
-logical_database_repository = None
+database_group_repository = None
 HISTORY_ENABLED = False
 
 
@@ -35,7 +35,7 @@ def initialize_repositories():
     global connection_repository
     global profile_repository
     global scenario_bundle_repository
-    global logical_database_repository
+    global database_group_repository
     global HISTORY_ENABLED
 
     print("[HISTORY_DB] === ИНИЦИАЛИЗАЦИЯ БД ИСТОРИИ ===")
@@ -104,19 +104,19 @@ def initialize_repositories():
         print(f"[BUNDLE_REPO] ❌ Ошибка инициализации: {e}")
         scenario_bundle_repository = None
 
-    print("[LOGICAL_DB_REPO] Инициализация LogicalDatabaseRepository...")
+    print("[DATABASE_GROUP_REPO] Инициализация DatabaseGroupRepository...")
     try:
-        from backend.database.repository.logical_database_repository import LogicalDatabaseRepository
+        from backend.database.repository.database_group_repository import DatabaseGroupRepository
         history_db_url = get_history_db_url()
         if history_db_url:
-            logical_database_repository = LogicalDatabaseRepository(history_db_url)
-            print("[LOGICAL_DB_REPO] ✅ LogicalDatabaseRepository инициализирован")
+            database_group_repository = DatabaseGroupRepository(history_db_url)
+            print("[DATABASE_GROUP_REPO] ✅ DatabaseGroupRepository инициализирован")
         else:
-            logical_database_repository = None
-            print("[LOGICAL_DB_REPO] ⚠️ LogicalDatabaseRepository не инициализирован (нет URL)")
+            database_group_repository = None
+            print("[DATABASE_GROUP_REPO] ⚠️ DatabaseGroupRepository не инициализирован (нет URL)")
     except Exception as e:
-        print(f"[LOGICAL_DB_REPO] ❌ Ошибка инициализации: {e}")
-        logical_database_repository = None
+        print(f"[DATABASE_GROUP_REPO] ❌ Ошибка инициализации: {e}")
+        database_group_repository = None
 
 
 # Инициализация при импорте модуля (вызывается явно из main.py)

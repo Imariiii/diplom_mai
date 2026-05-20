@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from backend.database.repository.connection_repository import ConnectionRepository
 from backend.database.dialects import get_dialect, is_registered_dbms_type
-from backend.database.logical_database_provisioner import LogicalDatabaseProvisioner
+from backend.database.database_group_provisioner import DatabaseGroupProvisioner
 from backend.api.schemas.connection_schemas import (
     ConnectionCreateRequest,
     ConnectionUpdateRequest,
@@ -49,18 +49,18 @@ def get_bundle_repo():
     return initialize.scenario_bundle_repository
 
 
-def get_logical_db_repo():
-    """Получить репозиторий logical database."""
-    if not hasattr(initialize, 'logical_database_repository') or initialize.logical_database_repository is None:
-        raise HTTPException(status_code=500, detail="LogicalDatabaseRepository не инициализирован")
-    return initialize.logical_database_repository
+def get_database_group_repo():
+    """Получить репозиторий database group."""
+    if not hasattr(initialize, 'database_group_repository') or initialize.database_group_repository is None:
+        raise HTTPException(status_code=500, detail="DatabaseGroupRepository не инициализирован")
+    return initialize.database_group_repository
 
 
-def get_logical_db_provisioner() -> LogicalDatabaseProvisioner:
+def get_database_group_provisioner() -> DatabaseGroupProvisioner:
     """Собрать provisioner для auto profile / auto bundle generation."""
-    return LogicalDatabaseProvisioner(
+    return DatabaseGroupProvisioner(
         connection_repository=get_connection_repo(),
-        logical_database_repository=get_logical_db_repo(),
+        database_group_repository=get_database_group_repo(),
         profile_repository=get_profile_repo(),
         bundle_repository=get_bundle_repo(),
     )
@@ -205,13 +205,13 @@ async def create_connection(
             password=data.password,
             database=data.database,
             group=data.group or 'default',
-            logical_database_id=data.logical_database_id,
+            database_group_id=data.database_group_id,
             extra_params=data.extra_params,
         )
-        if data.logical_database_id:
+        if data.database_group_id:
             try:
-                await get_logical_db_provisioner().ensure_logical_database_ready(
-                    logical_database_id=data.logical_database_id,
+                await get_database_group_provisioner().ensure_database_group_ready(
+                    database_group_id=data.database_group_id,
                     reference_connection_id=str(config.id),
                 )
                 refreshed = await repo.get_connection_by_id(str(config.id))
@@ -219,7 +219,7 @@ async def create_connection(
                     config = refreshed
             except Exception as provision_error:
                 print(
-                    "[CONNECTIONS] Предупреждение: auto-provision logical database не выполнен: "
+                    "[CONNECTIONS] Предупреждение: auto-provision database group не выполнен: "
                     f"{provision_error}"
                 )
         return _connection_to_response(config)
@@ -249,21 +249,21 @@ async def update_connection(
             password=data.password,
             database=data.database,
             group=data.group,
-            logical_database_id=data.logical_database_id,
+            database_group_id=data.database_group_id,
             is_active=data.is_active,
             extra_params=data.extra_params,
         )
         if not config:
             raise HTTPException(status_code=404, detail="Подключение не найдено")
-        target_logical_database_id = (
-            data.logical_database_id
-            if data.logical_database_id is not None
-            else (str(config.logical_database_id) if config.logical_database_id else None)
+        target_database_group_id = (
+            data.database_group_id
+            if data.database_group_id is not None
+            else (str(config.database_group_id) if config.database_group_id else None)
         )
-        if target_logical_database_id:
+        if target_database_group_id:
             try:
-                await get_logical_db_provisioner().ensure_logical_database_ready(
-                    logical_database_id=target_logical_database_id,
+                await get_database_group_provisioner().ensure_database_group_ready(
+                    database_group_id=target_database_group_id,
                     reference_connection_id=str(config.id),
                 )
                 refreshed = await repo.get_connection_by_id(connection_id)
@@ -271,7 +271,7 @@ async def update_connection(
                     config = refreshed
             except Exception as provision_error:
                 print(
-                    "[CONNECTIONS] Предупреждение: auto-provision logical database не выполнен: "
+                    "[CONNECTIONS] Предупреждение: auto-provision database group не выполнен: "
                     f"{provision_error}"
                 )
         return _connection_to_response(config)
@@ -293,15 +293,15 @@ async def assign_connection_profile(
         config = await repo.get_connection_by_id(connection_id)
         if not config:
             raise HTTPException(status_code=404, detail="Подключение не найдено")
-        if config.logical_database_id:
-            logical_database_name = (
-                config.logical_database.name if getattr(config, "logical_database", None) else "logical database"
+        if config.database_group_id:
+            database_group_name = (
+                config.database_group.name if getattr(config, "database_group", None) else "database group"
             )
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"Подключение входит в logical database '{logical_database_name}'. "
-                    "Назначайте schema_profile на уровне logical database."
+                    f"Подключение входит в database group '{database_group_name}'. "
+                    "Назначайте schema_profile на уровне database group."
                 ),
             )
 

@@ -1,5 +1,5 @@
 """
-Контрактные проверки миграции 011 logical database state.
+Контрактные проверки миграции 011 database group state.
 """
 from pathlib import Path
 

@@ -38,7 +38,7 @@ def make_test_info(
     virtual_users: int = 4,
     iterations: int = 100,
     scenario: str = "mixed_light",
-    logical_database_id: Optional[str] = None,
+    database_group_id: Optional[str] = None,
     use_indexes: Optional[bool] = None,
 ) -> ComparisonTestInfo:
     tid = test_id or make_uuid()
@@ -54,7 +54,7 @@ def make_test_info(
         summary={"total_queries": iterations * virtual_users},
         started_at=datetime.now(timezone.utc).isoformat(),
         finished_at=datetime.now(timezone.utc).isoformat(),
-        logical_database_id=logical_database_id,
+        database_group_id=database_group_id,
         use_indexes=use_indexes,
     )
 

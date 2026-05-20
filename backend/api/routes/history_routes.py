@@ -27,7 +27,7 @@ async def get_history_tests(
     limit: int = 50,
     offset: int = 0,
     status: Optional[str] = None,
-    logical_database_id: Optional[str] = Query(None),
+    database_group_id: Optional[str] = Query(None),
 ):
     """Получить историю тестов из БД"""
     repo = get_test_repository()
@@ -35,11 +35,11 @@ async def get_history_tests(
         limit=limit,
         offset=offset,
         status=status,
-        logical_database_id=logical_database_id,
+        database_group_id=database_group_id,
     )
     total = await repo.count_test_runs(
         status=status,
-        logical_database_id=logical_database_id,
+        database_group_id=database_group_id,
     )
     return {"tests": tests, "total": total}
 

@@ -55,9 +55,9 @@ class TestHealthEndpoint:
         assert "history_db" in data
 
 
-class TestAsyncRunLogicalDatabaseGates:
+class TestAsyncRunDatabaseGroupGates:
     @pytest.mark.asyncio
-    async def test_async_run_blocks_unconfirmed_logical_database(self, client):
+    async def test_async_run_blocks_unconfirmed_database_group(self, client):
         logical_db = SimpleNamespace(
             id="logical-1",
             name="Logical",
@@ -69,8 +69,8 @@ class TestAsyncRunLogicalDatabaseGates:
         connection = SimpleNamespace(
             id="conn-1",
             name="PostgreSQL",
-            logical_database_id="logical-1",
-            logical_database=logical_db,
+            database_group_id="logical-1",
+            database_group=logical_db,
             schema_profile_id="profile-1",
             profile_source="inherited",
         )
@@ -81,11 +81,11 @@ class TestAsyncRunLogicalDatabaseGates:
 
         with (
             patch("backend.initialize.connection_repository", connection_repo),
-            patch("backend.initialize.logical_database_repository", logical_repo),
+            patch("backend.initialize.database_group_repository", logical_repo),
         ):
             resp = await client.post("/test/async", json={
                 "connection_ids": ["conn-1"],
-                "logical_database_id": "logical-1",
+                "database_group_id": "logical-1",
                 "scenario": "mixed_light",
             })
 

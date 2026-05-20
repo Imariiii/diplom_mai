@@ -26,7 +26,7 @@ def _make_test_data(
     iterations: int = 100,
     scenario: str = "mixed_light",
     db_keys: Optional[List[str]] = None,
-    logical_database_id: Optional[str] = None,
+    database_group_id: Optional[str] = None,
     scenario_template_id: Optional[str] = None,
     created_at: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -61,7 +61,7 @@ def _make_test_data(
         "created_at": created_at or datetime.now(timezone.utc).isoformat(),
         "started_at": datetime.now(timezone.utc).isoformat(),
         "finished_at": datetime.now(timezone.utc).isoformat(),
-        "logical_database_id": logical_database_id,
+        "database_group_id": database_group_id,
     }
 
 
@@ -184,10 +184,10 @@ class TestValidation:
         svc = ComparisonService(repository=AsyncMock())
         id1, id2 = uuid.uuid4(), uuid.uuid4()
         tests = [
-            _make_test_data(id1, "A", logical_database_id="ldb1"),
-            _make_test_data(id2, "B", logical_database_id="ldb2"),
+            _make_test_data(id1, "A", database_group_id="ldb1"),
+            _make_test_data(id2, "B", database_group_id="ldb2"),
         ]
-        with pytest.raises(ValueError, match="одной логической"):
+        with pytest.raises(ValueError, match="одной группе баз"):
             svc._validate_tests_for_comparison(tests)
 
     def test_incomplete_test_status_raises(self):
@@ -203,8 +203,8 @@ class TestValidation:
         svc = ComparisonService(repository=AsyncMock())
         id1, id2 = uuid.uuid4(), uuid.uuid4()
         tests = [
-            _make_test_data(id1, "A", logical_database_id="ldb1"),
-            _make_test_data(id2, "B", logical_database_id="ldb1"),
+            _make_test_data(id1, "A", database_group_id="ldb1"),
+            _make_test_data(id2, "B", database_group_id="ldb1"),
         ]
         tests[0]["config"].update({
             "resolved_bundle_id": "bundle-a",

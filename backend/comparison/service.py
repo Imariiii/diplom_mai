@@ -390,9 +390,9 @@ class ComparisonService:
         if len(bundle_ids) > 1:
             reasons.append("Различные SQL bundle сценариев")
 
-        logical_db_ids = {s.get("logical_database_id") for s in sigs if s.get("logical_database_id")}
-        if len(logical_db_ids) > 1:
-            reasons.append("Различные logical database")
+        database_group_ids = {s.get("database_group_id") for s in sigs if s.get("database_group_id")}
+        if len(database_group_ids) > 1:
+            reasons.append("Различные database group")
 
         profile_ids = set()
         for t in tests:
@@ -444,7 +444,7 @@ class ComparisonService:
             and same_workload_mode
             and same_workload_signature
             and len(bundle_ids) <= 1
-            and len(logical_db_ids) <= 1
+            and len(database_group_ids) <= 1
         )
 
         return ComparabilityReport(
@@ -761,13 +761,13 @@ class ComparisonService:
             if t.get("status") != "completed":
                 raise ValueError(f"Прогон {t.get('id')} не завершён")
 
-        logical_db_ids = set()
+        database_group_ids = set()
         for t in tests:
-            ldb = t.get("logical_database_id")
+            ldb = t.get("database_group_id")
             if ldb:
-                logical_db_ids.add(str(ldb))
-        if len(logical_db_ids) > 1:
-            raise ValueError("Все прогоны должны принадлежать одной логической базе данных")
+                database_group_ids.add(str(ldb))
+        if len(database_group_ids) > 1:
+            raise ValueError("Все прогоны должны принадлежать одной группе баз данных")
 
     def _build_workload_signature(self, test_data: Dict[str, Any]) -> Dict[str, Any]:
         config = test_data.get("config", {}) or {}
@@ -819,7 +819,7 @@ class ComparisonService:
             "db_types": tuple(sorted(config.get("db_types", []) or [])),
             "bundle_id": config.get("resolved_bundle_id") or config.get("bundle_id"),
             "profile_id": config.get("resolved_profile_id") or config.get("schema_profile_id"),
-            "logical_database_id": test_data.get("logical_database_id") or config.get("logical_database_id"),
+            "database_group_id": test_data.get("database_group_id") or config.get("database_group_id"),
             "query_ids": tuple(query_ids),
             "transaction_ids": tuple(transaction_ids),
         }
@@ -1186,7 +1186,7 @@ class ComparisonService:
             finished_at=test_data.get("finished_at"),
             scenario_info=scenario_info,
             connections=connections,
-            logical_database_id=test_data.get("logical_database_id"),
+            database_group_id=test_data.get("database_group_id"),
             use_indexes=config.get("use_indexes"),
         )
 

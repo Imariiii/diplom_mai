@@ -1,5 +1,5 @@
 """
-Pydantic схемы для управления логическими базами данных
+Pydantic схемы для управления группами баз данных
 """
 from typing import Dict, List, Optional
 
@@ -8,22 +8,22 @@ from pydantic import BaseModel, Field
 from backend.api.schemas.profile_schemas import ScenarioBundleSummaryResponse
 
 
-class LogicalDatabaseCreateRequest(BaseModel):
-    """Запрос на создание логической базы данных"""
-    name: str = Field(..., min_length=1, max_length=255, description="Уникальное название логической БД")
+class DatabaseGroupCreateRequest(BaseModel):
+    """Запрос на создание группы баз данных"""
+    name: str = Field(..., min_length=1, max_length=255, description="Уникальное название группы баз данных")
     description: Optional[str] = Field(default=None, description="Описание датасета / модели данных")
-    schema_profile_id: Optional[str] = Field(default=None, description="ID schema_profile для logical database")
+    schema_profile_id: Optional[str] = Field(default=None, description="ID schema_profile для database group")
 
 
-class LogicalDatabaseUpdateRequest(BaseModel):
-    """Запрос на обновление логической базы данных (все поля опциональны)"""
+class DatabaseGroupUpdateRequest(BaseModel):
+    """Запрос на обновление группы баз данных (все поля опциональны)"""
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = Field(default=None)
-    schema_profile_id: Optional[str] = Field(default=None, description="ID schema_profile для logical database")
+    schema_profile_id: Optional[str] = Field(default=None, description="ID schema_profile для database group")
 
 
-class LogicalDatabaseProfileAssignRequest(BaseModel):
-    """Назначение профиля модели данных логической БД."""
+class DatabaseGroupProfileAssignRequest(BaseModel):
+    """Назначение профиля модели данных группы баз данных."""
     schema_profile_id: Optional[str] = None
     profile_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     description: Optional[str] = None
@@ -31,8 +31,8 @@ class LogicalDatabaseProfileAssignRequest(BaseModel):
     profile_source: str = "manual"
 
 
-class LogicalDatabaseConnectionSummary(BaseModel):
-    """Краткая информация о подключении внутри логической БД"""
+class DatabaseGroupConnectionSummary(BaseModel):
+    """Краткая информация о подключении внутри группы баз данных"""
     id: str
     name: str
     dbms_type: str
@@ -48,8 +48,8 @@ class LogicalDatabaseConnectionSummary(BaseModel):
     is_active: bool
 
 
-class LogicalDatabaseResponse(BaseModel):
-    """Ответ с информацией о логической БД"""
+class DatabaseGroupResponse(BaseModel):
+    """Ответ с информацией о группы баз данных"""
     id: str
     name: str
     description: Optional[str] = None
@@ -63,32 +63,32 @@ class LogicalDatabaseResponse(BaseModel):
     validated_at: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
-    connections: List[LogicalDatabaseConnectionSummary] = Field(default_factory=list)
+    connections: List[DatabaseGroupConnectionSummary] = Field(default_factory=list)
 
 
-class LogicalDatabaseDetailResponse(LogicalDatabaseResponse):
-    """Детальная информация о логической БД вместе с bundle'ами."""
+class DatabaseGroupDetailResponse(DatabaseGroupResponse):
+    """Детальная информация о группы баз данных вместе с bundle'ами."""
     bundles: List[ScenarioBundleSummaryResponse] = Field(default_factory=list)
 
 
-class LogicalDatabaseListResponse(BaseModel):
-    """Список логических БД"""
-    databases: List[LogicalDatabaseResponse]
+class DatabaseGroupListResponse(BaseModel):
+    """Список групп баз данных"""
+    groups: List[DatabaseGroupResponse]
 
 
-class LogicalDatabaseBundlesGenerateResponse(BaseModel):
-    """Ответ генерации bundle'ов для logical database."""
-    logical_database: LogicalDatabaseDetailResponse
+class DatabaseGroupBundlesGenerateResponse(BaseModel):
+    """Ответ генерации bundle'ов для database group."""
+    database_group: DatabaseGroupDetailResponse
     generated_count: int
 
 
-class LogicalDatabaseReferenceUpdateRequest(BaseModel):
-    """Назначение эталонного подключения logical database."""
+class DatabaseGroupReferenceUpdateRequest(BaseModel):
+    """Назначение эталонного подключения database group."""
     reference_connection_id: str = Field(..., min_length=1)
 
 
-class LogicalDatabaseValidationResponse(BaseModel):
-    """Результат проверки совместимости logical database."""
+class DatabaseGroupValidationResponse(BaseModel):
+    """Результат проверки совместимости database group."""
     valid: bool
     errors: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)

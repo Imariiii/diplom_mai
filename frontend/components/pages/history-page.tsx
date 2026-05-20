@@ -37,12 +37,23 @@ import { apiClient, type HistoryTestRun, type HistoryTestResult, type HistoryErr
 import { useAppStore } from "@/lib/store"
 import { DB_NAMES, getDbColor } from "@/lib/chart-colors"
 import { getVisibleSelfCheckWarnings } from "@/lib/self-check"
-import type { LogicalDatabaseWithConnections } from "@/lib/types"
-import { formatSummaryUnitsLabel } from "@/lib/throughput-metrics"
+import type { DatabaseGroupWithConnections } from "@/lib/types"
+import {
+  formatAttemptRateLabel,
+  formatPrimaryThroughputLabel,
+  formatSummaryUnitsLabel,
+} from "@/lib/throughput-metrics"
+
+function historyWorkloadMode(test: HistoryTestRun): string | undefined {
+  return test.config?.workload_mode || test.summary?.workload_mode
+}
+
+function historyPrimaryRateUnit(test: HistoryTestRun): string | undefined {
+  return test.config?.primary_rate_unit || test.summary?.primary_rate_unit
+}
 
 function historyUnitsLabel(test: HistoryTestRun): string {
-  const mode = test.config?.workload_mode || test.summary?.workload_mode
-  return formatSummaryUnitsLabel(mode)
+  return formatSummaryUnitsLabel(historyWorkloadMode(test))
 }
 
 function historyUnitsCount(test: HistoryTestRun): number | string {
@@ -94,7 +105,7 @@ function inferDbTypesFromResults(results: HistoryTestResult[] | undefined): stri
 
 function getHistoryDbTypesLabel(
   test: HistoryTestRun & { results?: HistoryTestResult[] },
-  logicalDatabases: LogicalDatabaseWithConnections[],
+  databaseGroups: DatabaseGroupWithConnections[],
 ): string {
   const cfg = test.config
   if (!cfg) return "—"
@@ -105,8 +116,8 @@ function getHistoryDbTypesLabel(
   if (!connIds?.length) {
     return inferDbTypesFromResults(test.results) || "—"
   }
-  const ldId = test.logical_database_id || cfg.logical_database_id
-  const ld = ldId ? logicalDatabases.find((d) => d.id === ldId) : null
+  const ldId = test.database_group_id || cfg.database_group_id
+  const ld = ldId ? databaseGroups.find((d) => d.id === ldId) : null
   if (ld) {
     const perConn = connIds
       .map((id) => {
@@ -177,20 +188,20 @@ export function HistoryPage() {
   const [total, setTotal] = useState(0)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
 
-  const [logicalDatabases, setLogicalDatabases] = useState<LogicalDatabaseWithConnections[]>([])
-  const [selectedLogicalDbId, setSelectedLogicalDbId] = useState<string | null>(null)
+  const [databaseGroups, setDatabaseGroups] = useState<DatabaseGroupWithConnections[]>([])
+  const [selectedDatabaseGroupId, setSelectedDatabaseGroupId] = useState<string | null>(null)
   const [activeDetailTab, setActiveDetailTab] = useState("results")
 
   const pageSize = 20
 
-  // Загрузка списка логических БД при монтировании
+  // Загрузка списка групп баз данных при монтировании
   useEffect(() => {
-    apiClient.getLogicalDatabases()
-      .then((resp) => setLogicalDatabases(resp.databases))
+    apiClient.getDatabaseGroups()
+      .then((resp) => setDatabaseGroups(resp.groups))
       .catch(() => {})
   }, [])
 
-  const fetchTests = async (logicalDbId: string | null = selectedLogicalDbId) => {
+  const fetchTests = async (databaseGroupId: string | null = selectedDatabaseGroupId) => {
     setLoading(true)
     setError(null)
     try {
@@ -205,8 +216,8 @@ export function HistoryPage() {
         limit: pageSize,
         offset: page * pageSize,
       }
-      if (logicalDbId) {
-        params.logical_database_id = logicalDbId
+      if (databaseGroupId) {
+        params.database_group_id = databaseGroupId
       }
 
       const response = await apiClient.getHistoryTests(params)
@@ -254,7 +265,7 @@ export function HistoryPage() {
 
   // Сбрасываем страницу при смене фильтра
   const handleLogicalDbChange = (id: string | null) => {
-    setSelectedLogicalDbId(id)
+    setSelectedDatabaseGroupId(id)
     setPage(0)
     setSelectedIds([])
     void fetchTests(id)
@@ -279,18 +290,18 @@ export function HistoryPage() {
     return mins > 0 ? `${mins}м ${secs}с` : `${secs}с`
   }
 
-  const getLogicalDbName = (id: string | null): string => {
+  const getDatabaseGroupName = (id: string | null): string => {
     if (!id) return "-"
-    return logicalDatabases.find((db) => db.id === id)?.name ?? id.slice(0, 8) + "…"
+    return databaseGroups.find((db) => db.id === id)?.name ?? id.slice(0, 8) + "…"
   }
 
   const getConnectionNamesLabel = (test: HistoryTestRun): string => {
-    const targetLogicalDbId = test.logical_database_id || selectedLogicalDbId
-    if (!targetLogicalDbId || !test.config?.connection_ids?.length) {
+    const targetDatabaseGroupId = test.database_group_id || selectedDatabaseGroupId
+    if (!targetDatabaseGroupId || !test.config?.connection_ids?.length) {
       return "-"
     }
 
-    const logicalDb = logicalDatabases.find((db) => db.id === targetLogicalDbId)
+    const logicalDb = databaseGroups.find((db) => db.id === targetDatabaseGroupId)
     if (!logicalDb) {
       return test.config.connection_ids.join(", ")
     }
@@ -400,8 +411,8 @@ export function HistoryPage() {
   // ==================== Детали теста ====================
 
   if (selectedTest) {
-    const logicalDbName = getLogicalDbName(selectedTest.logical_database_id)
-    const selectedLogicalDbEntry = logicalDatabases.find((d) => d.id === selectedTest.logical_database_id)
+    const databaseGroupName = getDatabaseGroupName(selectedTest.database_group_id)
+    const selectedLogicalDbEntry = databaseGroups.find((d) => d.id === selectedTest.database_group_id)
     const connectionNames = getConnectionNamesLabel(selectedTest)
     const resultsWithWarnings = selectedTest.results
       .map((result) => ({
@@ -440,7 +451,7 @@ export function HistoryPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div>
                 <p className="text-muted-foreground">База данных</p>
-                <p className="font-medium">{logicalDbName}</p>
+                <p className="font-medium">{databaseGroupName}</p>
               </div>
               <div>
                 <p className="text-muted-foreground">Начало</p>
@@ -528,15 +539,15 @@ export function HistoryPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>СУБД</TableHead>
-                      <TableHead>Запрос</TableHead>
+                      <TableHead>Единица</TableHead>
                       <TableHead className="text-right">Ср. время (мс)</TableHead>
                       <TableHead className="text-right">P50 (мс)</TableHead>
                       <TableHead className="text-right">P95 (мс)</TableHead>
                       <TableHead className="text-right">P99 (мс)</TableHead>
                       <TableHead className="text-right">Min (мс)</TableHead>
                       <TableHead className="text-right">Max (мс)</TableHead>
-                      <TableHead className="text-right">Запросов/с</TableHead>
-                      <TableHead className="text-right">Успешных запросов/с</TableHead>
+                      <TableHead className="text-right">{formatAttemptRateLabel(historyWorkloadMode(selectedTest))}</TableHead>
+                      <TableHead className="text-right">{formatPrimaryThroughputLabel(historyWorkloadMode(selectedTest), historyPrimaryRateUnit(selectedTest))}</TableHead>
                       <TableHead className="text-right">Ошибок %</TableHead>
                       <TableHead className="text-right">Успешных</TableHead>
                       <TableHead className="text-right">Ошибок</TableHead>
@@ -628,7 +639,7 @@ export function HistoryPage() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>Ошибка</TableHead>
-                          <TableHead>Запрос</TableHead>
+                          <TableHead>Единица</TableHead>
                           <TableHead className="text-right">Количество</TableHead>
                           <TableHead>Первое появление</TableHead>
                         </TableRow>
@@ -672,8 +683,8 @@ export function HistoryPage() {
               <CardContent className="space-y-6">
                 <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
                   <div>
-                    <p className="text-muted-foreground">Логическая БД</p>
-                    <p className="font-medium">{logicalDbName}</p>
+                    <p className="text-muted-foreground">Группа БД</p>
+                    <p className="font-medium">{databaseGroupName}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Подключения</p>
@@ -682,7 +693,7 @@ export function HistoryPage() {
                   <div>
                     <p className="text-muted-foreground">СУБД</p>
                     <p className="font-mono break-words">
-                      {getHistoryDbTypesLabel(selectedTest, logicalDatabases)}
+                      {getHistoryDbTypesLabel(selectedTest, databaseGroups)}
                     </p>
                   </div>
                   <div>
@@ -728,7 +739,7 @@ export function HistoryPage() {
                   {selectedLogicalDbEntry?.schema_profile_name &&
                     selectedTest.config?.scenario === "custom" && (
                     <div className="sm:col-span-2 lg:col-span-3">
-                      <p className="text-muted-foreground">Профиль в каталоге (логическая БД)</p>
+                      <p className="text-muted-foreground">Профиль в каталоге (группа баз данных)</p>
                       <p className="font-mono break-words text-muted-foreground">
                         {selectedLogicalDbEntry.schema_profile_name}
                         <span className="ml-1 text-xs">
@@ -773,8 +784,8 @@ export function HistoryPage() {
 
   // ==================== Список тестов ====================
 
-  const showDbColumn = selectedLogicalDbId === null
-  const showConnectionsColumn = selectedLogicalDbId !== null
+  const showDbColumn = selectedDatabaseGroupId === null
+  const showConnectionsColumn = selectedDatabaseGroupId !== null
 
   return (
     <div className="p-6 space-y-6">
@@ -801,7 +812,7 @@ export function HistoryPage() {
         </div>
       </div>
 
-      {/* Фильтр по логической БД: одиночный выбор через выпадающий список (паттерн «фильтр категории» в панели инструментов) */}
+      {/* Фильтр по группы баз данных: одиночный выбор через выпадающий список (паттерн «фильтр категории» в панели инструментов) */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
         <div className="flex min-w-0 flex-1 flex-col gap-2 sm:max-w-md">
           <Label htmlFor="history-logical-db-filter" className="flex items-center gap-2 text-sm font-medium">
@@ -809,7 +820,7 @@ export function HistoryPage() {
             База данных
           </Label>
           <Select
-            value={selectedLogicalDbId ?? "__all__"}
+            value={selectedDatabaseGroupId ?? "__all__"}
             onValueChange={(value) => {
               handleLogicalDbChange(value === "__all__" ? null : value)
             }}
@@ -818,13 +829,13 @@ export function HistoryPage() {
               id="history-logical-db-filter"
               size="sm"
               className="h-9 w-full min-w-0 sm:max-w-md"
-              aria-label="Фильтр списка тестов по логической базе данных"
+              aria-label="Фильтр списка тестов по группе баз данных"
             >
               <SelectValue placeholder="Все базы данных" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__all__">Все базы данных</SelectItem>
-              {logicalDatabases.map((db) => (
+              {databaseGroups.map((db) => (
                 <SelectItem key={db.id} value={db.id}>
                   {db.name}
                 </SelectItem>
@@ -835,10 +846,10 @@ export function HistoryPage() {
         {total > 0 && (
           <p className="text-sm text-muted-foreground sm:self-end sm:pb-2">
             Всего записей: <span className="font-mono text-foreground">{total}</span>
-            {selectedLogicalDbId ? (
+            {selectedDatabaseGroupId ? (
               <>
                 {" · "}
-                фильтр: <span className="font-medium text-foreground">{getLogicalDbName(selectedLogicalDbId)}</span>
+                фильтр: <span className="font-medium text-foreground">{getDatabaseGroupName(selectedDatabaseGroupId)}</span>
               </>
             ) : null}
           </p>
@@ -859,9 +870,9 @@ export function HistoryPage() {
                   Сценарий: {lockedScenario}
                 </Badge>
               )}
-              {selectedLogicalDbId && (
+              {selectedDatabaseGroupId && (
                 <Badge variant="secondary" className="text-xs">
-                  БД: {getLogicalDbName(selectedLogicalDbId)}
+                  БД: {getDatabaseGroupName(selectedDatabaseGroupId)}
                 </Badge>
               )}
             </div>
@@ -891,8 +902,8 @@ export function HistoryPage() {
             <div className="flex flex-col items-center justify-center py-12">
               <History className="h-12 w-12 text-muted-foreground mb-4" />
               <p className="text-muted-foreground">
-                {selectedLogicalDbId
-                  ? `Для базы данных «${getLogicalDbName(selectedLogicalDbId)}» тестов ещё нет`
+                {selectedDatabaseGroupId
+                  ? `Для базы данных «${getDatabaseGroupName(selectedDatabaseGroupId)}» тестов ещё нет`
                   : "История тестов пуста"}
               </p>
               <p className="text-sm text-muted-foreground mt-1">
@@ -952,8 +963,8 @@ export function HistoryPage() {
                       </TableCell>
                       {showDbColumn && (
                         <TableCell className="text-sm text-muted-foreground">
-                          {test.logical_database_id
-                            ? getLogicalDbName(test.logical_database_id)
+                          {test.database_group_id
+                            ? getDatabaseGroupName(test.database_group_id)
                             : <span className="text-xs italic">—</span>
                           }
                         </TableCell>

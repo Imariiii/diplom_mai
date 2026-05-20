@@ -1,5 +1,5 @@
 """
-Проверка совместимости подключений внутри logical database.
+Проверка совместимости подключений внутри database group.
 """
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -11,7 +11,7 @@ from backend.database.check_constraint_utils import (
 )
 
 
-class LogicalDatabaseValidator:
+class DatabaseGroupValidator:
     """Валидирует, что подключения logical DB совместимы для общего SQL bundle."""
 
     def __init__(self, connection_repository: ConnectionRepository):
@@ -312,7 +312,7 @@ class LogicalDatabaseValidator:
                 for capability in table.capabilities
             })
         if table_sets and not set.intersection(*table_sets):
-            errors.append("У выбранных подключений нет общего набора таблиц для logical database")
+            errors.append("У выбранных подключений нет общего набора таблиц для database group")
         if capability_sets and not set.intersection(*capability_sets):
             self._issue(
                 errors,

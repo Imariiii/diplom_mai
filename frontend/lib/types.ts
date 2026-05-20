@@ -269,9 +269,9 @@ export interface RestoreSettings {
 }
 
 
-// ==================== Logical Database Types ====================
+// ==================== Database Group Types ====================
 
-export interface LogicalDatabase {
+export interface DatabaseGroup {
   id: string
   name: string
   description: string | null
@@ -281,33 +281,33 @@ export interface LogicalDatabase {
   reference_connection_name?: string | null
   profile_status?: 'draft' | 'confirmed' | 'needs_review' | 'incompatible' | string
   compatibility_status?: 'unknown' | 'valid' | 'valid_with_warnings' | 'invalid' | string
-  compatibility_report?: LogicalDatabaseCompatibilityReport | null
+  compatibility_report?: DatabaseGroupCompatibilityReport | null
   validated_at?: string | null
   created_at: string | null
   updated_at: string | null
 }
 
-export interface LogicalDatabaseWithConnections extends LogicalDatabase {
+export interface DatabaseGroupWithConnections extends DatabaseGroup {
   connections: DatabaseConnection[]
 }
 
-export interface LogicalDatabaseDetail extends LogicalDatabaseWithConnections {
+export interface DatabaseGroupDetail extends DatabaseGroupWithConnections {
   bundles: ScenarioBundleSummary[]
 }
 
-export interface LogicalDatabaseCreateRequest {
+export interface DatabaseGroupCreateRequest {
   name: string
   description?: string
   schema_profile_id?: string
 }
 
-export interface LogicalDatabaseUpdateRequest {
+export interface DatabaseGroupUpdateRequest {
   name?: string
   description?: string
   schema_profile_id?: string
 }
 
-export interface LogicalDatabaseProfileAssignRequest {
+export interface DatabaseGroupProfileAssignRequest {
   schema_profile_id?: string
   profile_name?: string
   description?: string
@@ -315,11 +315,11 @@ export interface LogicalDatabaseProfileAssignRequest {
   profile_source?: string
 }
 
-export interface LogicalDatabaseReferenceUpdateRequest {
+export interface DatabaseGroupReferenceUpdateRequest {
   reference_connection_id: string
 }
 
-export interface LogicalDatabaseCompatibilityReport {
+export interface DatabaseGroupCompatibilityReport {
   valid: boolean
   errors: string[]
   warnings: string[]
@@ -329,12 +329,12 @@ export interface LogicalDatabaseCompatibilityReport {
   connections?: Array<{ id: string; name: string; dbms_type: string }>
 }
 
-export interface LogicalDatabaseListResponse {
-  databases: LogicalDatabaseWithConnections[]
+export interface DatabaseGroupListResponse {
+  groups: DatabaseGroupWithConnections[]
 }
 
-export interface LogicalDatabaseBundlesGenerateResponse {
-  logical_database: LogicalDatabaseDetail
+export interface DatabaseGroupBundlesGenerateResponse {
+  database_group: DatabaseGroupDetail
   generated_count: number
 }
 
@@ -351,8 +351,8 @@ export interface DatabaseConnection {
   user: string
   database: string
   group: string | null
-  logical_database_id?: string | null
-  logical_database_name?: string | null
+  database_group_id?: string | null
+  database_group_name?: string | null
   schema_profile_id?: string | null
   schema_profile_name?: string | null
   detected_profile_name?: string | null
@@ -373,7 +373,7 @@ export interface ConnectionCreateRequest {
   password: string
   database: string
   group?: string
-  logical_database_id?: string
+  database_group_id?: string
   extra_params?: Record<string, unknown>
 }
 
@@ -386,7 +386,7 @@ export interface ConnectionUpdateRequest {
   password?: string
   database?: string
   group?: string
-  logical_database_id?: string
+  database_group_id?: string
   is_active?: boolean
   extra_params?: Record<string, unknown>
 }

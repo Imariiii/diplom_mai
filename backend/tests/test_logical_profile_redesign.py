@@ -1,11 +1,11 @@
 """
-Регрессионные тесты новой модели logical database/schema profile.
+Регрессионные тесты новой модели database group/schema profile.
 """
 from types import SimpleNamespace
 
 import pytest
 
-from backend.database.logical_database_validator import LogicalDatabaseValidator
+from backend.database.database_group_validator import DatabaseGroupValidator
 from backend.database.scenario_bundle_resolver import ScenarioBundleResolver
 from backend.database.scenario_generator import ScenarioGenerator
 from backend.database.schema_analyzer import ColumnInfo, SchemaAnalyzer, SchemaMetadata, TableInfo
@@ -16,7 +16,7 @@ def _connection(
     name,
     *,
     schema_profile_id=None,
-    logical_database=None,
+    database_group=None,
     profile_source="inherited",
 ):
     return SimpleNamespace(
@@ -26,8 +26,8 @@ def _connection(
         schema_profile_id=schema_profile_id,
         schema_profile=SimpleNamespace(name="profile") if schema_profile_id else None,
         profile_source=profile_source,
-        logical_database_id=logical_database.id if logical_database else None,
-        logical_database=logical_database,
+        database_group_id=database_group.id if database_group else None,
+        database_group=database_group,
     )
 
 
@@ -104,7 +104,7 @@ class _BundleRepo:
         return _Bundle()
 
 
-class TestLogicalDatabaseValidatorStrictMode:
+class TestDatabaseGroupValidatorStrictMode:
     def test_strict_mode_promotes_missing_column_to_error(self):
         reference = _metadata("ref", _table(
             "orders",
@@ -119,7 +119,7 @@ class TestLogicalDatabaseValidatorStrictMode:
             [ColumnInfo("id", "integer", False, is_primary_key=True, category="integer")],
             primary_key=["id"],
         ))
-        validator = LogicalDatabaseValidator.__new__(LogicalDatabaseValidator)
+        validator = DatabaseGroupValidator.__new__(DatabaseGroupValidator)
         errors = []
         warnings = []
 
@@ -153,7 +153,7 @@ class TestLogicalDatabaseValidatorStrictMode:
             ],
             primary_key=["id"],
         ))
-        validator = LogicalDatabaseValidator.__new__(LogicalDatabaseValidator)
+        validator = DatabaseGroupValidator.__new__(DatabaseGroupValidator)
         errors = []
         warnings = []
 
@@ -183,7 +183,7 @@ class TestLogicalDatabaseValidatorStrictMode:
             ],
             primary_key=["actor_id"],
         ))
-        validator = LogicalDatabaseValidator.__new__(LogicalDatabaseValidator)
+        validator = DatabaseGroupValidator.__new__(DatabaseGroupValidator)
         errors = []
         warnings = []
 
@@ -226,7 +226,7 @@ class TestLogicalDatabaseValidatorStrictMode:
             ],
             primary_key=["actor_id"],
         ))
-        validator = LogicalDatabaseValidator.__new__(LogicalDatabaseValidator)
+        validator = DatabaseGroupValidator.__new__(DatabaseGroupValidator)
         errors = []
         warnings = []
 
@@ -249,7 +249,7 @@ class TestLogicalDatabaseValidatorStrictMode:
             [ColumnInfo("address_id", "integer", False, is_primary_key=True, category="integer")],
             primary_key=["address_id"],
         ))
-        validator = LogicalDatabaseValidator.__new__(LogicalDatabaseValidator)
+        validator = DatabaseGroupValidator.__new__(DatabaseGroupValidator)
         errors = []
         warnings = []
 
@@ -274,7 +274,7 @@ class TestLogicalDatabaseValidatorStrictMode:
             [ColumnInfo("film_id", "integer", False, category="integer")],
             primary_key=["film_id"],
         ))
-        validator = LogicalDatabaseValidator.__new__(LogicalDatabaseValidator)
+        validator = DatabaseGroupValidator.__new__(DatabaseGroupValidator)
         errors = []
         warnings = []
 
@@ -308,7 +308,7 @@ class TestLogicalDatabaseValidatorStrictMode:
             "orders",
             [ColumnInfo("comment", "text", True, category="string")],
         ))
-        validator = LogicalDatabaseValidator.__new__(LogicalDatabaseValidator)
+        validator = DatabaseGroupValidator.__new__(DatabaseGroupValidator)
         errors = []
         warnings = []
 
@@ -345,7 +345,7 @@ class TestLogicalDatabaseValidatorStrictMode:
             "review_score IS NOT NULL",
             "(((review_score >= 1) AND (review_score <= 5)))",
         ]
-        validator = LogicalDatabaseValidator.__new__(LogicalDatabaseValidator)
+        validator = DatabaseGroupValidator.__new__(DatabaseGroupValidator)
         errors = []
         warnings = []
 
@@ -374,7 +374,7 @@ class TestScenarioBundleResolverProfileSync:
             "conn-1",
             "PostgreSQL",
             schema_profile_id=None,
-            logical_database=logical_db,
+            database_group=logical_db,
         )
         resolver = ScenarioBundleResolver(_ConnectionRepo([connection]), _BundleRepo())
 
@@ -390,8 +390,8 @@ class TestScenarioBundleResolverProfileSync:
             reference_connection_id="conn-2",
         )
         connections = [
-            _connection("conn-1", "MySQL", schema_profile_id="profile-1", logical_database=logical_db),
-            _connection("conn-2", "PostgreSQL", schema_profile_id="profile-1", logical_database=logical_db),
+            _connection("conn-1", "MySQL", schema_profile_id="profile-1", database_group=logical_db),
+            _connection("conn-2", "PostgreSQL", schema_profile_id="profile-1", database_group=logical_db),
         ]
         calls = {}
 
@@ -402,7 +402,7 @@ class TestScenarioBundleResolverProfileSync:
             return {"valid": True, "errors": [], "warnings": []}
 
         monkeypatch.setattr(
-            "backend.database.scenario_bundle_resolver.LogicalDatabaseValidator.validate_connections",
+            "backend.database.scenario_bundle_resolver.DatabaseGroupValidator.validate_connections",
             fake_validate,
         )
         resolver = ScenarioBundleResolver(_ConnectionRepo(connections), _BundleRepo())
@@ -430,8 +430,8 @@ class TestScenarioBundleResolverProfileSync:
             compatibility_status="valid_with_warnings",
         )
         connections = [
-            _connection("conn-1", "Sakila", schema_profile_id="profile-1", logical_database=logical_db),
-            _connection("conn-2", "Pagila", schema_profile_id="profile-1", logical_database=logical_db),
+            _connection("conn-1", "Sakila", schema_profile_id="profile-1", database_group=logical_db),
+            _connection("conn-2", "Pagila", schema_profile_id="profile-1", database_group=logical_db),
         ]
         requested = {}
 
@@ -452,7 +452,7 @@ class TestScenarioBundleResolverProfileSync:
             return {"valid": True, "errors": [], "warnings": []}
 
         monkeypatch.setattr(
-            "backend.database.scenario_bundle_resolver.LogicalDatabaseValidator.validate_connections",
+            "backend.database.scenario_bundle_resolver.DatabaseGroupValidator.validate_connections",
             fake_validate,
         )
         resolver = ScenarioBundleResolver(_ConnectionRepo(connections), _TrackingBundleRepo())
@@ -476,15 +476,15 @@ class TestScenarioBundleResolverProfileSync:
             compatibility_status="valid",
         )
         connections = [
-            _connection("conn-1", "Sakila", schema_profile_id="profile-1", logical_database=logical_db),
-            _connection("conn-2", "Pagila", schema_profile_id="profile-1", logical_database=logical_db),
+            _connection("conn-1", "Sakila", schema_profile_id="profile-1", database_group=logical_db),
+            _connection("conn-2", "Pagila", schema_profile_id="profile-1", database_group=logical_db),
         ]
 
         async def fake_validate(self, connection_ids, reference_connection_id=None, mode="lenient"):
             return {"valid": True, "errors": [], "warnings": []}
 
         monkeypatch.setattr(
-            "backend.database.scenario_bundle_resolver.LogicalDatabaseValidator.validate_connections",
+            "backend.database.scenario_bundle_resolver.DatabaseGroupValidator.validate_connections",
             fake_validate,
         )
 
@@ -527,7 +527,7 @@ class TestScenarioBundleResolverProfileSync:
             "conn-1",
             "PostgreSQL",
             schema_profile_id="profile-1",
-            logical_database=logical_db,
+            database_group=logical_db,
             profile_source="pending_review",
         )
         resolver = ScenarioBundleResolver(_ConnectionRepo([connection]), _BundleRepo())
@@ -536,7 +536,7 @@ class TestScenarioBundleResolverProfileSync:
             await resolver.resolve_for_connections(["conn-1"], scenario_template_id="mixed_light")
 
     @pytest.mark.asyncio
-    async def test_resolver_blocks_unconfirmed_logical_database_state(self):
+    async def test_resolver_blocks_unconfirmed_database_group_state(self):
         logical_db = SimpleNamespace(
             id="logical-1",
             name="Logical",
@@ -549,7 +549,7 @@ class TestScenarioBundleResolverProfileSync:
             "conn-1",
             "PostgreSQL",
             schema_profile_id="profile-1",
-            logical_database=logical_db,
+            database_group=logical_db,
         )
         resolver = ScenarioBundleResolver(_ConnectionRepo([connection]), _BundleRepo())
 

@@ -113,7 +113,7 @@ export interface ComparisonTestInfo {
   finished_at?: string | null
   scenario_info?: ScenarioInfo | null
   connections: ConnectionInfo[]
-  logical_database_id?: string | null
+  database_group_id?: string | null
   use_indexes?: boolean | null
 }
 

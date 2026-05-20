@@ -40,8 +40,8 @@ import type {
   ConnectionSchemaPreview,
   ConnectionTestResponse,
   DatabaseConnection,
-  LogicalDatabase,
-  LogicalDatabaseProfileAssignRequest,
+  DatabaseGroup,
+  DatabaseGroupProfileAssignRequest,
   SchemaProfileSummary,
   SupportedDbmsType,
 } from "@/lib/types"
@@ -143,10 +143,10 @@ function translateConnectionError(raw: string): string {
 }
 
 export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProps) {
-  // --- Состояние логических БД ---
+  // --- Состояние групп баз данных ---
   // Только метаданные (id, name, description) — без вложенных connections
-  const [logicalDatabases, setLogicalDatabases] = useState<LogicalDatabase[]>([])
-  // Полные connections, сгруппированные по logical_database_id
+  const [databaseGroups, setDatabaseGroups] = useState<DatabaseGroup[]>([])
+  // Полные connections, сгруппированные по database_group_id
   const [groupedConnections, setGroupedConnections] = useState<Record<string, DatabaseConnection[]>>({})
   const [ungroupedConnections, setUngroupedConnections] = useState<DatabaseConnection[]>([])
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
@@ -155,20 +155,20 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
   // --- Состояние потока добавления ---
   const [addMode, setAddMode] = useState<AddMode>(null)
 
-  // Шаг 1: создание новой логической БД
+  // Шаг 1: создание новой группы баз данных
   const [newDbDialogOpen, setNewDbDialogOpen] = useState(false)
   const [newDbName, setNewDbName] = useState("")
   const [newDbDescription, setNewDbDescription] = useState("")
   const [creatingDb, setCreatingDb] = useState(false)
 
-  // Шаг 1 (альт): выбор существующей логической БД
+  // Шаг 1 (альт): выбор существующей группы баз данных
   const [selectDbDialogOpen, setSelectDbDialogOpen] = useState(false)
-  const [selectedLogicalDbId, setSelectedLogicalDbId] = useState<string>("")
+  const [selectedDatabaseGroupId, setSelectedDatabaseGroupId] = useState<string>("")
 
   // Шаг 2: диалог нового/редактирования подключения
   const [connectionDialogOpen, setConnectionDialogOpen] = useState(false)
   const [editingConnection, setEditingConnection] = useState<DatabaseConnection | null>(null)
-  const [targetLogicalDb, setTargetLogicalDb] = useState<{ id: string; name: string } | null>(null)
+  const [targetDatabaseGroup, setTargetDatabaseGroup] = useState<{ id: string; name: string } | null>(null)
   const [groups, setGroups] = useState<string[]>([])
   const [formData, setFormData] = useState<ConnectionCreateRequest>({
     name: "",
@@ -186,7 +186,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
 
   // --- Диалог профиля/сценариев ---
   const [schemaDialogOpen, setSchemaDialogOpen] = useState(false)
-  const [schemaPreviewLogicalDb, setSchemaPreviewLogicalDb] = useState<LogicalDatabase | null>(null)
+  const [schemaPreviewDatabaseGroup, setSchemaPreviewDatabaseGroup] = useState<DatabaseGroup | null>(null)
   const [schemaPreviewConnection, setSchemaPreviewConnection] = useState<DatabaseConnection | null>(null)
   const [schemaPreview, setSchemaPreview] = useState<ConnectionSchemaPreview | null>(null)
   const [availableProfiles, setAvailableProfiles] = useState<SchemaProfileSummary[]>([])
@@ -196,7 +196,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
   const [selectedProfileId, setSelectedProfileId] = useState<string>("")
   const [customProfileName, setCustomProfileName] = useState("")
   const [customProfileDescription, setCustomProfileDescription] = useState("")
-  const [compatibilityReportDb, setCompatibilityReportDb] = useState<LogicalDatabase | null>(null)
+  const [compatibilityReportDb, setCompatibilityReportDb] = useState<DatabaseGroup | null>(null)
 
   useEffect(() => {
     loadAll()
@@ -206,12 +206,12 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
     setLoading(true)
     try {
       const [logicalResp, connectionsResp] = await Promise.all([
-        apiClient.getLogicalDatabases(),
+        apiClient.getDatabaseGroups(),
         apiClient.getConnections(),
       ])
 
-      // Сохраняем только метаданные логических БД
-      const logicalDbs: LogicalDatabase[] = logicalResp.databases.map((db) => ({
+      // Сохраняем только метаданные групп баз данных
+      const logicalDbs: DatabaseGroup[] = logicalResp.groups.map((db) => ({
         id: db.id,
         name: db.name,
         description: db.description,
@@ -226,16 +226,16 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
         created_at: db.created_at,
         updated_at: db.updated_at,
       }))
-      setLogicalDatabases(logicalDbs)
+      setDatabaseGroups(logicalDbs)
       setGroups(connectionsResp.groups)
 
-      // Группируем полные connections по logical_database_id
+      // Группируем полные connections по database_group_id
       const grouped: Record<string, DatabaseConnection[]> = {}
       const ungrouped: DatabaseConnection[] = []
       for (const conn of connectionsResp.connections) {
-        if (conn.logical_database_id) {
-          if (!grouped[conn.logical_database_id]) grouped[conn.logical_database_id] = []
-          grouped[conn.logical_database_id].push(conn)
+        if (conn.database_group_id) {
+          if (!grouped[conn.database_group_id]) grouped[conn.database_group_id] = []
+          grouped[conn.database_group_id].push(conn)
         } else {
           ungrouped.push(conn)
         }
@@ -276,7 +276,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
 
   const handleAddToExistingDb = () => {
     setAddMode("existing-db")
-    setSelectedLogicalDbId(logicalDatabases[0]?.id || "")
+    setSelectedDatabaseGroupId(databaseGroups[0]?.id || "")
     setSelectDbDialogOpen(true)
   }
 
@@ -287,13 +287,13 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
     }
     setCreatingDb(true)
     try {
-      const created = await apiClient.createLogicalDatabase({
+      const created = await apiClient.createDatabaseGroup({
         name: newDbName.trim(),
         description: newDbDescription.trim() || undefined,
       })
       toast.success(`База данных «${created.name}» создана`)
       setNewDbDialogOpen(false)
-      setTargetLogicalDb({ id: created.id, name: created.name })
+      setTargetDatabaseGroup({ id: created.id, name: created.name })
       openCreateConnectionDialog(created.id, created.name)
       await loadAll()
     } catch (error) {
@@ -304,19 +304,19 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
   }
 
   const confirmSelectDb = () => {
-    const db = logicalDatabases.find((d) => d.id === selectedLogicalDbId)
+    const db = databaseGroups.find((d) => d.id === selectedDatabaseGroupId)
     if (!db) {
       toast.error("Выберите базу данных")
       return
     }
     setSelectDbDialogOpen(false)
-    setTargetLogicalDb({ id: db.id, name: db.name })
+    setTargetDatabaseGroup({ id: db.id, name: db.name })
     openCreateConnectionDialog(db.id, db.name)
   }
 
-  const openCreateConnectionDialog = (logicalDbId: string, logicalDbName: string) => {
+  const openCreateConnectionDialog = (databaseGroupId: string, databaseGroupName: string) => {
     setEditingConnection(null)
-    setTargetLogicalDb({ id: logicalDbId, name: logicalDbName })
+    setTargetDatabaseGroup({ id: databaseGroupId, name: databaseGroupName })
     setFormData({
       name: "",
       dbms_type: "mysql",
@@ -326,7 +326,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
       password: "",
       database: "",
       group: "local",
-      logical_database_id: logicalDbId,
+      database_group_id: databaseGroupId,
     })
     setTestingForm(null)
     setConnectionDialogOpen(true)
@@ -334,9 +334,9 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
 
   const openEditDialog = (conn: DatabaseConnection) => {
     setEditingConnection(conn)
-    setTargetLogicalDb(
-      conn.logical_database_id && conn.logical_database_name
-        ? { id: conn.logical_database_id, name: conn.logical_database_name }
+    setTargetDatabaseGroup(
+      conn.database_group_id && conn.database_group_name
+        ? { id: conn.database_group_id, name: conn.database_group_name }
         : null
     )
     setFormData({
@@ -348,7 +348,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
       password: "",
       database: conn.database,
       group: conn.group || "local",
-      logical_database_id: conn.logical_database_id || undefined,
+      database_group_id: conn.database_group_id || undefined,
     })
     setTestingForm(null)
     setConnectionDialogOpen(true)
@@ -407,7 +407,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
           user: formData.user,
           database: formData.database,
           group: formData.group,
-          logical_database_id: formData.logical_database_id,
+          database_group_id: formData.database_group_id,
         }
         if (formData.password) updateData.password = formData.password
         await apiClient.updateConnection(editingConnection.id, updateData)
@@ -451,10 +451,10 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
     }
   }
 
-  const deleteLogicalDatabase = async (id: string, name: string) => {
+  const deleteDatabaseGroup = async (id: string, name: string) => {
     if (!confirm(`Удалить базу данных «${name}»? Подключения останутся, но потеряют привязку.`)) return
     try {
-      await apiClient.deleteLogicalDatabase(id)
+      await apiClient.deleteDatabaseGroup(id)
       toast.success(`База данных «${name}» удалена`)
       loadAll()
     } catch {
@@ -466,10 +466,10 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
 
   const loadSchemaDialog = async (
     connection: DatabaseConnection,
-    logicalDb: LogicalDatabase | null = null
+    logicalDb: DatabaseGroup | null = null
   ) => {
     setSchemaDialogOpen(true)
-    setSchemaPreviewLogicalDb(logicalDb)
+    setSchemaPreviewDatabaseGroup(logicalDb)
     setSchemaPreviewConnection(connection)
     setSchemaPreview(null)
     setAvailableProfiles([])
@@ -513,7 +513,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
     await loadSchemaDialog(connection, null)
   }
 
-  const openLogicalDatabaseScenarioDialog = async (logicalDb: LogicalDatabase) => {
+  const openDatabaseGroupScenarioDialog = async (logicalDb: DatabaseGroup) => {
     const candidates = groupedConnections[logicalDb.id] || []
     const referenceConnection =
       candidates.find((connection) => connection.id === logicalDb.reference_connection_id) ||
@@ -533,18 +533,18 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
   }
 
   const handleSchemaReferenceConnectionChange = async (connectionId: string) => {
-    const candidates = schemaPreviewLogicalDb
-      ? (groupedConnections[schemaPreviewLogicalDb.id] || [])
+    const candidates = schemaPreviewDatabaseGroup
+      ? (groupedConnections[schemaPreviewDatabaseGroup.id] || [])
       : ungroupedConnections
     const nextConnection = candidates.find((connection) => connection.id === connectionId)
     if (!nextConnection) return
-    await loadSchemaDialog(nextConnection, schemaPreviewLogicalDb)
+    await loadSchemaDialog(nextConnection, schemaPreviewDatabaseGroup)
   }
 
   const assignProfile = async (): Promise<{ schema_profile_id?: string | null } | null> => {
     if (!schemaPreviewConnection) return null
-    if (schemaPreviewLogicalDb) {
-      const payload: LogicalDatabaseProfileAssignRequest = {
+    if (schemaPreviewDatabaseGroup) {
+      const payload: DatabaseGroupProfileAssignRequest = {
         profile_source: "manual",
         reference_connection_id: schemaPreviewConnection.id,
       }
@@ -558,9 +558,9 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
         return null
       }
 
-      const updated = await apiClient.assignLogicalDatabaseProfile(schemaPreviewLogicalDb.id, payload)
+      const updated = await apiClient.assignDatabaseGroupProfile(schemaPreviewDatabaseGroup.id, payload)
       await loadAll()
-      setSchemaPreviewLogicalDb({
+      setSchemaPreviewDatabaseGroup({
         id: updated.id,
         name: updated.name,
         description: updated.description,
@@ -613,8 +613,8 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
       const profileId = updatedTarget?.schema_profile_id
       if (!profileId) throw new Error("Не удалось определить профиль для генерации сценариев")
 
-      const result = schemaPreviewLogicalDb
-        ? await apiClient.generateLogicalDatabaseBundles(schemaPreviewLogicalDb.id, {
+      const result = schemaPreviewDatabaseGroup
+        ? await apiClient.generateDatabaseGroupBundles(schemaPreviewDatabaseGroup.id, {
             reference_connection_id: schemaPreviewConnection.id,
             scenario_template_ids: selectedScenarioTypes,
           })
@@ -634,9 +634,9 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
     }
   }
 
-  const validateLogicalDatabase = async (logicalDb: LogicalDatabase) => {
+  const validateDatabaseGroup = async (logicalDb: DatabaseGroup) => {
     try {
-      const report = await apiClient.validateLogicalDatabase(logicalDb.id, {
+      const report = await apiClient.validateDatabaseGroup(logicalDb.id, {
         reference_connection_id: logicalDb.reference_connection_id || undefined,
         mode: "strict",
       })
@@ -644,9 +644,9 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
       if (report.valid) {
         toast.success(report.warnings.length > 0
           ? "Совместимость подтверждена с предупреждениями"
-          : "Совместимость logical database подтверждена")
+          : "Совместимость database group подтверждена")
       } else {
-        toast.error(report.errors[0] || "Logical database несовместима")
+        toast.error(report.errors[0] || "Database group несовместима")
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Не удалось проверить совместимость")
@@ -654,10 +654,10 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
   }
 
   const confirmConnectionProfile = async (conn: DatabaseConnection) => {
-    if (!conn.logical_database_id) return
+    if (!conn.database_group_id) return
     try {
-      const updated = await apiClient.confirmLogicalDatabaseConnectionProfile(
-        conn.logical_database_id,
+      const updated = await apiClient.confirmDatabaseGroupConnectionProfile(
+        conn.database_group_id,
         conn.id
       )
       await loadAll()
@@ -666,7 +666,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
       } else {
         toast.error(
           updated.compatibility_report?.errors?.[0] ||
-          "Подключение несовместимо с logical database"
+          "Подключение несовместимо с database group"
         )
       }
     } catch (error) {
@@ -705,7 +705,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
           </div>
           <div className="text-xs text-muted-foreground">
             профиль: {conn.schema_profile_name || conn.detected_profile_name || "не назначен"}
-            {conn.logical_database_id
+            {conn.database_group_id
               ? conn.profile_source === "pending_review"
                 ? " · требует подтверждения"
                 : " · подтверждён"
@@ -734,7 +734,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
             <Play className="h-4 w-4" />
           )}
         </Button>
-        {!conn.logical_database_id && (
+        {!conn.database_group_id && (
           <Button
             variant="ghost"
             size="sm"
@@ -744,7 +744,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
             <Database className="h-4 w-4" />
           </Button>
         )}
-        {conn.logical_database_id && conn.profile_source === "pending_review" && (
+        {conn.database_group_id && conn.profile_source === "pending_review" && (
           <Button
             variant="ghost"
             size="sm"
@@ -804,7 +804,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={handleAddToExistingDb}
-                  disabled={logicalDatabases.length === 0}
+                  disabled={databaseGroups.length === 0}
                 >
                   <Database className="mr-2 h-4 w-4" />
                   Добавить к существующей базе данных
@@ -820,7 +820,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               Загрузка...
             </div>
-          ) : logicalDatabases.length === 0 && ungroupedConnections.length === 0 ? (
+          ) : databaseGroups.length === 0 && ungroupedConnections.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <Database className="mx-auto h-8 w-8 mb-2 opacity-50" />
               <p>Нет баз данных</p>
@@ -829,7 +829,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
           ) : (
             <div className="space-y-2">
               {/* Сгруппированные подключения */}
-              {logicalDatabases.map((logicalDb) => {
+              {databaseGroups.map((logicalDb) => {
                 const dbConnections = groupedConnections[logicalDb.id] || []
                 return (
                   <Collapsible
@@ -885,14 +885,14 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem
-                              onClick={() => { void openLogicalDatabaseScenarioDialog(logicalDb) }}
+                              onClick={() => { void openDatabaseGroupScenarioDialog(logicalDb) }}
                               disabled={dbConnections.length === 0}
                             >
                               <Database className="mr-2 h-4 w-4" />
                               Профиль и сценарии тестирования
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              onClick={() => { void validateLogicalDatabase(logicalDb) }}
+                              onClick={() => { void validateDatabaseGroup(logicalDb) }}
                               disabled={dbConnections.length === 0}
                             >
                               <CheckCircle className="mr-2 h-4 w-4" />
@@ -907,7 +907,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() => {
-                                setTargetLogicalDb({ id: logicalDb.id, name: logicalDb.name })
+                                setTargetDatabaseGroup({ id: logicalDb.id, name: logicalDb.name })
                                 openCreateConnectionDialog(logicalDb.id, logicalDb.name)
                               }}
                             >
@@ -916,7 +916,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-red-500 focus:text-red-500"
-                              onClick={() => deleteLogicalDatabase(logicalDb.id, logicalDb.name)}
+                              onClick={() => deleteDatabaseGroup(logicalDb.id, logicalDb.name)}
                             >
                               <Trash2 className="mr-2 h-4 w-4" />
                               Удалить базу данных
@@ -941,7 +941,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
                 )
               })}
 
-              {/* Подключения без логической БД */}
+              {/* Подключения без группы баз данных */}
               {ungroupedConnections.length > 0 && (
                 <Collapsible
                   open={openGroups.has("__ungrouped__")}
@@ -974,7 +974,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
         </CardContent>
       </Card>
 
-      {/* ===== Диалог: Новая логическая БД ===== */}
+      {/* ===== Диалог: Новая группа баз данных ===== */}
       <Dialog open={newDbDialogOpen} onOpenChange={setNewDbDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -1016,7 +1016,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
         </DialogContent>
       </Dialog>
 
-      {/* ===== Диалог: Выбор существующей логической БД ===== */}
+      {/* ===== Диалог: Выбор существующей группы баз данных ===== */}
       <Dialog open={selectDbDialogOpen} onOpenChange={setSelectDbDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -1026,11 +1026,11 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
             </DialogDescription>
           </DialogHeader>
           <div className="py-4 space-y-3">
-            {logicalDatabases.map((db) => (
+            {databaseGroups.map((db) => (
               <label
                 key={db.id}
                 className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                  selectedLogicalDbId === db.id
+                  selectedDatabaseGroupId === db.id
                     ? "border-primary bg-primary/10"
                     : "border-border hover:border-muted-foreground"
                 }`}
@@ -1039,8 +1039,8 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
                   type="radio"
                   name="logical-db-select"
                   value={db.id}
-                  checked={selectedLogicalDbId === db.id}
-                  onChange={() => setSelectedLogicalDbId(db.id)}
+                  checked={selectedDatabaseGroupId === db.id}
+                  onChange={() => setSelectedDatabaseGroupId(db.id)}
                   className="accent-primary"
                 />
                 <div>
@@ -1059,7 +1059,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
             <Button variant="outline" onClick={() => setSelectDbDialogOpen(false)}>
               Отмена
             </Button>
-            <Button onClick={confirmSelectDb} disabled={!selectedLogicalDbId}>
+            <Button onClick={confirmSelectDb} disabled={!selectedDatabaseGroupId}>
               Далее
             </Button>
           </DialogFooter>
@@ -1074,9 +1074,9 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
               {editingConnection ? "Редактировать подключение" : "Новое подключение"}
             </DialogTitle>
             <DialogDescription>
-              {targetLogicalDb ? (
+              {targetDatabaseGroup ? (
                 <>
-                  База данных: <span className="font-medium">{targetLogicalDb.name}</span>
+                  База данных: <span className="font-medium">{targetDatabaseGroup.name}</span>
                 </>
               ) : (
                 editingConnection
@@ -1229,12 +1229,12 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
         <DialogContent className="top-[3vh] flex max-h-[94vh] w-[min(98vw,92rem)] max-w-none translate-y-0 flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
           <DialogHeader className="shrink-0 px-6 pt-6 pr-14">
             <DialogTitle>
-              {schemaPreviewLogicalDb
-                ? `Профиль схемы и сценарии для «${schemaPreviewLogicalDb.name}»`
+              {schemaPreviewDatabaseGroup
+                ? `Профиль схемы и сценарии для «${schemaPreviewDatabaseGroup.name}»`
                 : `Профиль схемы и сценарии для «${schemaPreviewConnection?.name || "подключения"}»`}
             </DialogTitle>
             <DialogDescription>
-              {schemaPreviewLogicalDb
+              {schemaPreviewDatabaseGroup
                 ? "Подтвердите профиль для базы данных и выберите эталонное подключение для генерации сценариев"
                 : "Подтвердите или переопределите профиль схемы, затем сгенерируйте сценарии тестирования"}
             </DialogDescription>
@@ -1265,13 +1265,13 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
                   </div>
 
                   <div className="rounded-lg border p-4 space-y-3">
-                    {schemaPreviewLogicalDb && (
+                    {schemaPreviewDatabaseGroup && (
                       <div className="grid gap-3 md:grid-cols-2">
                         <div className="rounded-lg bg-muted/50 p-3">
                           <div className="text-sm text-muted-foreground">База данных</div>
-                          <div className="font-medium">{schemaPreviewLogicalDb.name}</div>
+                          <div className="font-medium">{schemaPreviewDatabaseGroup.name}</div>
                           <div className="text-xs text-muted-foreground mt-1">
-                            {schemaPreviewLogicalDb.description || "Без описания"}
+                            {schemaPreviewDatabaseGroup.description || "Без описания"}
                           </div>
                         </div>
                         <div className="space-y-2">
@@ -1284,7 +1284,7 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
                               <SelectValue placeholder="Выберите подключение" />
                             </SelectTrigger>
                             <SelectContent>
-                              {(groupedConnections[schemaPreviewLogicalDb.id] || []).map((connection) => (
+                              {(groupedConnections[schemaPreviewDatabaseGroup.id] || []).map((connection) => (
                                 <SelectItem key={connection.id} value={connection.id}>
                                   {connection.name} · {connection.dbms_type}
                                 </SelectItem>
@@ -1299,14 +1299,14 @@ export function ConnectionManager({ onConnectionsChange }: ConnectionManagerProp
                       <div className="rounded-lg bg-muted/50 p-3">
                         <div className="text-sm text-muted-foreground">Текущий профиль</div>
                         <div className="font-medium">
-                          {schemaPreviewLogicalDb?.schema_profile_name ||
+                          {schemaPreviewDatabaseGroup?.schema_profile_name ||
                             schemaPreview.current_profile?.name ||
                             schemaPreviewConnection?.schema_profile_name ||
                             "не назначен"}
                         </div>
                         <div className="text-xs text-muted-foreground mt-1">
                           {schemaPreview.current_profile?.description ||
-                            (schemaPreviewLogicalDb
+                            (schemaPreviewDatabaseGroup
                               ? "Профиль задаётся на уровне базы данных"
                               : "Пока профиль не подтверждён вручную")}
                         </div>

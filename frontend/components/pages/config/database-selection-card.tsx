@@ -49,12 +49,12 @@ export function DatabaseSelectionCard({
   const seen = new Set<string | null>()
 
   for (const conn of connections) {
-    const gId = conn.logical_database_id || null
+    const gId = conn.database_group_id || null
     if (!seen.has(gId)) {
       seen.add(gId)
       groups.push({
         id: gId,
-        name: conn.logical_database_name || (gId ? gId : "Без базы данных"),
+        name: conn.database_group_name || (gId ? gId : "Без базы данных"),
         schemaProfileName: conn.schema_profile_name || conn.detected_profile_name || null,
         connections: [],
       })
@@ -107,7 +107,7 @@ export function DatabaseSelectionCard({
               {group.connections.map((conn) => {
                 const check = connectionChecks[conn.id]
                 const requiresProfileReview =
-                  conn.logical_database_id && (!conn.schema_profile_id || conn.profile_source === "pending_review")
+                  conn.database_group_id && (!conn.schema_profile_id || conn.profile_source === "pending_review")
                 const canSelect = !checksPending && check?.ok === true && !requiresProfileReview
                 return (
                   <label

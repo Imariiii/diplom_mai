@@ -1,5 +1,5 @@
 """
-Интеграционные preflight-тесты запуска logical database сценариев.
+Интеграционные preflight-тесты запуска database group сценариев.
 """
 import os
 from typing import Iterable, List
@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy.exc import OperationalError
 
 from backend.database.repository.connection_repository import ConnectionRepository
-from backend.database.repository.logical_database_repository import LogicalDatabaseRepository
+from backend.database.repository.database_group_repository import DatabaseGroupRepository
 from backend.database.repository.scenario_bundle_repository import ScenarioBundleRepository
 from backend.database.scenario_bundle_resolver import ScenarioBundleResolver
 from backend.database.scenario_bundle_validator import ScenarioBundleValidator
@@ -18,7 +18,7 @@ from backend.database.scenario_generator import DEFAULT_SCENARIO_TYPES
 pytestmark = pytest.mark.integration
 
 DEFAULT_HISTORY_URL = "postgresql+asyncpg://postgres:history123@localhost:5433/project_data"
-DEFAULT_LOGICAL_DATABASES = ("Sakila", "Brazilian E-com")
+DEFAULT_DATABASE_GROUPS = ("Sakila", "Brazilian E-com")
 DEFAULT_SCENARIOS = tuple(DEFAULT_SCENARIO_TYPES)
 EXPECTED_DBMS_TYPES = {"postgresql", "mysql", "mariadb"}
 
@@ -32,7 +32,7 @@ def _split_env(name: str, default: Iterable[str]) -> List[str]:
 
 def _history_url() -> str:
     return (
-        os.getenv("LOGICAL_PREFLIGHT_HISTORY_DATABASE_URL")
+        os.getenv("DATABASE_GROUP_PREFLIGHT_HISTORY_DATABASE_URL")
         or os.getenv("HISTORY_DATABASE_URL")
         or DEFAULT_HISTORY_URL
     )
@@ -40,10 +40,10 @@ def _history_url() -> str:
 
 @pytest.fixture(scope="module")
 def preflight_enabled():
-    if os.getenv("LOGICAL_PREFLIGHT_ENABLED") != "1":
+    if os.getenv("DATABASE_GROUP_PREFLIGHT_ENABLED") != "1":
         pytest.skip(
             "Preflight logical DB tests are opt-in. "
-            "Set LOGICAL_PREFLIGHT_ENABLED=1 and load .env with ENCRYPTION_KEY."
+            "Set DATABASE_GROUP_PREFLIGHT_ENABLED=1 and load .env with ENCRYPTION_KEY."
         )
 
 
@@ -51,29 +51,29 @@ def preflight_enabled():
 async def repositories(preflight_enabled):
     history_url = _history_url()
     connection_repo = ConnectionRepository(history_url)
-    logical_db_repo = LogicalDatabaseRepository(history_url)
+    database_group_repo = DatabaseGroupRepository(history_url)
     bundle_repo = ScenarioBundleRepository(history_url)
     try:
-        yield connection_repo, logical_db_repo, bundle_repo
+        yield connection_repo, database_group_repo, bundle_repo
     except OperationalError as exc:
         pytest.skip(f"project_data is not available for logical DB preflight: {exc}")
     finally:
         await connection_repo.engine.dispose()
-        await logical_db_repo.engine.dispose()
+        await database_group_repo.engine.dispose()
         await bundle_repo.engine.dispose()
 
 
-@pytest.mark.parametrize("logical_db_name", _split_env("LOGICAL_PREFLIGHT_DATABASES", DEFAULT_LOGICAL_DATABASES))
-@pytest.mark.parametrize("scenario_template_id", _split_env("LOGICAL_PREFLIGHT_SCENARIOS", DEFAULT_SCENARIOS))
-async def test_logical_database_bundle_is_ready_for_load_test(
+@pytest.mark.parametrize("logical_db_name", _split_env("DATABASE_GROUP_PREFLIGHT_DATABASES", DEFAULT_DATABASE_GROUPS))
+@pytest.mark.parametrize("scenario_template_id", _split_env("DATABASE_GROUP_PREFLIGHT_SCENARIOS", DEFAULT_SCENARIOS))
+async def test_database_group_bundle_is_ready_for_load_test(
     repositories,
     logical_db_name: str,
     scenario_template_id: str,
 ):
     """Проверить путь запуска: logical DB -> active bundle -> SQL preflight."""
-    connection_repo, logical_db_repo, bundle_repo = repositories
-    logical_db = await logical_db_repo.get_by_name(logical_db_name)
-    assert logical_db is not None, f"Logical database '{logical_db_name}' не найдена"
+    connection_repo, database_group_repo, bundle_repo = repositories
+    logical_db = await database_group_repo.get_by_name(logical_db_name)
+    assert logical_db is not None, f"Database group '{logical_db_name}' не найдена"
     assert logical_db.profile_status == "confirmed", (
         f"{logical_db_name}: profile_status={logical_db.profile_status}, нужен confirmed"
     )
