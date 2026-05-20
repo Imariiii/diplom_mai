@@ -77,11 +77,39 @@ class _ReportBase:
         return "p недоступно"
 
     @staticmethod
-    def _metric_label(metric: str) -> str:
+    def _throughput_rate_unit(workload_mode: str = "query") -> str:
+        return "транзакций/с" if workload_mode == "transaction" else "запросов/с"
+
+    @staticmethod
+    def _format_throughput_rate(value: float, workload_mode: str = "query", precision: int = 0) -> str:
+        unit = _ReportBase._throughput_rate_unit(workload_mode)
+        if precision == 0:
+            return f"{value:.0f} {unit}"
+        return f"{value:.1f} {unit}"
+
+    @staticmethod
+    def _resolve_workload_mode_from_test(test_info: Optional[ComparisonTestInfo] = None) -> str:
+        if test_info and test_info.scenario_info:
+            return test_info.scenario_info.workload_mode or "query"
+        return "query"
+
+    @staticmethod
+    def _resolve_workload_mode_from_tests(tests: List[ComparisonTestInfo]) -> str:
+        modes = {
+            t.scenario_info.workload_mode
+            for t in tests
+            if t.scenario_info and t.scenario_info.workload_mode
+        }
+        if len(modes) == 1:
+            return modes.pop()
+        return "query"
+
+    @staticmethod
+    def _metric_label(metric: str, workload_mode: str = "query") -> str:
+        if metric in ("throughput", "throughput_mean", "throughput_per_thread"):
+            return f"пропускная способность ({_ReportBase._throughput_rate_unit(workload_mode)})"
         return {
             "latency_ms": "latency",
-            "throughput": "throughput",
-            "throughput_mean": "throughput",
             "latency_mean": "latency mean",
             "latency_p95": "latency p95",
             "latency_p99": "latency p99",
@@ -114,6 +142,7 @@ class _ReportBase:
         pairwise: List[PairwiseComparison],
         label_overrides: Optional[Dict[str, str]] = None,
         limit: int = 3,
+        workload_mode: str = "query",
     ) -> List[str]:
         insights = []
         label_overrides = label_overrides or {}
@@ -124,7 +153,7 @@ class _ReportBase:
         candidates.sort(key=lambda p: abs(p.effect_size or 0), reverse=True)
         for p in candidates[:limit]:
             label = self._safe_label(label_overrides.get(p.db_key, p.db_key))
-            metric_label = self._metric_label(p.metric)
+            metric_label = self._metric_label(p.metric, workload_mode)
             effect = "большой" if p.effect_size_label == "large" else "средний"
             insights.append(
                 f"{label}: {metric_label} отличается практически значимо "
@@ -163,13 +192,14 @@ class PerTestReportGenerator(_ReportBase):
         config: Optional[AnalysisReportConfig] = None,
     ) -> AnalysisReport:
         _ = config
-        verdict = self._verdict(pairwise, rankings, db_key_labels)
+        workload_mode = self._resolve_workload_mode_from_test(test_info)
+        verdict = self._verdict(pairwise, rankings, db_key_labels, workload_mode)
         facts = self._facts(test_info, descriptive_stats, pairwise, db_key_labels)
-        important = self._important(descriptive_stats, pairwise, db_key_labels)
+        important = self._important(descriptive_stats, pairwise, db_key_labels, workload_mode)
         reliability = self._reliability(descriptive_stats, pairwise)
         actions = self._actions(descriptive_stats, pairwise, db_key_labels)
         sections = self._sections(verdict, facts, important, reliability, actions)
-        findings = self._per_db_findings(descriptive_stats, pairwise, db_key_labels)
+        findings = self._per_db_findings(descriptive_stats, pairwise, db_key_labels, workload_mode)
 
         return AnalysisReport(
             verdict=verdict,
@@ -189,13 +219,16 @@ class PerTestReportGenerator(_ReportBase):
         descriptive_stats: Dict[str, MetricStatsBundle],
         pairwise: List[PairwiseComparison],
         db_key_labels: Dict[str, str],
+        workload_mode: str = "query",
     ) -> List[DbFinding]:
         findings: List[DbFinding] = []
         for db_key, bundle in descriptive_stats.items():
             label = self._safe_label(db_key_labels.get(db_key, db_key))
             status, reason = self._per_test_status(bundle)
-            chips = self._per_test_chips(bundle)
-            highlights = self._per_test_highlights(db_key, label, bundle, pairwise, db_key_labels)
+            chips = self._per_test_chips(bundle, workload_mode)
+            highlights = self._per_test_highlights(
+                db_key, label, bundle, pairwise, db_key_labels, workload_mode,
+            )
             findings.append(DbFinding(
                 db_key=db_key,
                 db_label=label,
@@ -220,10 +253,14 @@ class PerTestReportGenerator(_ReportBase):
             return DbFindingStatus.WARNING, "; ".join(reasons)
         return DbFindingStatus.GOOD, "стабильна"
 
-    def _per_test_chips(self, bundle: MetricStatsBundle) -> List[DbMetricChip]:
+    def _per_test_chips(self, bundle: MetricStatsBundle, workload_mode: str = "query") -> List[DbMetricChip]:
         chips: List[DbMetricChip] = []
         if bundle.throughput and bundle.throughput.mean is not None:
-            chips.append(DbMetricChip(label="throughput", value=f"{bundle.throughput.mean:.0f} req/s", tone="neutral"))
+            chips.append(DbMetricChip(
+                label="throughput",
+                value=self._format_throughput_rate(bundle.throughput.mean, workload_mode),
+                tone="neutral",
+            ))
         if bundle.latency_ms:
             chips.append(DbMetricChip(label="p95", value=f"{bundle.latency_ms.p95:.1f} ms", tone="neutral"))
             chips.append(DbMetricChip(label="p99", value=f"{bundle.latency_ms.p99:.1f} ms", tone="neutral"))
@@ -238,6 +275,7 @@ class PerTestReportGenerator(_ReportBase):
         bundle: MetricStatsBundle,
         pairwise: List[PairwiseComparison],
         db_key_labels: Dict[str, str],
+        workload_mode: str = "query",
     ) -> List[str]:
         items: List[str] = []
         if bundle.error_rate and bundle.error_rate > 0:
@@ -257,7 +295,10 @@ class PerTestReportGenerator(_ReportBase):
         ]
         for p in sorted(relevant, key=lambda x: abs(x.effect_size or 0), reverse=True)[:1]:
             effect = "большой" if p.effect_size_label == "large" else "средний"
-            items.append(f"{self._metric_label(p.metric)}: {effect} эффект (d = {abs(p.effect_size or 0):.2f}).")
+            items.append(
+                f"{self._metric_label(p.metric, workload_mode)}: {effect} эффект "
+                f"(d = {abs(p.effect_size or 0):.2f})."
+            )
         return items
 
     # ------------------------------------------------------------------
@@ -269,6 +310,7 @@ class PerTestReportGenerator(_ReportBase):
         pairwise: List[PairwiseComparison],
         rankings: List[MetricRanking],
         db_key_labels: Dict[str, str],
+        workload_mode: str = "query",
     ) -> str:
         tp_ranking = next((r for r in rankings if r.metric == "throughput_mean"), None)
         latency_ranking = next((r for r in rankings if r.metric in ("latency_mean", "latency_p95")), None)
@@ -279,10 +321,14 @@ class PerTestReportGenerator(_ReportBase):
                 lat_best = latency_ranking.rankings[0]
                 lat_label = self._safe_label(db_key_labels.get(lat_best.db_key, lat_best.db_key))
                 return (
-                    f"Лидер по throughput — {label} ({best.value:.1f} req/s); "
+                    f"Лидер по пропускной способности — {label} "
+                    f"({self._format_throughput_rate(best.value, workload_mode, precision=1)}); "
                     f"лучшая latency у {lat_label} ({lat_best.value:.2f} мс)."
                 )
-            return f"Лидер по throughput — {label} ({best.value:.1f} req/s)."
+            return (
+                f"Лидер по пропускной способности — {label} "
+                f"({self._format_throughput_rate(best.value, workload_mode, precision=1)})."
+            )
 
         throughput_items = [p for p in pairwise if p.metric == "throughput" and p.warning is None]
         sig = [p for p in throughput_items if self._is_significant(p) and p.pct_difference is not None]
@@ -312,8 +358,9 @@ class PerTestReportGenerator(_ReportBase):
         descriptive_stats: Dict[str, MetricStatsBundle],
         pairwise: List[PairwiseComparison],
         db_key_labels: Dict[str, str],
+        workload_mode: str = "query",
     ) -> List[str]:
-        patterns = self._effect_size_insights(pairwise)
+        patterns = self._effect_size_insights(pairwise, workload_mode=workload_mode)
         high_tail: List[str] = []
         high_variability: List[str] = []
         errors: List[str] = []
@@ -395,13 +442,14 @@ class SeriesReportGenerator(_ReportBase):
         config: Optional[AnalysisReportConfig] = None,
     ) -> AnalysisReport:
         _ = config
-        verdict = self._verdict(per_db, load_levels, db_key_labels)
+        workload_mode = self._resolve_workload_mode_from_tests(tests)
+        verdict = self._verdict(per_db, load_levels, db_key_labels, workload_mode)
         facts = self._facts(tests, per_db, load_levels, db_key_labels)
-        important = self._important(per_db, db_key_labels)
+        important = self._important(per_db, db_key_labels, workload_mode)
         reliability = self._reliability(tests, per_db, parameter_impacts)
         actions = self._actions(per_db, load_levels, db_key_labels, parameter_impacts)
         sections = self._sections(verdict, facts, important, reliability, actions)
-        findings = self._per_db_findings(per_db, load_levels, db_key_labels)
+        findings = self._per_db_findings(per_db, load_levels, db_key_labels, workload_mode)
 
         return AnalysisReport(
             verdict=verdict,
@@ -421,12 +469,13 @@ class SeriesReportGenerator(_ReportBase):
         per_db: Dict[str, DbSeriesSummary],
         load_levels: List[LoadLevel],
         db_key_labels: Dict[str, str],
+        workload_mode: str = "query",
     ) -> List[DbFinding]:
         findings: List[DbFinding] = []
         for dk, s in per_db.items():
             label = self._safe_label(db_key_labels.get(dk, s.db_label or dk))
             status, reason = self._series_status(s)
-            chips = self._series_chips(s)
+            chips = self._series_chips(s, workload_mode)
             highlights = self._series_highlights(dk, label, s, load_levels, db_key_labels)
             findings.append(DbFinding(
                 db_key=dk,
@@ -464,12 +513,16 @@ class SeriesReportGenerator(_ReportBase):
             return DbFindingStatus.WARNING, "; ".join(reasons)
         return DbFindingStatus.GOOD, "стабильна и масштабируется"
 
-    def _series_chips(self, s: DbSeriesSummary) -> List[DbMetricChip]:
+    def _series_chips(self, s: DbSeriesSummary, workload_mode: str = "query") -> List[DbMetricChip]:
         chips: List[DbMetricChip] = []
         if s.trajectory:
             last = s.trajectory[-1]
             if last.throughput_mean is not None:
-                chips.append(DbMetricChip(label="peak throughput", value=f"{last.throughput_mean:.0f} req/s", tone="neutral"))
+                chips.append(DbMetricChip(
+                    label="peak throughput",
+                    value=self._format_throughput_rate(last.throughput_mean, workload_mode),
+                    tone="neutral",
+                ))
             if last.latency_p95 is not None:
                 chips.append(DbMetricChip(label="p95", value=f"{last.latency_p95:.1f} ms", tone="neutral"))
         if s.degradation.overall_p95 > 0:
@@ -528,6 +581,7 @@ class SeriesReportGenerator(_ReportBase):
         per_db: Dict[str, DbSeriesSummary],
         load_levels: List[LoadLevel],
         db_key_labels: Dict[str, str],
+        workload_mode: str = "query",
     ) -> str:
         if not per_db:
             return "Недостаточно данных для итогового вердикта."
@@ -552,13 +606,16 @@ class SeriesReportGenerator(_ReportBase):
             if gap_pct > 5:
                 parts.append(
                     f"При максимальной нагрузке лидирует {labels[best_dk]} "
-                    f"({best_val:.0f} req/s, на {gap_pct:.0f}% выше {labels[worst_dk]})"
+                    f"({self._format_throughput_rate(best_val, workload_mode)}, "
+                    f"на {gap_pct:.0f}% выше {labels[worst_dk]})"
                 )
             else:
                 lo = min(max_tp.values())
                 hi = max(max_tp.values())
                 parts.append(
-                    f"Throughput СУБД сопоставим при максимальной нагрузке ({lo:.0f}–{hi:.0f} req/s)"
+                    f"Пропускная способность СУБД сопоставима при максимальной нагрузке "
+                    f"({self._format_throughput_rate(lo, workload_mode)}–"
+                    f"{self._format_throughput_rate(hi, workload_mode)})"
                 )
         elif len(max_tp) == 1:
             dk = next(iter(max_tp))
@@ -570,11 +627,16 @@ class SeriesReportGenerator(_ReportBase):
                 change = ((max_tp[dk] - first_tp) / first_tp * 100) if first_tp > 0 else 0
                 direction = "рост" if change > 0 else "снижение"
                 parts.append(
-                    f"{labels[dk]}: throughput от {first_tp:.0f} до {max_tp[dk]:.0f} req/s "
+                    f"{labels[dk]}: пропускная способность от "
+                    f"{self._format_throughput_rate(first_tp, workload_mode)} до "
+                    f"{self._format_throughput_rate(max_tp[dk], workload_mode)} "
                     f"({direction} {abs(change):.0f}%)"
                 )
             else:
-                parts.append(f"{labels[dk]}: throughput {max_tp[dk]:.0f} req/s при максимальной нагрузке")
+                parts.append(
+                    f"{labels[dk]}: пропускная способность "
+                    f"{self._format_throughput_rate(max_tp[dk], workload_mode)} при максимальной нагрузке"
+                )
 
         degraded = [
             (labels[dk], s.degradation.overall_p95)
@@ -617,6 +679,7 @@ class SeriesReportGenerator(_ReportBase):
         self,
         per_db: Dict[str, DbSeriesSummary],
         db_key_labels: Dict[str, str],
+        workload_mode: str = "query",
     ) -> List[str]:
         patterns: List[str] = []
         labels = {dk: self._safe_label(db_key_labels.get(dk, s.db_label or dk)) for dk, s in per_db.items()}
@@ -644,7 +707,11 @@ class SeriesReportGenerator(_ReportBase):
             worst = max(degraded_p95, key=lambda item: item[1])
             names = ", ".join(name for name, _ in degraded_p95)
             patterns.append(f"p95 деградирует у: {names}; сильнее — {worst[0]} (+{worst[1]:.0f}%).")
-        patterns.extend(self._effect_size_insights(self._all_adjacent(per_db), labels, limit=2))
+        patterns.extend(
+            self._effect_size_insights(
+                self._all_adjacent(per_db), labels, limit=2, workload_mode=workload_mode,
+            )
+        )
         if degraded_p99:
             worst = max(degraded_p99, key=lambda item: item[1])
             patterns.append(f"p99-хвост растёт у {worst[0]} (+{worst[1]:.0f}%).")

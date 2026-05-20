@@ -9,6 +9,10 @@ import {
   isPerTestResult,
   isSeriesResult,
 } from "@/lib/api"
+import {
+  buildComparisonMetricRows,
+  resolveComparisonWorkloadMode,
+} from "@/lib/throughput-metrics"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
@@ -34,22 +38,6 @@ interface MetricRow {
   format: (value: number | null | undefined) => string
 }
 
-const METRIC_ROWS: MetricRow[] = [
-  { key: "latency_mean", label: "Задержка (среднее)", better: "lower", isCore: true, unit: "мс", accessor: (b) => b?.latency_ms?.mean, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
-  { key: "latency_median", label: "Задержка (медиана)", better: "lower", isCore: true, unit: "мс", accessor: (b) => b?.latency_ms?.median, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
-  { key: "latency_p95", label: "Задержка p95", better: "lower", isCore: true, unit: "мс", accessor: (b) => b?.latency_ms?.p95, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
-  { key: "latency_p99", label: "Задержка p99", better: "lower", isCore: true, unit: "мс", accessor: (b) => b?.latency_ms?.p99, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
-  { key: "latency_cv", label: "Вариативность задержки (CV)", better: "lower", isCore: true, unit: "%", accessor: (b) => b?.latency_ms?.cv, format: (v) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`) },
-  { key: "throughput_mean", label: "Пропускная способность (среднее)", better: "higher", isCore: true, unit: "зап/с", accessor: (b) => b?.throughput?.mean, format: (v) => (v == null ? "—" : `${v.toFixed(0)} зап/с`) },
-  { key: "error_rate", label: "Доля ошибок", better: "lower", isCore: true, unit: "%", accessor: (b) => b?.error_rate, format: (v) => (v == null ? "—" : `${v.toFixed(2)}%`) },
-  { key: "duration", label: "Общее время", better: "lower", isCore: true, unit: "с", accessor: (b) => b?.total_duration_sec, format: (v) => (v == null ? "—" : `${v.toFixed(1)} с`) },
-  { key: "latency_min", label: "Задержка (мин)", better: "lower", isCore: false, unit: "мс", accessor: (b) => b?.latency_ms?.min, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
-  { key: "latency_max", label: "Задержка (макс)", better: "lower", isCore: false, unit: "мс", accessor: (b) => b?.latency_ms?.max, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
-  { key: "latency_iqr", label: "Задержка IQR", better: "lower", isCore: false, unit: "мс", accessor: (b) => b?.latency_ms?.iqr, format: (v) => (v == null ? "—" : `${v.toFixed(2)} мс`) },
-  { key: "throughput_median", label: "Пропускная способность (медиана)", better: "higher", isCore: false, unit: "зап/с", accessor: (b) => b?.throughput?.median, format: (v) => (v == null ? "—" : `${v.toFixed(0)} зап/с`) },
-  { key: "throughput_cv", label: "Вариативность пропускной способности (CV)", better: "lower", isCore: false, unit: "%", accessor: (b) => b?.throughput?.cv, format: (v) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`) },
-]
-
 export function ComparisonTable({ result }: ComparisonTableProps) {
   if (isPerTestResult(result)) return <PerTestTable result={result} />
   if (isSeriesResult(result)) return <SeriesTable result={result} />
@@ -66,10 +54,15 @@ function PerTestTable({
   result: Extract<ComparisonResult, { analysis_mode: "per_test" }>
 }) {
   const [showExtended, setShowExtended] = useState(false)
+  const workloadMode = resolveComparisonWorkloadMode(result)
+  const allMetricRows = useMemo(
+    () => buildComparisonMetricRows(workloadMode),
+    [workloadMode],
+  )
 
   const dbKeys = useMemo(() => Object.keys(result.descriptive_stats), [result])
-  const metricRows = showExtended ? METRIC_ROWS : METRIC_ROWS.filter((r) => r.isCore)
-  const hasExtended = METRIC_ROWS.some((r) => !r.isCore)
+  const metricRows = showExtended ? allMetricRows : allMetricRows.filter((r) => r.isCore)
+  const hasExtended = allMetricRows.some((r) => !r.isCore)
 
   const firstDbKey = dbKeys[0]
 
@@ -190,12 +183,17 @@ function SeriesTable({
 }) {
   const [showExtended, setShowExtended] = useState(false)
   const [cellView, setCellView] = useState<CellView>("both")
+  const workloadMode = resolveComparisonWorkloadMode(result)
+  const allMetricRows = useMemo(
+    () => buildComparisonMetricRows(workloadMode),
+    [workloadMode],
+  )
 
   const dbKeys = useMemo(() => Object.keys(result.per_db), [result])
   const [activeDb, setActiveDb] = useState(dbKeys[0] ?? "")
 
-  const metricRows = showExtended ? METRIC_ROWS : METRIC_ROWS.filter((r) => r.isCore)
-  const hasExtended = METRIC_ROWS.some((r) => !r.isCore)
+  const metricRows = showExtended ? allMetricRows : allMetricRows.filter((r) => r.isCore)
+  const hasExtended = allMetricRows.some((r) => !r.isCore)
 
   const levelIds = useMemo(
     () => result.load_levels.map((l) => l.level_id),

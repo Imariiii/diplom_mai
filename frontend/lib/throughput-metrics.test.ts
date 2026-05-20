@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  formatAttemptRateLabel,
   formatCardAttemptRate,
   formatCardSuccessfulThroughput,
   formatPrimaryThroughputLabel,
@@ -90,7 +91,10 @@ describe("workload mode labels", () => {
     expect(formatWorkloadModeLabel("transaction")).toBe("Транзакционный bundle")
     expect(resolvePrimaryRateUnit("query")).toBe("qps")
     expect(resolvePrimaryRateUnit("transaction")).toBe("tps")
-    expect(formatPrimaryThroughputLabel("transaction")).toContain("TPS")
+    expect(formatAttemptRateLabel("query")).toBe("Запросов/с")
+    expect(formatPrimaryThroughputLabel("query")).toBe("Успешных запросов/с")
+    expect(formatAttemptRateLabel("transaction")).toBe("Транзакций/с")
+    expect(formatPrimaryThroughputLabel("transaction")).toBe("Успешных транзакций/с")
     expect(formatSummaryUnitsLabel("transaction")).toContain("транзакции")
   })
 })

@@ -28,6 +28,11 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart"
+import {
+  formatComparisonThroughputRateUnit,
+  formatComparisonThroughputTitle,
+  resolveComparisonWorkloadMode,
+} from "@/lib/throughput-metrics"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -69,17 +74,23 @@ export function ComparisonCharts({ result, chartFocus }: ComparisonChartsProps) 
 
 function PerTestChartsView({ result }: { result: Extract<ComparisonResult, { analysis_mode: "per_test" }> }) {
   const charts = result.charts
+  const workloadMode = resolveComparisonWorkloadMode(result)
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
       <GroupedLatencyChart barData={charts.bar_chart} dbKeyLabels={result.db_key_labels} />
-      <GroupedThroughputChart barData={charts.bar_chart} dbKeyLabels={result.db_key_labels} />
+      <GroupedThroughputChart
+        barData={charts.bar_chart}
+        dbKeyLabels={result.db_key_labels}
+        workloadMode={workloadMode}
+      />
       <PercentilesChart barData={charts.bar_chart} dbKeyLabels={result.db_key_labels} />
       <DistributionChart boxData={charts.box_plot} dbKeyLabels={result.db_key_labels} />
       <div className="xl:col-span-2">
         <ThroughputTimeline
           series={charts.throughput_series}
           dbKeyLabels={result.db_key_labels}
+          workloadMode={workloadMode}
         />
       </div>
     </div>
@@ -98,6 +109,9 @@ function SeriesChartsView({
   chartFocus?: "degradation" | "stability"
 }) {
   const charts = result.charts
+  const workloadMode = resolveComparisonWorkloadMode(result)
+  const throughputUnit = formatComparisonThroughputRateUnit(workloadMode)
+  const throughputTitle = formatComparisonThroughputTitle(workloadMode)
 
   if (chartFocus === "degradation") {
     return (
@@ -148,11 +162,12 @@ function SeriesChartsView({
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
       <SeriesTrajectoryChart
-        title="Пропускная способность по уровням нагрузки"
-        description="Средняя пропускная способность на каждом уровне"
+        title={throughputTitle}
+        description={`Средняя пропускная способность на каждом уровне (${throughputUnit})`}
         data={charts.throughput_by_load}
         dbKeyLabels={result.db_key_labels}
-        unit="зап/с"
+        unit={throughputUnit}
+        integerValues
       />
       <SeriesTrajectoryChart
         title="Задержка по уровням нагрузки"
@@ -176,7 +191,11 @@ function SeriesChartsView({
         unit="мс"
       />
       {charts.bar_chart.length > 0 && (
-        <GroupedThroughputChart barData={charts.bar_chart} dbKeyLabels={result.db_key_labels} />
+        <GroupedThroughputChart
+          barData={charts.bar_chart}
+          dbKeyLabels={result.db_key_labels}
+          workloadMode={workloadMode}
+        />
       )}
       {charts.box_plot.length > 0 && (
         <DistributionChart boxData={charts.box_plot} dbKeyLabels={result.db_key_labels} />
@@ -335,10 +354,13 @@ function GroupedLatencyChart({
 function GroupedThroughputChart({
   barData,
   dbKeyLabels,
+  workloadMode,
 }: {
   barData: BarChartPoint[]
   dbKeyLabels: Record<string, string>
+  workloadMode?: string | null
 }) {
+  const throughputUnit = formatComparisonThroughputRateUnit(workloadMode)
   const { data, dbLabels } = useMemo(
     () => buildGroupedData(barData, dbKeyLabels, (pt) => pt.throughput_mean),
     [barData, dbKeyLabels]
@@ -352,12 +374,12 @@ function GroupedThroughputChart({
 
   return (
     <ChartCard
-      title="Пропускная способность"
-      description="Пропускная способность по СУБД (зап/с)"
+      title={formatComparisonThroughputTitle(workloadMode)}
+      description={`Пропускная способность по СУБД (${throughputUnit})`}
       icon={BarChart3}
       badge={
         <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-          макс {Math.round(maxVal).toLocaleString()} зап/с
+          макс {Math.round(maxVal).toLocaleString()} {throughputUnit}
         </span>
       }
     >
@@ -494,10 +516,13 @@ function DistributionChart({
 function ThroughputTimeline({
   series,
   dbKeyLabels,
+  workloadMode,
 }: {
   series: Record<string, Array<{ timestamp?: string | null; throughput?: number | null; tps?: number | null }>>
   dbKeyLabels: Record<string, string>
+  workloadMode?: string | null
 }) {
+  const throughputUnit = formatComparisonThroughputRateUnit(workloadMode)
   const { merged, seriesKeys } = useMemo(() => {
     const resolveSeriesLabel = (seriesKey: string) => {
       const parts = seriesKey.split(":")
@@ -544,8 +569,8 @@ function ThroughputTimeline({
 
   return (
     <ChartCard
-      title="Пропускная способность по времени"
-      description="Временные ряды пропускной способности (относительное время)"
+      title={formatComparisonThroughputTitle(workloadMode)}
+      description={`Временные ряды пропускной способности (${throughputUnit}, относительное время)`}
       icon={LineIcon}
       chartHeight={320}
     >
@@ -575,12 +600,14 @@ function SeriesTrajectoryChart({
   data,
   dbKeyLabels,
   unit,
+  integerValues = false,
 }: {
   title: string
   description: string
   data: Record<string, SeriesChartPoint[]>
   dbKeyLabels: Record<string, string>
   unit: string
+  integerValues?: boolean
 }) {
   const { chartData, dbLabels } = useMemo(() => {
     const entries = Object.entries(data)
@@ -627,7 +654,7 @@ function SeriesTrajectoryChart({
                   <div className="flex w-full justify-between gap-4">
                     <span className="text-muted-foreground">{name}</span>
                     <span className="font-mono font-medium tabular-nums">
-                      {typeof value === "number" ? (unit === "зап/с" ? value.toFixed(0) : value.toFixed(2)) : "—"} {unit}
+                      {typeof value === "number" ? (integerValues ? value.toFixed(0) : value.toFixed(2)) : "—"} {unit}
                     </span>
                   </div>
                 )}

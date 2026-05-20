@@ -4,10 +4,16 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Database, Clock, Gauge, Users, AlertTriangle } from "lucide-react"
 import { DB_NAMES, getDbColor } from "@/lib/chart-colors"
 import {
+  formatAttemptRateDescription,
+  formatAttemptRateLabel,
   formatCardAttemptRate,
   formatCardSuccessfulThroughput,
+  formatPrimaryThroughputDescription,
+  formatPrimaryThroughputLabel,
+  formatWindowUnitsDescription,
+  formatWindowUnitsLabel,
 } from "@/lib/throughput-metrics"
-import type { ChartTimelineMode } from "@/lib/time-series-chart-data"
+import type { ChartRow, ChartTimelineMode } from "@/lib/time-series-chart-data"
 import { ChartTimelineModeToggle } from "./shared/chart-timeline-mode-toggle"
 import { TimeSeriesChart } from "./shared/time-series-chart"
 
@@ -37,7 +43,7 @@ interface TestResult {
 
 interface DatabaseMetricsTabProps {
   databases: string[]
-  chartData: Record<string, unknown>[]
+  chartData: ChartRow[]
   getResultForDb: (dbId: string) => TestResult | undefined
   getLatestMetric: (dbId: string, metric: string) => string
   getDbDisplayName: (dbId: string) => string
@@ -49,12 +55,20 @@ interface DatabaseMetricsTabProps {
   chartXAxisTitle?: string
   chartTimelineMode?: ChartTimelineMode
   onChartTimelineModeChange?: (mode: ChartTimelineMode) => void
+  workloadMode?: string | null
+  primaryRateUnit?: string | null
 }
 
-export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLatestMetric, getDbDisplayName, getDbType, virtualUsers, isTestFinished, customDbNames, showCharts = true, chartXAxisTitle, chartTimelineMode, onChartTimelineModeChange }: DatabaseMetricsTabProps) {
+export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLatestMetric, getDbDisplayName, getDbType, virtualUsers, isTestFinished, customDbNames, showCharts = true, chartXAxisTitle, chartTimelineMode, onChartTimelineModeChange, workloadMode, primaryRateUnit }: DatabaseMetricsTabProps) {
   const formatMetric = (value?: number, digits: number = 2) => {
     return typeof value === "number" ? value.toFixed(digits) : undefined
   }
+  const attemptRateLabel = formatAttemptRateLabel(workloadMode)
+  const primaryThroughputLabel = formatPrimaryThroughputLabel(workloadMode, primaryRateUnit)
+  const attemptRateDescription = formatAttemptRateDescription(workloadMode)
+  const primaryThroughputDescription = formatPrimaryThroughputDescription(workloadMode)
+  const windowUnitsLabel = formatWindowUnitsLabel(workloadMode)
+  const windowUnitsDescription = formatWindowUnitsDescription(workloadMode)
 
   return (
     <div className="space-y-6">
@@ -76,7 +90,7 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
                   <span className="font-mono text-foreground">{formatMetric(result?.metrics?.avgResponseTime) ?? getLatestMetric(dbId, "responseTime")} ms</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Запросы/с</span>
+                  <span className="text-muted-foreground">{attemptRateLabel}</span>
                   <span className="font-mono text-foreground">
                     {formatCardAttemptRate({
                       isTestFinished,
@@ -86,7 +100,7 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
                   </span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Успешных запросов/с</span>
+                  <span className="text-muted-foreground">{primaryThroughputLabel}</span>
                   <span className="font-mono text-foreground">
                     {formatCardSuccessfulThroughput({
                       isTestFinished,
@@ -102,8 +116,8 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
                   </div>
                 )}
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground" title="Завершённые запросы в последнем окне (~1 с)">
-                    Запросов в окне
+                  <span className="text-muted-foreground" title={windowUnitsDescription}>
+                    {windowUnitsLabel}
                   </span>
                   <span className="font-mono text-foreground">{getLatestMetric(dbId, "activeConnections")}</span>
                 </div>
@@ -230,8 +244,8 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
             xAxisTitle={chartXAxisTitle}
           />
           <TimeSeriesChart
-            title="Запросы/с"
-            description="Все завершённые запросы в секунду, включая ошибки"
+            title={attemptRateLabel}
+            description={attemptRateDescription}
             icon={<Gauge className="h-5 w-5 text-primary" />}
             data={chartData}
             databases={databases}
@@ -244,8 +258,8 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
             xAxisTitle={chartXAxisTitle}
           />
           <TimeSeriesChart
-            title="Успешных запросов/с"
-            description="Только успешные SQL-операции за окно сэмпла"
+            title={primaryThroughputLabel}
+            description={primaryThroughputDescription}
             icon={<Gauge className="h-5 w-5 text-primary" />}
             data={chartData}
             databases={databases}
@@ -258,7 +272,7 @@ export function DatabaseMetricsTab({ databases, chartData, getResultForDb, getLa
             xAxisTitle={chartXAxisTitle}
           />
           <TimeSeriesChart
-            title="Запросов в окне"
+            title={windowUnitsLabel}
             icon={<Users className="h-5 w-5 text-primary" />}
             data={chartData}
             databases={databases}

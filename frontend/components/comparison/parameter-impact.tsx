@@ -20,6 +20,11 @@ import {
   isSeriesResult,
 } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
+import {
+  formatComparisonThroughputRateUnit,
+  formatComparisonThroughputTitle,
+  resolveComparisonWorkloadMode,
+} from "@/lib/throughput-metrics"
 
 interface ParameterImpactProps {
   result: ComparisonResult
@@ -32,21 +37,21 @@ const PARAM_ICONS: Record<string, React.ReactNode> = {
   warmup_time: <Timer className="h-3.5 w-3.5" />,
 }
 
-const METRIC_LABELS: Record<string, string> = {
-  throughput: "Пропускная способность",
-  latency_mean: "Задержка (среднее)",
-  latency_p99: "Задержка p99",
-  latency_cv: "Стабильность (CV)",
-}
-
-const METRIC_UNITS: Record<string, string> = {
-  throughput: "зап/с",
-  latency_mean: "мс",
-  latency_p99: "мс",
-  latency_cv: "",
-}
-
 export function ParameterImpact({ result }: ParameterImpactProps) {
+  const workloadMode = resolveComparisonWorkloadMode(result)
+  const throughputUnit = formatComparisonThroughputRateUnit(workloadMode)
+  const metricLabels: Record<string, string> = {
+    throughput: formatComparisonThroughputTitle(workloadMode),
+    latency_mean: "Задержка (среднее)",
+    latency_p99: "Задержка p99",
+    latency_cv: "Стабильность (CV)",
+  }
+  const metricUnits: Record<string, string> = {
+    throughput: throughputUnit,
+    latency_mean: "мс",
+    latency_p99: "мс",
+    latency_cv: "",
+  }
   const impacts = isSeriesResult(result) ? result.parameter_impacts : []
 
   if (!impacts || impacts.length === 0) {
@@ -78,6 +83,8 @@ export function ParameterImpact({ result }: ParameterImpactProps) {
             key={summary.test_id}
             summary={summary}
             dbKeyLabels={result.db_key_labels}
+            metricLabels={metricLabels}
+            metricUnits={metricUnits}
           />
         ))}
       </div>
@@ -88,9 +95,13 @@ export function ParameterImpact({ result }: ParameterImpactProps) {
 function ImpactCard({
   summary,
   dbKeyLabels,
+  metricLabels,
+  metricUnits,
 }: {
   summary: ParameterImpactSummary
   dbKeyLabels?: Record<string, string>
+  metricLabels: Record<string, string>
+  metricUnits: Record<string, string>
 }) {
   if (
     summary.changed_parameters.length === 0 &&
@@ -171,7 +182,7 @@ function ImpactCard({
               {metricKeys.map((metric) => (
                 <tr key={metric} className="border-b border-border/40 last:border-b-0">
                   <td className="py-2 pr-3 font-medium">
-                    {METRIC_LABELS[metric] || metric}
+                    {metricLabels[metric] || metric}
                   </td>
                   {dbKeys.map((dbKey) => {
                     const effect = effectMap.get(`${dbKey}:${metric}`)
@@ -184,7 +195,7 @@ function ImpactCard({
                     }
                     return (
                       <td key={dbKey} className="px-2 py-2 text-center">
-                        <EffectCell effect={effect} />
+                        <EffectCell effect={effect} metricUnits={metricUnits} />
                       </td>
                     )
                   })}
@@ -214,8 +225,14 @@ function InsightRow({ text }: { text: string }) {
   )
 }
 
-function EffectCell({ effect }: { effect: MetricEffect }) {
-  const unit = METRIC_UNITS[effect.metric] || ""
+function EffectCell({
+  effect,
+  metricUnits,
+}: {
+  effect: MetricEffect
+  metricUnits: Record<string, string>
+}) {
+  const unit = metricUnits[effect.metric] || ""
 
   const colorCls =
     effect.magnitude === "negligible"
@@ -232,7 +249,7 @@ function EffectCell({ effect }: { effect: MetricEffect }) {
         : Minus
 
   const fmtVal = (v: number) =>
-    unit === "зап/с" ? v.toFixed(0) : unit === "мс" ? v.toFixed(2) : v.toFixed(2)
+    effect.metric === "throughput" ? v.toFixed(0) : unit === "мс" ? v.toFixed(2) : v.toFixed(2)
 
   return (
     <div className="flex flex-col items-center gap-0.5">

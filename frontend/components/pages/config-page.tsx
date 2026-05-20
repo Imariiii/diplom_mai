@@ -29,7 +29,7 @@ import { QuerySelectorCard } from "./config/query-selector-card"
 import { LoadParamsCard } from "./config/load-params-card"
 import { ConfigSummaryCard } from "./config/config-summary-card"
 import { formatWorkloadModeLabel } from "@/lib/throughput-metrics"
-import { findActiveScenarioBundle, isBundleActive } from "@/lib/scenario-bundle-utils"
+import { buildScenarioBundleConfigPatch, findActiveScenarioBundle, isBundleActive } from "@/lib/scenario-bundle-utils"
 
 export function ConfigPage() {
   const {
@@ -278,13 +278,25 @@ export function ConfigPage() {
         test_name: testName,
         logical_database_id: selectedLogicalDbId ?? undefined,
       })
+      const testRunConfig = testConfig.testMode === "scenario" && selectedBundle
+        ? {
+            ...testConfig,
+            ...buildScenarioBundleConfigPatch(selectedBundle),
+          }
+        : {
+            ...testConfig,
+            bundleId: undefined,
+            workload_mode: "query" as const,
+            primary_rate_unit: "qps" as const,
+            comparison_unit: "query" as const,
+          }
 
       const testRun: TestRun = {
         id: asyncResponse.test_id,
         name: asyncResponse.name,
         status: "running",
         startTime: new Date(),
-        config: { ...testConfig },
+        config: testRunConfig,
         connection_names: testConfig.databases.reduce((acc, dbId) => {
           const conn = connections.find(c => c.id === dbId)
           if (conn) {
@@ -349,10 +361,24 @@ export function ConfigPage() {
 
   useEffect(() => {
     if (testConfig.testMode !== "scenario" || !selectedBundle) return
-    if (testConfig.bundleId !== selectedBundle.id) {
-      setTestConfig({ bundleId: selectedBundle.id })
+    const bundleConfigPatch = buildScenarioBundleConfigPatch(selectedBundle)
+    if (
+      testConfig.bundleId !== bundleConfigPatch.bundleId ||
+      testConfig.workload_mode !== bundleConfigPatch.workload_mode ||
+      testConfig.primary_rate_unit !== bundleConfigPatch.primary_rate_unit ||
+      testConfig.comparison_unit !== bundleConfigPatch.comparison_unit
+    ) {
+      setTestConfig(bundleConfigPatch)
     }
-  }, [testConfig.testMode, testConfig.bundleId, selectedBundle, setTestConfig])
+  }, [
+    testConfig.testMode,
+    testConfig.bundleId,
+    testConfig.workload_mode,
+    testConfig.primary_rate_unit,
+    testConfig.comparison_unit,
+    selectedBundle,
+    setTestConfig,
+  ])
 
   const canRunTest = () => {
     if (testConfig.databases.length === 0) return false
@@ -441,7 +467,7 @@ export function ConfigPage() {
             const bundle = findActiveScenarioBundle(selectedBundles, id)
             setTestConfig({
               scenario: id,
-              bundleId: bundle?.id,
+              ...(bundle ? buildScenarioBundleConfigPatch(bundle) : { bundleId: undefined }),
               useIndexes: (bundle?.indexes?.length ?? 0) > 0 ? testConfig.useIndexes : false,
             })
           }}

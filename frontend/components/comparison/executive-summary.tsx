@@ -19,6 +19,12 @@ import {
   isSeriesResult,
 } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
+import {
+  formatComparisonThroughputRateUnit,
+  formatComparisonThroughputTitle,
+  formatComparisonThroughputValue,
+  resolveComparisonWorkloadMode,
+} from "@/lib/throughput-metrics"
 
 interface ExecutiveSummaryProps {
   result: ComparisonResult
@@ -70,6 +76,8 @@ function getTests(result: ComparisonResult): { id: string; name: string }[] {
 }
 
 export function ExecutiveSummary({ result }: ExecutiveSummaryProps) {
+  const workloadMode = resolveComparisonWorkloadMode(result)
+  const throughputUnit = formatComparisonThroughputRateUnit(workloadMode)
   const pairwise = getPairwise(result)
   const sigCount = pairwise.filter((p) => p.is_significant).length
   const totalComparisons = pairwise.length
@@ -124,7 +132,7 @@ export function ExecutiveSummary({ result }: ExecutiveSummaryProps) {
                 label="Лидер по пропускной способности"
                 name={bestThroughput.testName}
                 db={resolveDbKeyLabel(bestThroughput.dbKey, result.db_key_labels)}
-                value={`${bestThroughput.value.toFixed(0)} зап/с`}
+                value={formatComparisonThroughputValue(bestThroughput.value, workloadMode)}
               />
               <WinnerPill
                 icon={<Timer className="h-3.5 w-3.5" />}
@@ -156,11 +164,11 @@ export function ExecutiveSummary({ result }: ExecutiveSummaryProps) {
           />
           <KpiTile
             icon={<TrendingUp className="h-3.5 w-3.5" />}
-            label="Пропускная способность"
-            primary={bestThroughput ? `${bestThroughput.value.toFixed(0)} зап/с` : "—"}
+            label={formatComparisonThroughputTitle(workloadMode)}
+            primary={bestThroughput ? formatComparisonThroughputValue(bestThroughput.value, workloadMode) : "—"}
             secondary={
               worstThroughput && bestThroughput && worstThroughput.value !== bestThroughput.value
-                ? `мин ${worstThroughput.value.toFixed(0)} зап/с`
+                ? `мин ${formatComparisonThroughputValue(worstThroughput.value, workloadMode)}`
                 : "по всем СУБД"
             }
             tone="success"
@@ -179,12 +187,22 @@ export function ExecutiveSummary({ result }: ExecutiveSummaryProps) {
         </div>
       </div>
 
-      {showTrends && isSeriesResult(result) && <SeriesTrendsStrip result={result} />}
+      {showTrends && isSeriesResult(result) && (
+        <SeriesTrendsStrip result={result} workloadMode={workloadMode} throughputUnit={throughputUnit} />
+      )}
     </section>
   )
 }
 
-function SeriesTrendsStrip({ result }: { result: ComparisonResult }) {
+function SeriesTrendsStrip({
+  result,
+  workloadMode,
+  throughputUnit,
+}: {
+  result: ComparisonResult
+  workloadMode: string
+  throughputUnit: string
+}) {
   if (!isSeriesResult(result)) return null
 
   const trends = useMemo(() => {
@@ -194,12 +212,17 @@ function SeriesTrendsStrip({ result }: { result: ComparisonResult }) {
       const tpVals = summary.trajectory.map((t) => t.throughput_mean ?? 0)
       const latVals = summary.trajectory.map((t) => t.latency_p95 ?? 0)
       if (tpVals.some((v) => v > 0))
-        series.push({ key: `tp-${dbKey}`, label: `${label} · Пропускная способность`, unit: "зап/с", values: tpVals })
+        series.push({
+          key: `tp-${dbKey}`,
+          label: `${label} · ${formatComparisonThroughputTitle(workloadMode)}`,
+          unit: throughputUnit,
+          values: tpVals,
+        })
       if (latVals.some((v) => v > 0))
         series.push({ key: `lat-${dbKey}`, label: `${label} · Задержка p95`, unit: "мс", values: latVals })
     }
     return series
-  }, [result])
+  }, [result, workloadMode, throughputUnit])
 
   if (trends.length === 0) return null
 

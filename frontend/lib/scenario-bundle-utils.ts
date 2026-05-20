@@ -16,3 +16,20 @@ export function findActiveScenarioBundle(
     (bundle) => bundle.scenario_template_id === scenarioTemplateId && isBundleActive(bundle),
   )
 }
+
+export function buildScenarioBundleConfigPatch(bundle: ScenarioBundleSummary): {
+  bundleId: string
+  workload_mode: "query" | "transaction"
+  primary_rate_unit: "qps" | "tps"
+  comparison_unit: "query" | "transaction"
+} {
+  const workloadMode = bundle.workload_mode === "transaction" ? "transaction" : "query"
+  return {
+    bundleId: bundle.id,
+    workload_mode: workloadMode,
+    primary_rate_unit: bundle.primary_rate_unit === "tps" || bundle.primary_rate_unit === "qps"
+      ? bundle.primary_rate_unit
+      : workloadMode === "transaction" ? "tps" : "qps",
+    comparison_unit: workloadMode === "transaction" ? "transaction" : "query",
+  }
+}

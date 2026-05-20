@@ -1414,7 +1414,13 @@ class ComparisonService:
                 ))
 
             metric_effects = self._compute_metric_effects(baseline_stats, compared_stats, db_key_labels)
-            top_insights = self._build_top_insights(metric_effects)
+            workload_mode = (
+                t.get("workload_mode")
+                or compared_config.get("workload_mode")
+                or baseline_config.get("workload_mode")
+                or "query"
+            )
+            top_insights = self._build_top_insights(metric_effects, workload_mode=workload_mode)
             summary_text = self._format_impact_summary(
                 t.get("name", ""), baseline_test.get("name", ""),
                 changed_params, top_insights,
@@ -1492,16 +1498,26 @@ class ComparisonService:
         return effects
 
     @staticmethod
-    def _build_top_insights(effects: List[MetricEffect], limit: int = 3) -> List[str]:
+    def _build_top_insights(
+        effects: List[MetricEffect],
+        limit: int = 3,
+        workload_mode: str = "query",
+    ) -> List[str]:
         mag_rank = {"large": 3, "medium": 2, "small": 1, "negligible": 0}
         sorted_e = sorted(effects, key=lambda e: (
             0 if not e.is_improvement else 1,
             -mag_rank.get(e.magnitude, 0),
             -abs(e.pct_change),
         ))
-        labels = {"throughput": "throughput", "latency_mean": "latency mean",
-                  "latency_p99": "latency p99", "latency_cv": "стабильность (CV)"}
-        units = {"throughput": "req/s", "latency_mean": "мс", "latency_p99": "мс", "latency_cv": ""}
+        tp_unit = "транзакций/с" if workload_mode == "transaction" else "запросов/с"
+        tp_label = f"пропускная способность ({tp_unit})"
+        labels = {
+            "throughput": tp_label,
+            "latency_mean": "latency mean",
+            "latency_p99": "latency p99",
+            "latency_cv": "стабильность (CV)",
+        }
+        units = {"throughput": tp_unit, "latency_mean": "мс", "latency_p99": "мс", "latency_cv": ""}
         insights: List[str] = []
         for e in sorted_e[:limit]:
             if e.magnitude == "negligible":

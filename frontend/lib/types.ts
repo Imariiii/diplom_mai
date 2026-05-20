@@ -20,6 +20,9 @@ export interface TestConfig {
   testMode: TestMode            // Режим тестирования
   scenario: string              // ID logical template
   bundleId?: string             // Опционально: явный bundle variant
+  workload_mode?: "query" | "transaction"
+  primary_rate_unit?: "qps" | "tps"
+  comparison_unit?: "query" | "transaction"
   useIndexes: boolean           // Создавать индексы сценария перед тестом
   selectedQueryId: string       // ID выбранного запроса (для режима custom_query)
   customSql: string             // Пользовательский SQL запрос
@@ -40,7 +43,11 @@ export interface TestRun {
   results?: TestResult[]
   summary?: {
     total_transactions?: number
+    total_units?: number
     total_duration?: number
+    workload_mode?: "query" | "transaction" | string
+    primary_rate_unit?: "qps" | "tps" | string
+    comparison_unit?: "query" | "transaction" | string
   }
   error?: string | null
   connection_names?: Record<string, string>
@@ -61,9 +68,9 @@ export interface DatabaseMetrics {
   minResponseTime: number       // Минимальное время
   maxResponseTime: number       // Максимальное время
   
-  // Производительность (одна SQL-операция = один запрос + commit)
-  throughput: number            // Успешных запросов в секунду
-  attemptRate?: number          // Всех запросов в секунду (успех + ошибка), итог прогона
+  // Производительность primary units (запросы/с для query, транзакции/с для transaction)
+  throughput: number            // Успешных primary units в секунду
+  attemptRate?: number          // Всех primary unit попыток в секунду (успех + ошибка), итог прогона
   stdDevResponseTime?: number   // σ задержки (мс), итог прогона
   
   // Соединения
@@ -135,9 +142,9 @@ export interface TimeSeriesPoint {
   
   // Метрики базы данных
   responseTime: number
-  /** Live: запросов SQL/с за окно (~1 с). */
+  /** Live: всех primary unit попыток/с за окно (~1 с). */
   attemptRate: number
-  /** Live: успешных операций/с за окно. */
+  /** Live: успешных primary units/с за окно. */
   throughput?: number
   activeConnections: number
   errorCount: number

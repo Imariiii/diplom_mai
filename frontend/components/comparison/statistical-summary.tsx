@@ -21,6 +21,11 @@ import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  formatComparisonThroughputRateUnit,
+  formatComparisonThroughputTitle,
+  resolveComparisonWorkloadMode,
+} from "@/lib/throughput-metrics"
 
 function resolveDbKeyLabel(dbKey: string, labels?: Record<string, string>): string {
   return labels?.[dbKey] || dbKey
@@ -31,11 +36,14 @@ interface StatisticalSummaryProps {
 }
 
 const METRIC_ORDER = ["latency_ms", "throughput", "throughput_per_thread", "scaling_efficiency"]
-const METRIC_LABELS: Record<string, string> = {
-  latency_ms: "Задержка",
-  throughput: "Пропускная способность",
-  throughput_per_thread: "Пропускная способность на поток",
-  scaling_efficiency: "Эффективность масштабирования",
+
+function buildMetricLabels(workloadMode?: string | null): Record<string, string> {
+  return {
+    latency_ms: "Задержка",
+    throughput: formatComparisonThroughputTitle(workloadMode),
+    throughput_per_thread: `Пропускная способность на поток (${formatComparisonThroughputRateUnit(workloadMode)})`,
+    scaling_efficiency: "Эффективность масштабирования",
+  }
 }
 
 const EFFECT_VARIANTS: Record<
@@ -86,6 +94,9 @@ function resolveLabel(id: string, result: ComparisonResult): string {
 }
 
 export function StatisticalSummary({ result }: StatisticalSummaryProps) {
+  const workloadMode = resolveComparisonWorkloadMode(result)
+  const metricLabels = useMemo(() => buildMetricLabels(workloadMode), [workloadMode])
+  const throughputUnit = formatComparisonThroughputRateUnit(workloadMode)
   const [showOnlySignificant, setShowOnlySignificant] = useState(false)
   const [activeMetric, setActiveMetric] = useState<string>("all")
   const [activeDb, setActiveDb] = useState<string>("all")
@@ -172,7 +183,7 @@ export function StatisticalSummary({ result }: StatisticalSummaryProps) {
                   value={m}
                   className="h-8 rounded-md border border-transparent px-3 text-xs data-[state=active]:border-border data-[state=active]:bg-muted/50"
                 >
-                  {METRIC_LABELS[m] || m}
+                  {metricLabels[m] || m}
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -223,7 +234,7 @@ export function StatisticalSummary({ result }: StatisticalSummaryProps) {
             {filteredEntries.map(([metric, items]) => (
               <div key={metric} className="p-4">
                 <div className="mb-3 flex items-center gap-2">
-                  <h3 className="text-sm font-medium">{METRIC_LABELS[metric] || metric}</h3>
+                  <h3 className="text-sm font-medium">{metricLabels[metric] || metric}</h3>
                   <Badge variant="outline" className="font-mono text-[10px]">{items.length}</Badge>
                 </div>
                 <div className="grid gap-2 lg:grid-cols-2">
@@ -232,6 +243,7 @@ export function StatisticalSummary({ result }: StatisticalSummaryProps) {
                       key={`${item.baseline_id}-${item.compared_id}-${item.db_key}-${item.metric}`}
                       item={item}
                       result={result}
+                      throughputUnit={throughputUnit}
                     />
                   ))}
                 </div>
@@ -239,7 +251,7 @@ export function StatisticalSummary({ result }: StatisticalSummaryProps) {
             ))}
           </div>
         ) : (
-          <CompactTable items={allFiltered} result={result} />
+          <CompactTable items={allFiltered} result={result} metricLabels={metricLabels} />
         )}
 
         {filteredEntries.length === 0 && (
@@ -260,9 +272,11 @@ export function StatisticalSummary({ result }: StatisticalSummaryProps) {
 function CompactTable({
   items,
   result,
+  metricLabels,
 }: {
   items: PairwiseComparison[]
   result: ComparisonResult
+  metricLabels: Record<string, string>
 }) {
   return (
     <div className="overflow-x-auto">
@@ -293,7 +307,7 @@ function CompactTable({
                 <td className="px-3 py-2 text-muted-foreground">
                   {resolveDbKeyLabel(item.db_key, result.db_key_labels)}
                 </td>
-                <td className="px-3 py-2">{METRIC_LABELS[item.metric] || item.metric}</td>
+                <td className="px-3 py-2">{metricLabels[item.metric] || item.metric}</td>
                 <td className="px-3 py-2 text-center font-mono tabular-nums">
                   {item.p_value_adjusted != null
                     ? item.p_value_adjusted.toExponential(1)
@@ -327,9 +341,11 @@ function CompactTable({
 function ComparisonCard({
   item,
   result,
+  throughputUnit,
 }: {
   item: PairwiseComparison
   result: ComparisonResult
+  throughputUnit: string
 }) {
   const baselineName = resolveLabel(item.baseline_id, result)
   const comparedName = resolveLabel(item.compared_id, result)
@@ -337,7 +353,12 @@ function ComparisonCard({
   const effectKey = item.effect_size_label || "negligible"
   const effectCfg = EFFECT_VARIANTS[effectKey]
 
-  const unit = item.metric === "latency_ms" ? "мс" : "зап/с"
+  const unit =
+    item.metric === "latency_ms"
+      ? "мс"
+      : item.metric === "throughput" || item.metric === "throughput_per_thread"
+        ? throughputUnit
+        : ""
 
   return (
     <div
