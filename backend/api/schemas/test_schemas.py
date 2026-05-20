@@ -1,13 +1,21 @@
 """
 Pydantic схемы для запросов тестирования
 """
+from datetime import datetime
 from pydantic import BaseModel, field_validator
 from typing import List, Optional
 
 
 MAX_TEST_ITERATIONS = 10_000
+MAX_TEST_NAME_LENGTH = 255
 MAX_TEST_VIRTUAL_USERS = 100
 MAX_TEST_WARMUP_TIME = 300
+
+
+def build_default_test_run_name(now: Optional[datetime] = None) -> str:
+    """Сгенерировать читаемое имя прогона по умолчанию."""
+    moment = now or datetime.now()
+    return f"Тест {moment.strftime('%d.%m.%Y %H:%M')}"
 
 
 class BaseTestRequest(BaseModel):
@@ -67,6 +75,21 @@ class BaseTestRequest(BaseModel):
         if len(sql) > 10_000:
             raise ValueError("SQL-запрос не может превышать 10 000 символов")
         return sql
+
+    @field_validator("test_name")
+    @classmethod
+    def validate_test_name(cls, v: Optional[str]) -> Optional[str]:
+        """Нормализовать название прогона: пустое → None, иначе trim и проверка длины."""
+        if v is None:
+            return None
+        name = v.strip()
+        if not name:
+            return None
+        if len(name) > MAX_TEST_NAME_LENGTH:
+            raise ValueError(
+                f"test_name не может превышать {MAX_TEST_NAME_LENGTH} символов"
+            )
+        return name
 
 
 class TestRequest(BaseTestRequest):

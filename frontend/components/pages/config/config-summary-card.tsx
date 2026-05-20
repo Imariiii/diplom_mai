@@ -16,6 +16,7 @@ interface ConfigSummaryCardProps {
   selectedProfileName: string | null
   selectedBundleName: string | null
   workloadModeLabel?: string | null
+  testDisplayName: string
   /** Только сетка полей — для встраивания в диалог (заголовок задаётся снаружи) */
   embedded?: boolean
 }
@@ -32,6 +33,7 @@ export function ConfigSummaryCard({
   selectedProfileName,
   selectedBundleName,
   workloadModeLabel,
+  testDisplayName,
   embedded = false,
 }: ConfigSummaryCardProps) {
   const row = (label: string, value: ReactNode) => (
@@ -43,6 +45,7 @@ export function ConfigSummaryCard({
 
   const grid = (
     <div className="grid grid-cols-1 gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
+      {row("Название", testDisplayName)}
       {row(
         "СУБД",
         selectedDatabases.length > 0

@@ -247,6 +247,10 @@ export async function getHistoryTest(testId: string): Promise<HistoryTestRun & {
   return apiClient.getHistoryTest(testId)
 }
 
+export async function renameHistoryTest(testId: string, name: string): Promise<HistoryTestRun> {
+  return apiClient.renameHistoryTest(testId, name)
+}
+
 export async function getHistoryTestErrors(testId: string): Promise<HistoryErrorReport> {
   return apiClient.getHistoryTestErrors(testId)
 }

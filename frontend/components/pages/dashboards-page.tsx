@@ -410,7 +410,7 @@ export function DashboardsPage() {
   if (!currentTest && Object.keys(realtimeData).length === 0) {
     return (
       <div className="flex min-h-[calc(100vh-3.5rem)] w-full min-w-0 max-w-full flex-col p-6">
-        <PageHeader isConnected={isConnected} currentTest={null} />
+        <PageHeader isConnected={isConnected} currentTest={null} testName={undefined} />
         <div className="flex flex-1 flex-col items-center justify-center py-10 sm:py-16">
           <EmptyStateCard />
         </div>
@@ -420,7 +420,11 @@ export function DashboardsPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <PageHeader isConnected={isConnected} currentTest={currentTest} />
+      <PageHeader
+        isConnected={isConnected}
+        currentTest={currentTest}
+        testName={currentTest?.name}
+      />
 
       {(canCancel || isCancelling) && (
         <div className="flex justify-end">

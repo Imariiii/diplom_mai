@@ -8,6 +8,7 @@ import uuid
 import asyncio
 
 from backend.api.schemas import AsyncTestRequest
+from backend.api.schemas.test_schemas import build_default_test_run_name
 from backend.core.summary_utils import sanitize_test_summary
 from backend.database.bundle_workload import get_bundle_workload_mode, get_primary_rate_unit
 from backend.database.scenario_bundle_resolver import ScenarioBundleResolver
@@ -242,8 +243,10 @@ async def run_async_test(request: AsyncTestRequest):
     from backend.initialize import HISTORY_ENABLED, test_repository
     
     test_id = str(uuid.uuid4())
-    test_name = request.test_name or f"Тест {test_id}"
-    
+    test_name = request.test_name or build_default_test_run_name()
+    run_config = request.model_dump()
+    run_config["test_name"] = test_name
+
     active_tests = get_active_tests()
     prune_active_tests(active_tests)
     created_at = _now_utc()
@@ -253,7 +256,7 @@ async def run_async_test(request: AsyncTestRequest):
         "id": test_id,
         "name": test_name,
         "status": "pending",
-        "config": request.model_dump(),
+        "config": run_config,
         "created_at": created_at,
         "finished_at": None,
     }
@@ -264,7 +267,7 @@ async def run_async_test(request: AsyncTestRequest):
             from datetime import datetime, timezone
             await test_repository.create_test_run(
                 name=test_name,
-                config=request.model_dump(),
+                config=run_config,
                 status='pending',
                 test_run_id=test_id,
                 database_group_id=request.database_group_id,

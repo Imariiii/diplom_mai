@@ -6,13 +6,19 @@ import { Badge } from "@/components/ui/badge"
 interface PageHeaderProps {
   isConnected: boolean
   currentTest: { status: string } | null
+  testName?: string
 }
 
-export function PageHeader({ isConnected, currentTest }: PageHeaderProps) {
+export function PageHeader({ isConnected, currentTest, testName }: PageHeaderProps) {
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
         <h1 className="text-2xl font-bold text-foreground">Дашборды</h1>
+        {testName ? (
+          <p className="mt-1 truncate text-sm font-medium text-foreground" title={testName}>
+            {testName}
+          </p>
+        ) : null}
         <p className="text-muted-foreground text-pretty break-words">
           Мониторинг производительности в реальном времени
         </p>

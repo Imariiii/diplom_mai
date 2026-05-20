@@ -4,6 +4,8 @@ API роуты для истории тестирования
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 
+from backend.api.schemas.history_schemas import RenameTestRunRequest
+
 router = APIRouter(prefix="/history", tags=["history"])
 
 
@@ -96,6 +98,16 @@ async def get_history_test_errors(
     if not test:
         raise HTTPException(status_code=404, detail=f"Тест {test_id} не найден")
     return await repo.get_test_error_report(test_id, db_type=db_type, limit=limit)
+
+
+@router.patch("/tests/{test_id}")
+async def rename_history_test(test_id: str, body: RenameTestRunRequest):
+    """Переименовать тест в истории"""
+    repo = get_test_repository()
+    test_run = await repo.update_test_run_name(test_id, body.name)
+    if not test_run:
+        raise HTTPException(status_code=404, detail=f"Тест {test_id} не найден")
+    return test_run.to_dict()
 
 
 @router.delete("/tests/{test_id}")

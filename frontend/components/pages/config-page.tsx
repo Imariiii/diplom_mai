@@ -30,6 +30,12 @@ import { LoadParamsCard } from "./config/load-params-card"
 import { ConfigSummaryCard } from "./config/config-summary-card"
 import { formatWorkloadModeLabel } from "@/lib/throughput-metrics"
 import { buildScenarioBundleConfigPatch, findActiveScenarioBundle, isBundleActive } from "@/lib/scenario-bundle-utils"
+import { TestRunNameCard } from "./config/test-run-name-card"
+import {
+  formatTestRunNameForSummary,
+  isWhitespaceOnlyTestDisplayName,
+  resolveTestRunName,
+} from "@/lib/test-run-name"
 
 export function ConfigPage() {
   const {
@@ -243,6 +249,11 @@ export function ConfigPage() {
       }
     }
 
+    if (isWhitespaceOnlyTestDisplayName(testConfig.testDisplayName)) {
+      toast.error("Введите название или оставьте поле пустым")
+      return false
+    }
+
     return true
   }
 
@@ -257,7 +268,7 @@ export function ConfigPage() {
     setIsRunning(true)
 
     try {
-      const testName = `Тест ${new Date().toLocaleString("ru")}`
+      const testName = resolveTestRunName(testConfig.testDisplayName)
 
       if (testConfig.testMode === "scenario") {
         const selectedScenario = scenarios.find(s => s.id === testConfig.scenario)
@@ -509,6 +520,11 @@ export function ConfigPage() {
         onWarmupTimeChange={(v) => setTestConfig({ warmupTime: v })}
       />
 
+      <TestRunNameCard
+        value={testConfig.testDisplayName ?? ""}
+        onChange={(value) => setTestConfig({ testDisplayName: value })}
+      />
+
       <div className="space-y-2">
         <Button
           size="lg"
@@ -552,6 +568,7 @@ export function ConfigPage() {
               selectedProfileName={hasMixedProfiles ? null : selectedProfileName}
               selectedBundleName={selectedBundle?.name || null}
               workloadModeLabel={selectedBundle ? formatWorkloadModeLabel(selectedBundle.workload_mode) : null}
+              testDisplayName={formatTestRunNameForSummary(testConfig.testDisplayName)}
             />
           </div>
           <DialogFooter className="min-w-0 shrink-0 flex-col gap-2 border-t border-border px-6 py-4 sm:flex-row sm:justify-end">

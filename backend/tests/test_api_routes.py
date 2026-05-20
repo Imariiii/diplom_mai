@@ -165,6 +165,36 @@ class TestHistoryRoutes:
             resp = await client.delete(f"/history/tests/{uuid.uuid4()}")
         assert resp.status_code == 404
 
+    @pytest.mark.asyncio
+    async def test_rename_test(self, client):
+        tid = str(uuid.uuid4())
+        renamed = _test_run_dict(tid, "Диплом demo 1")
+        mock_run = SimpleNamespace(to_dict=lambda: renamed)
+        mock_repo = AsyncMock()
+        mock_repo.update_test_run_name = AsyncMock(return_value=mock_run)
+
+        with patch("backend.api.routes.history_routes.get_test_repository", return_value=mock_repo):
+            resp = await client.patch(f"/history/tests/{tid}", json={"name": "Диплом demo 1"})
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "Диплом demo 1"
+        mock_repo.update_test_run_name.assert_awaited_once_with(tid, "Диплом demo 1")
+
+    @pytest.mark.asyncio
+    async def test_rename_test_not_found(self, client):
+        mock_repo = AsyncMock()
+        mock_repo.update_test_run_name = AsyncMock(return_value=None)
+
+        with patch("backend.api.routes.history_routes.get_test_repository", return_value=mock_repo):
+            resp = await client.patch(f"/history/tests/{uuid.uuid4()}", json={"name": "New"})
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_rename_test_empty_name_422(self, client):
+        mock_repo = AsyncMock()
+        with patch("backend.api.routes.history_routes.get_test_repository", return_value=mock_repo):
+            resp = await client.patch(f"/history/tests/{uuid.uuid4()}", json={"name": "   "})
+        assert resp.status_code == 422
+
 
 # ---------------------------------------------------------------------------
 # Comparison routes

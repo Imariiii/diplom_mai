@@ -172,6 +172,13 @@ class ApiClient {
     return this.request(`/history/tests/${testId}`, { method: 'DELETE' })
   }
 
+  async renameHistoryTest(testId: string, name: string): Promise<any> {
+    return this.request(`/history/tests/${testId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    })
+  }
+
   async getHistoryTestTimeSeries(
     testId: string,
     params?: { db_type?: string; limit?: number; full?: boolean },

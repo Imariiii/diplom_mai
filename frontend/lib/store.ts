@@ -53,6 +53,7 @@ export const useAppStore = create<AppState>((set) => ({
     virtualUsers: 10,            // 10 виртуальных пользователей
     iterations: 100,             // 100 итераций на пользователя
     warmupTime: 5,               // 5 секунд прогрева
+    testDisplayName: "",
     queryTypes: ["mixed"],
     dataSize: "medium",
   },

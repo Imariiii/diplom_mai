@@ -17,7 +17,11 @@ import {
   GitCompare,
   Database,
   LayoutDashboard,
+  Pencil,
 } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { toast } from "sonner"
+import { isWhitespaceOnlyTestDisplayName } from "@/lib/test-run-name"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -191,6 +195,9 @@ export function HistoryPage() {
   const [databaseGroups, setDatabaseGroups] = useState<DatabaseGroupWithConnections[]>([])
   const [selectedDatabaseGroupId, setSelectedDatabaseGroupId] = useState<string | null>(null)
   const [activeDetailTab, setActiveDetailTab] = useState("results")
+  const [isRenaming, setIsRenaming] = useState(false)
+  const [renameDraft, setRenameDraft] = useState("")
+  const [renameLoading, setRenameLoading] = useState(false)
 
   const pageSize = 20
 
@@ -248,6 +255,39 @@ export function HistoryPage() {
     }
   }
 
+  const saveRename = async () => {
+    if (!selectedTest) return
+    const trimmed = renameDraft.trim()
+    if (!trimmed) {
+      toast.error("Введите название прогона")
+      return
+    }
+    if (isWhitespaceOnlyTestDisplayName(renameDraft)) {
+      toast.error("Название не может состоять только из пробелов")
+      return
+    }
+    if (trimmed === selectedTest.name) {
+      setIsRenaming(false)
+      return
+    }
+    setRenameLoading(true)
+    try {
+      const updated = await apiClient.renameHistoryTest(selectedTest.id, trimmed)
+      setSelectedTest((prev) =>
+        prev ? { ...prev, name: updated.name, config: updated.config ?? prev.config } : prev,
+      )
+      setTests((prev) =>
+        prev.map((t) => (t.id === selectedTest.id ? { ...t, name: updated.name } : t)),
+      )
+      setIsRenaming(false)
+      toast.success("Название обновлено")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Не удалось переименовать прогон")
+    } finally {
+      setRenameLoading(false)
+    }
+  }
+
   const deleteTest = async (testId: string) => {
     if (!confirm("Удалить этот тест из истории?")) return
     try {
@@ -278,6 +318,12 @@ export function HistoryPage() {
   useEffect(() => {
     setActiveDetailTab(selectedTest?.status === "completed" ? "dashboard" : "results")
   }, [selectedTest?.id, selectedTest?.status])
+
+  useEffect(() => {
+    setIsRenaming(false)
+    setRenameDraft(selectedTest?.name ?? "")
+    setRenameLoading(false)
+  }, [selectedTest?.id, selectedTest?.name])
 
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return "-"
@@ -437,9 +483,64 @@ export function HistoryPage() {
 
         <Card className="bg-card border-border">
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>{selectedTest.name}</CardTitle>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0 flex-1 space-y-2">
+                {isRenaming ? (
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <Input
+                      value={renameDraft}
+                      onChange={(e) => setRenameDraft(e.target.value)}
+                      maxLength={255}
+                      disabled={renameLoading}
+                      aria-label="Новое название прогона"
+                      className="max-w-md"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void saveRename()
+                        if (e.key === "Escape") {
+                          setRenameDraft(selectedTest.name)
+                          setIsRenaming(false)
+                        }
+                      }}
+                    />
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => void saveRename()} disabled={renameLoading}>
+                        {renameLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          "Сохранить"
+                        )}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={renameLoading}
+                        onClick={() => {
+                          setRenameDraft(selectedTest.name)
+                          setIsRenaming(false)
+                        }}
+                      >
+                        Отмена
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CardTitle className="truncate">{selectedTest.name}</CardTitle>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0"
+                      aria-label="Изменить название"
+                      onClick={() => {
+                        setRenameDraft(selectedTest.name)
+                        setIsRenaming(true)
+                      }}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
                 <CardDescription>ID: {selectedTest.id}</CardDescription>
               </div>
               <Badge className={STATUS_CONFIG[selectedTest.status].color}>
@@ -677,7 +778,6 @@ export function HistoryPage() {
                 <CardTitle>Конфигурация теста</CardTitle>
                 <CardDescription>
                   Параметры запуска из сохранённой записи прогона
-                  {selectedTest.config?.test_name ? ` · ${selectedTest.config.test_name}` : ""}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">

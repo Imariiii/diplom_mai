@@ -188,6 +188,26 @@ class TestRepository(BaseRepository):
                 await session.refresh(test_run)
             return test_run
 
+    async def update_test_run_name(
+        self,
+        test_run_id: str,
+        name: str,
+    ) -> Optional[TestRun]:
+        """Переименовать тестовый прогон и синхронизировать test_name в config."""
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(TestRun).where(TestRun.id == uuid.UUID(test_run_id))
+            )
+            test_run = result.scalar_one_or_none()
+            if test_run:
+                test_run.name = name
+                config = dict(test_run.config or {})
+                config["test_name"] = name
+                test_run.config = config
+                await session.commit()
+                await session.refresh(test_run)
+            return test_run
+
     async def delete_test_run(self, test_run_id: str) -> bool:
         """Удалить тестовый прогон"""
         async with self.SessionLocal() as session:

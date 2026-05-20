@@ -29,6 +29,7 @@ export interface TestConfig {
   virtualUsers: number          // Количество виртуальных пользователей (параллельных соединений)
   iterations: number            // Количество итераций на пользователя
   warmupTime: number            // Время прогрева в секундах
+  testDisplayName?: string      // Пользовательское название прогона (пусто = авто)
   queryTypes: ("read" | "write" | "mixed")[]
   dataSize: "small" | "medium" | "large"
 }
