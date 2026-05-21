@@ -59,6 +59,12 @@ def test_sakila_and_olist_seed_structure():
     assert sakila_payload["generation_source"] == MANUAL_OLTP_GENERATION_SOURCE
     assert sakila_payload["queries"] == []
     assert len(sakila_payload["transactions"]) == 3
+    rental_sql = " ".join(
+        step["sql_template"]
+        for tx in sakila_payload["transactions"]
+        for step in tx["steps"]
+    ).lower()
+    assert "insert into rental" not in rental_sql
 
     ecom_payload = build_manual_oltp_bundle_payload(
         profile_name="olist_like_test",

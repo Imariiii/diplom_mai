@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Database, Cpu, BarChart3, Lock, AlertTriangle, CheckCircle2, History, SlidersHorizontal, Loader2, Square } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -28,8 +28,11 @@ import {
   pickAggregateAttemptRate,
   pickAggregateThroughput,
 } from "@/lib/throughput-metrics"
+
+const ACTIVE_TEST_STATUSES = new Set(["pending", "running", "cancelling"])
+
 export function DashboardsPage() {
-  const { currentTest, realtimeData, testConfig, setCurrentTest, addTestToHistory, clearRealtimeData, connectionNames, setConnectionNames, connectionDbTypes, setConnectionDbTypes, setCurrentPage, setComparisonSelection } = useAppStore()
+  const { currentTest, realtimeData, testConfig, setCurrentTest, addTestToHistory, connectionNames, setConnectionNames, connectionDbTypes, setConnectionDbTypes, setCurrentPage, setComparisonSelection } = useAppStore()
   const [statusMessage, setStatusMessage] = useState<string>("")
   const [showProgressBar, setShowProgressBar] = useState(false)
   const [cancelLoading, setCancelLoading] = useState(false)
@@ -39,10 +42,6 @@ export function DashboardsPage() {
     const cleaned = (message || "").replace(/^Ошибка:\s*/i, "").trim()
     return cleaned || "Тест завершился с ошибкой до сбора метрик. Подробности отсутствуют."
   }
-
-  // Ref always holds the latest currentTest so the cleanup closure is never stale.
-  const currentTestRef = useRef(currentTest)
-  currentTestRef.current = currentTest
 
   const {
     isConnected,
@@ -288,15 +287,6 @@ export function DashboardsPage() {
     },
   })
 
-  useEffect(() => {
-    return () => {
-      if (currentTestRef.current?.status !== "completed") {
-        clearRealtimeData()
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTest?.id])
-
   // Показываем прогресс-бар во время теста и ещё 2 секунды после завершения,
   // чтобы пользователь успел увидеть финальные 100%
   useEffect(() => {
@@ -380,13 +370,35 @@ export function DashboardsPage() {
     return currentTest?.results?.find(r => r.databaseId === dbKey)
   }
 
-  const chartDatabases = Object.keys(realtimeData).length > 0
-    ? Object.keys(realtimeData)
-    : (currentTest?.results?.map((result) =>
-        currentTest.connection_names?.[result.databaseId]
-          || connectionNames[result.databaseId]
-          || result.databaseId
-      ) || [])
+  const chartDatabases = useMemo(() => {
+    const realtimeKeys = Object.keys(realtimeData)
+    if (realtimeKeys.length > 0) {
+      return realtimeKeys
+    }
+
+    const status = currentTest?.status
+    if (status && ACTIVE_TEST_STATUSES.has(status)) {
+      const fromCurrentTest = currentTest?.connection_names
+        ? Object.keys(currentTest.connection_names)
+        : []
+      if (fromCurrentTest.length > 0) {
+        return fromCurrentTest
+      }
+      if (testConfig.databases.length > 0) {
+        return testConfig.databases
+      }
+    }
+
+    return (
+      currentTest?.results?.map((result) => result.databaseId) || []
+    )
+  }, [
+    realtimeData,
+    currentTest?.status,
+    currentTest?.connection_names,
+    currentTest?.results,
+    testConfig.databases,
+  ])
 
   const isTestFinished = currentTest?.status === "completed" || currentTest?.status === "failed" || currentTest?.status === "cancelled"
   const hasCompletedResults =

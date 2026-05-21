@@ -110,38 +110,33 @@ SAKILA_OLTP_TRANSACTIONS: List[Dict[str, Any]] = [
         ],
     },
     {
-        "name": "new_rental",
+        "name": "rental_touch",
         "weight": 25,
         "order_index": 2,
-        "description": "Оформление аренды: проверка inventory/клиента и INSERT в rental.",
-        "params": [
-            _param("inventory_id", "inventory", "inventory_id"),
-            _param("customer_id", "customer", "customer_id"),
-            _param("staff_id", "staff", "staff_id"),
-        ],
+        "description": "Просмотр аренды и обновление last_update по PK (без INSERT в composite UNIQUE).",
+        "params": [_param("rental_id", "rental", "rental_id")],
         "steps": [
             {
                 "sql_template": (
-                    "SELECT inventory_id, film_id, store_id FROM inventory "
-                    "WHERE inventory_id = {inventory_id}"
+                    "SELECT rental_id, inventory_id, customer_id, rental_date "
+                    "FROM rental WHERE rental_id = {rental_id}"
                 ),
                 "query_type": "select",
                 "order_index": 0,
             },
             {
                 "sql_template": (
-                    "SELECT customer_id, store_id FROM customer "
-                    "WHERE customer_id = {customer_id}"
+                    "SELECT inventory_id, film_id, store_id FROM inventory "
+                    "WHERE inventory_id = (SELECT inventory_id FROM rental WHERE rental_id = {rental_id})"
                 ),
                 "query_type": "select",
                 "order_index": 1,
             },
             {
                 "sql_template": (
-                    "INSERT INTO rental (rental_date, inventory_id, customer_id, staff_id, last_update) "
-                    "VALUES (NOW(), {inventory_id}, {customer_id}, {staff_id}, NOW())"
+                    "UPDATE rental SET last_update = NOW() WHERE rental_id = {rental_id}"
                 ),
-                "query_type": "insert",
+                "query_type": "update",
                 "order_index": 2,
             },
         ],

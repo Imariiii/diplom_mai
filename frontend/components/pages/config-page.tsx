@@ -43,6 +43,7 @@ export function ConfigPage() {
     setTestConfig,
     setCurrentTest,
     setCurrentPage,
+    clearRealtimeData,
   } = useAppStore()
   const [isRunning, setIsRunning] = useState(false)
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false)
@@ -324,6 +325,7 @@ export function ConfigPage() {
         }, {} as Record<string, string>),
       }
 
+      clearRealtimeData()
       setCurrentTest(testRun)
       setConfirmDialogOpen(false)
       setCurrentPage("dashboards")

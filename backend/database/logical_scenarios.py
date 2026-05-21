@@ -49,7 +49,7 @@ AUTO_GENERATED_SCENARIO_TEMPLATE_IDS = [
     template_id for template_id in LOGICAL_SCENARIO_TEMPLATE_IDS if template_id != "oltp"
 ]
 MANUAL_OLTP_TEMPLATE_ID = "oltp"
-MANUAL_OLTP_GENERATION_SOURCE = "manual_oltp_transactions_v1"
+MANUAL_OLTP_GENERATION_SOURCE = "manual_oltp_transactions_v2"
 
 
 def build_custom_template_id(name: str, existing_ids: Iterable[str] = ()) -> str:
