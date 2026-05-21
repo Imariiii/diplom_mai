@@ -5,7 +5,9 @@ import {
   formatCardSuccessfulThroughput,
   formatPrimaryThroughputLabel,
   formatSummaryUnitsLabel,
+  formatWorkloadModeBadge,
   formatWorkloadModeLabel,
+  getWorkloadModeBadgeVariant,
   resolvePrimaryRateUnit,
   resolveWorkloadMode,
 } from "./throughput-metrics"
@@ -89,6 +91,10 @@ describe("workload mode labels", () => {
   it("formats bundle and throughput labels", () => {
     expect(formatWorkloadModeLabel("query")).toBe("SQL bundle")
     expect(formatWorkloadModeLabel("transaction")).toBe("Транзакционный bundle")
+    expect(formatWorkloadModeBadge("query")).toBe("Запросы")
+    expect(formatWorkloadModeBadge("transaction")).toBe("Транзакции")
+    expect(getWorkloadModeBadgeVariant("query")).toBe("outline")
+    expect(getWorkloadModeBadgeVariant("transaction")).toBe("secondary")
     expect(resolvePrimaryRateUnit("query")).toBe("qps")
     expect(resolvePrimaryRateUnit("transaction")).toBe("tps")
     expect(formatAttemptRateLabel("query")).toBe("Запросов/с")

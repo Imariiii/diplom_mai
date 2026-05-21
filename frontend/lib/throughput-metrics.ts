@@ -107,6 +107,17 @@ export function formatWorkloadModeLabel(workloadMode?: string | null): string {
     : "SQL bundle"
 }
 
+/** Короткая подпись для бейджа в UI конфигурации и сценариев. */
+export function formatWorkloadModeBadge(workloadMode?: string | null): string {
+  return resolveWorkloadMode(workloadMode) === "transaction" ? "Транзакции" : "Запросы"
+}
+
+export function getWorkloadModeBadgeVariant(
+  workloadMode?: string | null,
+): "outline" | "secondary" {
+  return resolveWorkloadMode(workloadMode) === "transaction" ? "secondary" : "outline"
+}
+
 export function formatPrimaryThroughputLabel(
   workloadMode?: string | null,
   primaryRateUnit?: string | null,

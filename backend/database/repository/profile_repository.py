@@ -6,7 +6,7 @@ from typing import List, Optional
 
 from sqlalchemy import delete, select
 
-from backend.database.logical_scenarios import LOGICAL_SCENARIO_TEMPLATES
+from backend.database.logical_scenarios import LOGICAL_SCENARIO_TEMPLATES, MANUAL_OLTP_TEMPLATE_ID
 from backend.database.models import Base, ScenarioBundle, ScenarioTemplate, SchemaProfile
 from backend.database.repository.base import BaseRepository, get_local_now
 
@@ -23,18 +23,19 @@ class ProfileRepository(BaseRepository):
         """Инициализировать встроенные logical templates."""
         async with self.SessionLocal() as session:
             for template_data in LOGICAL_SCENARIO_TEMPLATES:
+                template_is_builtin = 'f' if template_data["id"] == MANUAL_OLTP_TEMPLATE_ID else 't'
                 existing = await session.get(ScenarioTemplate, template_data["id"])
                 if existing:
                     existing.name = template_data["name"]
                     existing.description = template_data["description"]
-                    existing.is_builtin = 't'
+                    existing.is_builtin = template_is_builtin
                     continue
                 session.add(
                     ScenarioTemplate(
                         id=template_data["id"],
                         name=template_data["name"],
                         description=template_data["description"],
-                        is_builtin='t',
+                        is_builtin=template_is_builtin,
                     )
                 )
             await session.commit()

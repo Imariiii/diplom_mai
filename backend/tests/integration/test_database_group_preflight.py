@@ -12,14 +12,17 @@ from backend.database.repository.database_group_repository import DatabaseGroupR
 from backend.database.repository.scenario_bundle_repository import ScenarioBundleRepository
 from backend.database.scenario_bundle_resolver import ScenarioBundleResolver
 from backend.database.scenario_bundle_validator import ScenarioBundleValidator
-from backend.database.scenario_generator import DEFAULT_SCENARIO_TYPES
+from backend.database.logical_scenarios import (
+    AUTO_GENERATED_SCENARIO_TEMPLATE_IDS,
+    MANUAL_OLTP_TEMPLATE_ID,
+)
 
 
 pytestmark = pytest.mark.integration
 
 DEFAULT_HISTORY_URL = "postgresql+asyncpg://postgres:history123@localhost:5433/project_data"
 DEFAULT_DATABASE_GROUPS = ("Sakila", "Brazilian E-com")
-DEFAULT_SCENARIOS = tuple(DEFAULT_SCENARIO_TYPES)
+DEFAULT_SCENARIOS = tuple(AUTO_GENERATED_SCENARIO_TEMPLATE_IDS) + (MANUAL_OLTP_TEMPLATE_ID,)
 EXPECTED_DBMS_TYPES = {"postgresql", "mysql", "mariadb"}
 
 
@@ -109,7 +112,13 @@ async def test_database_group_bundle_is_ready_for_load_test(
     )
 
     bundle = resolved["bundle"]
-    assert bundle["queries"], f"{logical_db_name}/{scenario_template_id}: bundle не содержит queries"
+    workload_mode = bundle.get("workload_mode") or "query"
+    if workload_mode == "transaction":
+        assert bundle.get("transactions"), (
+            f"{logical_db_name}/{scenario_template_id}: transaction bundle не содержит транзакций"
+        )
+    else:
+        assert bundle["queries"], f"{logical_db_name}/{scenario_template_id}: bundle не содержит queries"
     if len(active_connections) >= 2:
         expected_common_name = f"{scenario_template_id}::{logical_db_name}::common"
         assert bundle.get("name") == expected_common_name, (

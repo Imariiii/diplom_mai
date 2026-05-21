@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from backend.database.logical_scenarios import AUTO_GENERATED_SCENARIO_TEMPLATE_IDS
 from backend.database.query_templates import QUERY_TEMPLATES, QueryTemplateDefinition, TemplateRequirements
 from backend.database.repository.scenario_bundle_repository import ScenarioBundleRepository
 from backend.database.scenario_bundle_validator import ScenarioBundleValidator
@@ -16,14 +17,7 @@ from backend.database.identifier_utils import shorten_identifier
 from backend.database.schema_analyzer import ColumnInfo, ForeignKeyInfo, SchemaAnalyzer, SchemaMetadata, TableInfo
 
 
-DEFAULT_SCENARIO_TYPES: List[str] = [
-    "read_only",
-    "write_only",
-    "mixed_light",
-    "mixed_heavy",
-    "oltp",
-    "olap",
-]
+DEFAULT_SCENARIO_TYPES: List[str] = list(AUTO_GENERATED_SCENARIO_TEMPLATE_IDS)
 
 SCENARIO_GENERATOR_VERSION = "logical-scenario-generator-v9"
 
@@ -32,7 +26,6 @@ SCENARIO_QUERY_LIMITS: Dict[str, int] = {
     "write_only": 4,
     "mixed_light": 5,
     "mixed_heavy": 6,
-    "oltp": 5,
     "olap": 5,
 }
 

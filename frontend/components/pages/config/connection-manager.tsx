@@ -76,7 +76,7 @@ const GENERATABLE_SCENARIO_TYPES = [
   { value: "mixed_light", label: "Смешанная лёгкая" },
   { value: "mixed_heavy", label: "Смешанная тяжёлая" },
   { value: "oltp", label: "OLTP" },
-  { value: "olap", label: "OLAP" },
+  { value: "olap", label: "Аналитические запросы" },
 ]
 const TEMPLATE_LABELS: Record<string, string> = {
   select_by_pk: "SELECT по PK",

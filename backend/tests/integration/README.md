@@ -81,7 +81,7 @@ python -m pytest backend/tests/integration/test_database_group_preflight.py -m i
 ```
 
 По умолчанию проверяются все builtin-сценарии, поддерживаемые генератором
-(`read_only`, `write_only`, `mixed_light`, `mixed_heavy`, `oltp`, `olap`).
+(`read_only`, `write_only`, `mixed_light`, `mixed_heavy`, `olap`; `oltp` — ручной transaction-bundle, не автогенерируется).
 Список logical DB и сценариев можно переопределить:
 
 ```bash

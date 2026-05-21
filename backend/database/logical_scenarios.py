@@ -34,14 +34,22 @@ LOGICAL_SCENARIO_TEMPLATES: List[Dict[str, str]] = [
     },
     {
         "id": "olap",
-        "name": "OLAP",
-        "description": "Аналитическая нагрузка с агрегациями, JOIN и диапазонными чтениями.",
+        "name": "Аналитические запросы",
+        "description": "Аналитические запросы с агрегациями, JOIN и диапазонными чтениями.",
     },
 ]
 
 
 LOGICAL_SCENARIO_TEMPLATE_IDS = [template["id"] for template in LOGICAL_SCENARIO_TEMPLATES]
 BUILTIN_LOGICAL_SCENARIO_TEMPLATE_IDS = set(LOGICAL_SCENARIO_TEMPLATE_IDS)
+
+# Шаблоны, для которых bootstrap/provisioner создают query-bundle автоматически.
+# OLTP исключён: transaction-bundle задаётся вручную (см. oltp_transaction_seeds.py).
+AUTO_GENERATED_SCENARIO_TEMPLATE_IDS = [
+    template_id for template_id in LOGICAL_SCENARIO_TEMPLATE_IDS if template_id != "oltp"
+]
+MANUAL_OLTP_TEMPLATE_ID = "oltp"
+MANUAL_OLTP_GENERATION_SOURCE = "manual_oltp_transactions_v1"
 
 
 def build_custom_template_id(name: str, existing_ids: Iterable[str] = ()) -> str:

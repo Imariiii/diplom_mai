@@ -9,6 +9,16 @@ from backend.database.repository.connection_repository import ConnectionReposito
 from backend.database.repository.database_group_repository import DatabaseGroupRepository
 from backend.database.repository.profile_repository import ProfileRepository
 from backend.database.repository.scenario_bundle_repository import ScenarioBundleRepository
+from backend.database.logical_scenarios import (
+    AUTO_GENERATED_SCENARIO_TEMPLATE_IDS,
+    MANUAL_OLTP_GENERATION_SOURCE,
+    MANUAL_OLTP_TEMPLATE_ID,
+)
+from backend.database.oltp_transaction_seeds import (
+    build_manual_oltp_bundle_payload,
+    is_olist_profile,
+    is_sakila_profile,
+)
 from backend.database.scenario_generator import SCENARIO_GENERATOR_VERSION, ScenarioGenerator
 
 
@@ -55,6 +65,7 @@ class LogicalScenarioBootstrap:
         await self._ensure_database_group_reference_state()
         await self._ensure_reference_connections()
         await self._ensure_builtin_bundles()
+        await self._ensure_manual_oltp_bundles()
 
     async def _auto_provision_existing_database_groups(self) -> None:
         """Автоматически создать profile/bundle для уже существующих database group."""
@@ -228,10 +239,12 @@ class LogicalScenarioBootstrap:
 
     async def _ensure_builtin_bundles(self) -> None:
         profiles = await self.profile_repository.list_profiles()
+        all_templates = await self.profile_repository.list_templates()
+        auto_template_ids = set(AUTO_GENERATED_SCENARIO_TEMPLATE_IDS)
         templates = [
             template
-            for template in await self.profile_repository.list_templates()
-            if template.is_builtin == 't'
+            for template in all_templates
+            if template.id in auto_template_ids
         ]
 
         logical_profile_ids = set()
@@ -316,7 +329,7 @@ class LogicalScenarioBootstrap:
             if not bundle:
                 missing_or_incomplete_template_ids.append(template.id)
                 continue
-            if not bundle.queries or not bundle.indexes:
+            if not self._is_bundle_complete(bundle):
                 missing_or_incomplete_template_ids.append(template.id)
                 continue
             if bundle.generation_source != SCENARIO_GENERATOR_VERSION:
@@ -329,6 +342,123 @@ class LogicalScenarioBootstrap:
                 missing_or_incomplete_template_ids.append(template.id)
                 continue
         return missing_or_incomplete_template_ids
+
+    def _is_bundle_complete(self, bundle) -> bool:
+        """Проверить, что bundle содержит достаточно данных для своего workload_mode."""
+        workload_mode = (bundle.workload_mode or "query").strip().lower()
+        if workload_mode == "transaction":
+            transactions = bundle.transactions or []
+            if not transactions:
+                return False
+            return all((transaction.steps or []) for transaction in transactions)
+        if not bundle.queries:
+            return False
+        return bool(bundle.indexes)
+
+    async def _ensure_manual_oltp_bundles(self) -> None:
+        """Создать или обновить ручные OLTP transaction-bundle для Sakila и E-com."""
+        targets = []
+
+        if self.database_group_repository:
+            database_groups = await self.database_group_repository.get_all_with_connections()
+            for database_group in database_groups:
+                if not database_group.schema_profile_id:
+                    continue
+                if getattr(database_group, "profile_status", None) != "confirmed":
+                    continue
+                if getattr(database_group, "compatibility_status", None) == "invalid":
+                    continue
+                profile = await self.profile_repository.get_profile_by_id(
+                    str(database_group.schema_profile_id)
+                )
+                if not profile:
+                    continue
+                if not (
+                    is_sakila_profile(profile.name, database_group.name)
+                    or is_olist_profile(profile.name, database_group.name)
+                ):
+                    continue
+                reference_connection = self._pick_database_group_reference(
+                    database_group,
+                    [
+                        connection for connection in database_group.connections
+                        if connection.is_active == 't'
+                    ],
+                )
+                if not reference_connection:
+                    continue
+                targets.append({
+                    "schema_profile_id": str(profile.id),
+                    "profile_name": profile.name,
+                    "scope_name": database_group.name,
+                    "variant": "common",
+                    "database_group_name": database_group.name,
+                    "reference_connection_id": str(reference_connection.id),
+                })
+
+        profiles = await self.profile_repository.list_profiles()
+        covered_profile_ids = {target["schema_profile_id"] for target in targets}
+        for profile in profiles:
+            if str(profile.id) in covered_profile_ids:
+                continue
+            if not profile.reference_connection_id:
+                continue
+            if not (is_sakila_profile(profile.name) or is_olist_profile(profile.name)):
+                continue
+            targets.append({
+                "schema_profile_id": str(profile.id),
+                "profile_name": profile.name,
+                "scope_name": profile.name,
+                "variant": "canonical",
+                "database_group_name": None,
+                "reference_connection_id": str(profile.reference_connection_id),
+            })
+
+        for target in targets:
+            await self._upsert_manual_oltp_bundle_for_target(target)
+
+    async def _upsert_manual_oltp_bundle_for_target(self, target: dict) -> None:
+        """Идемпотентно применить manual OLTP seed к одному профилю."""
+        payload = build_manual_oltp_bundle_payload(
+            profile_name=target["profile_name"],
+            scope_name=target["scope_name"],
+            variant=target["variant"],
+            database_group_name=target.get("database_group_name"),
+        )
+        if not payload:
+            return
+
+        existing_bundles = await self.bundle_repository.list_bundles(
+            schema_profile_id=target["schema_profile_id"],
+            scenario_template_id=MANUAL_OLTP_TEMPLATE_ID,
+        )
+        bundle = next(
+            (item for item in existing_bundles if item.name == payload["name"]),
+            None,
+        )
+        if bundle and bundle.generation_source == "manual_variant":
+            return
+
+        try:
+            await self.bundle_repository.upsert_generated_bundle(
+                schema_profile_id=target["schema_profile_id"],
+                scenario_template_id=payload["scenario_template_id"],
+                name=payload["name"],
+                description=payload["description"],
+                generation_source=payload["generation_source"],
+                generated_from_connection_id=target["reference_connection_id"],
+                queries=payload["queries"],
+                indexes=payload["indexes"],
+                transactions=payload["transactions"],
+                workload_mode=payload["workload_mode"],
+                activate=True,
+                is_builtin=False,
+            )
+        except Exception as exc:
+            print(
+                f"[LOGICAL_BOOTSTRAP] Не удалось применить manual OLTP bundle "
+                f"{payload['name']}: {exc}"
+            )
 
     def _pick_reference_connection(self, profile_name: str, connections: List) -> Optional[object]:
         if not connections:

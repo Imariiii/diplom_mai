@@ -33,7 +33,7 @@ import type {
   SchemaProfileDetail,
   SchemaProfileSummary,
 } from "@/lib/types"
-import { formatWorkloadModeLabel } from "@/lib/throughput-metrics"
+import { WorkloadModeBadge } from "@/components/scenarios/workload-mode-badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -838,9 +838,6 @@ export function LogicalScenariosBrowser() {
   // ==================== Render ====================
 
   const profileName = selectedDatabaseGroup?.schema_profile_name || selectedProfileDetail?.name || null
-  const bundleSubtitle = draftBundle
-    ? `${draftBundle.name} · ${formatWorkloadModeLabel(draftBundle.workload_mode)} · ${draftBundle.generation_source || "manual"}`
-    : null
 
   if (loading) {
     return (
@@ -875,7 +872,9 @@ export function LogicalScenariosBrowser() {
               </div>
               <p className="mt-0.5 truncate text-xs text-muted-foreground">
                 {selectedTemplate
-                  ? `${selectedTemplate.name}${bundleSubtitle ? ` — ${bundleSubtitle}` : ""}`
+                  ? draftBundle
+                    ? `${selectedTemplate.name} — ${draftBundle.name}`
+                    : `${selectedTemplate.name} — выберите профиль и bundle`
                   : "Выберите шаблон из списка слева"}
               </p>
             </div>
@@ -1024,6 +1023,12 @@ export function LogicalScenariosBrowser() {
                     >
                       {selectedTemplate.is_builtin ? "Встроенный" : "Пользовательский"}
                     </Badge>
+                    {draftBundle && (
+                      <WorkloadModeBadge
+                        workloadMode={draftBundle.workload_mode}
+                        className="text-[11px]"
+                      />
+                    )}
                   </div>
                   {selectedTemplate.description ? (
                     <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
@@ -1754,8 +1759,13 @@ export function LogicalScenariosBrowser() {
                           <p className="font-medium">{draftBundle.name}</p>
                         </div>
                         <div>
-                          <span className="text-xs text-muted-foreground">Тип нагрузки</span>
-                          <p className="font-medium">{formatWorkloadModeLabel(draftBundle.workload_mode)}</p>
+                          <span className="text-xs text-muted-foreground">Режим исполнения</span>
+                          <p className="mt-1">
+                            <WorkloadModeBadge
+                              workloadMode={draftBundle.workload_mode}
+                              className="text-[11px]"
+                            />
+                          </p>
                         </div>
                         <div>
                           <span className="text-xs text-muted-foreground">Источник генерации</span>
@@ -1818,7 +1828,7 @@ export function LogicalScenariosBrowser() {
               </Label>
               <Input
                 id="tpl-name"
-                placeholder="Например: OLAP нагрузка с агрегациями"
+                placeholder="Например: аналитические запросы с агрегациями"
                 value={templateDialog.name}
                 onChange={(e) => setTemplateDialog((s) => ({ ...s, name: e.target.value }))}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) void handleSubmitTemplateDialog() }}

@@ -71,6 +71,8 @@ class DatabaseGroupValidator:
                 errors=errors,
                 warnings=warnings,
                 mode=mode,
+                reference_dbms=reference_metadata.dbms_type,
+                target_dbms=metadata.dbms_type,
             )
 
         if len(metadata_by_id) > 1:
@@ -97,6 +99,8 @@ class DatabaseGroupValidator:
         errors: List[str],
         warnings: List[str],
         mode: str = "lenient",
+        reference_dbms: Optional[str] = None,
+        target_dbms: Optional[str] = None,
     ) -> None:
         reference_tables = reference_metadata.tables
         target_tables = target_metadata.tables
@@ -120,7 +124,16 @@ class DatabaseGroupValidator:
             if not target_table:
                 continue
             common_tables_count += 1
-            self._compare_table(reference_table, target_table, target_name, errors, warnings, mode=mode)
+            self._compare_table(
+                reference_table,
+                target_table,
+                target_name,
+                errors,
+                warnings,
+                mode=mode,
+                reference_dbms=reference_dbms or reference_metadata.dbms_type,
+                target_dbms=target_dbms or target_metadata.dbms_type,
+            )
 
         if common_tables_count == 0:
             errors.append(f"{target_name}: нет пересечения таблиц с эталоном")
@@ -133,6 +146,8 @@ class DatabaseGroupValidator:
         errors: List[str],
         warnings: List[str],
         mode: str = "lenient",
+        reference_dbms: Optional[str] = None,
+        target_dbms: Optional[str] = None,
     ) -> None:
         reference_columns = {column.name: column for column in reference_table.columns}
         target_columns = {column.name: column for column in target_table.columns}
@@ -158,12 +173,24 @@ class DatabaseGroupValidator:
                     strict_error=True,
                 )
             if target_column.is_nullable != reference_column.is_nullable:
+                cross_dbms = (
+                    reference_dbms
+                    and target_dbms
+                    and reference_dbms != target_dbms
+                )
+                is_primary_key_column = column_name in reference_table.primary_key
+                # У портов Sakila/Pagila information_schema по-разному отражает NULL
+                # на необязательных колонках (например address.location) — не блокируем группу.
+                nullable_is_blocking = (
+                    not reference_column.is_nullable
+                    and not (cross_dbms and not is_primary_key_column)
+                )
                 self._issue(
                     errors,
                     warnings,
                     f"{target_name}: {reference_table.name}.{column_name} отличается nullable",
                     mode,
-                    strict_error=not reference_column.is_nullable,
+                    strict_error=nullable_is_blocking,
                 )
             if self._insert_default_signature(target_column) != self._insert_default_signature(reference_column):
                 self._issue(

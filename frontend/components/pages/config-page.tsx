@@ -28,7 +28,7 @@ import { ScenarioSelectorCard } from "./config/scenario-selector-card"
 import { QuerySelectorCard } from "./config/query-selector-card"
 import { LoadParamsCard } from "./config/load-params-card"
 import { ConfigSummaryCard } from "./config/config-summary-card"
-import { formatWorkloadModeLabel } from "@/lib/throughput-metrics"
+import { formatWorkloadModeBadge } from "@/lib/throughput-metrics"
 import { buildScenarioBundleConfigPatch, findActiveScenarioBundle, isBundleActive } from "@/lib/scenario-bundle-utils"
 import { TestRunNameCard } from "./config/test-run-name-card"
 import {
@@ -567,7 +567,7 @@ export function ConfigPage() {
               connections={connections}
               selectedProfileName={hasMixedProfiles ? null : selectedProfileName}
               selectedBundleName={selectedBundle?.name || null}
-              workloadModeLabel={selectedBundle ? formatWorkloadModeLabel(selectedBundle.workload_mode) : null}
+              workloadModeLabel={selectedBundle ? formatWorkloadModeBadge(selectedBundle.workload_mode) : null}
               testDisplayName={formatTestRunNameForSummary(testConfig.testDisplayName)}
             />
           </div>

@@ -31,11 +31,14 @@ def _connection(
     )
 
 
-def _metadata(connection_id, table):
+def _metadata(connection_id, table, dbms_type=None):
+    resolved_dbms = dbms_type or connection_id
+    if resolved_dbms not in {"mysql", "postgresql", "mariadb"}:
+        resolved_dbms = "postgresql"
     return SchemaMetadata(
         connection_id=connection_id,
         connection_name=connection_id,
-        dbms_type="postgresql",
+        dbms_type=resolved_dbms,
         tables={table.name: table},
     )
 
@@ -257,6 +260,33 @@ class TestDatabaseGroupValidatorStrictMode:
 
         assert errors == []
         assert "Makila: в address отсутствует колонка location" in warnings
+
+    def test_strict_mode_cross_dbms_nullable_drift_on_optional_column_is_warning(self):
+        """Sakila MySQL vs Pagila: address.location часто расходится по NULL в metadata."""
+        reference = _metadata("mysql", _table(
+            "address",
+            [
+                ColumnInfo("address_id", "integer", False, is_primary_key=True, category="integer"),
+                ColumnInfo("location", "varchar", False, category="string"),
+            ],
+            primary_key=["address_id"],
+        ))
+        target = _metadata("postgresql", _table(
+            "address",
+            [
+                ColumnInfo("address_id", "integer", False, is_primary_key=True, category="integer"),
+                ColumnInfo("location", "varchar", True, category="string"),
+            ],
+            primary_key=["address_id"],
+        ))
+        validator = DatabaseGroupValidator.__new__(DatabaseGroupValidator)
+        errors = []
+        warnings = []
+
+        validator._compare_metadata(reference, target, "Pagila", errors, warnings, mode="strict")
+
+        assert errors == []
+        assert "Pagila: address.location отличается nullable" in warnings
 
     def test_strict_mode_reports_fk_and_unique_drift_as_warnings(self):
         reference_table = _table(

@@ -277,8 +277,9 @@ class ScenarioBundleRepository(BaseRepository):
         transactions: Optional[List[Dict[str, Any]]] = None,
         workload_mode: str = "query",
         activate: bool = False,
+        is_builtin: bool = True,
     ) -> ScenarioBundle:
-        """Создать или обновить системный generated bundle по имени variant."""
+        """Создать или обновить bundle по имени variant."""
         async with self.SessionLocal() as session:
             result = await session.execute(
                 select(ScenarioBundle)
@@ -308,13 +309,15 @@ class ScenarioBundleRepository(BaseRepository):
                     ),
                     workload_mode=workload_mode,
                     is_active='f' if active_exists and not activate else 't',
-                    is_builtin='t',
+                    is_builtin='t' if is_builtin else 'f',
                 )
                 session.add(bundle)
                 await session.flush()
             else:
                 bundle.description = description
                 bundle.generation_source = generation_source
+                bundle.workload_mode = workload_mode
+                bundle.is_builtin = 't' if is_builtin else 'f'
                 bundle.generated_from_connection_id = (
                     uuid.UUID(generated_from_connection_id) if generated_from_connection_id else None
                 )

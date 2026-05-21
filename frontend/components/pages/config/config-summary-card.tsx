@@ -59,7 +59,7 @@ export function ConfigSummaryCard({
           {row("Индексы", useIndexes ? "Включены" : "Выключены")}
           {row("Профиль", selectedProfileName || "Не определён")}
           {row("Bundle", selectedBundleName || "Не разрешён")}
-          {row("Тип нагрузки", workloadModeLabel || "SQL bundle")}
+          {row("Режим исполнения", workloadModeLabel || "Запросы")}
         </>
       ) : (
         row("Запрос", "Пользовательский SQL")

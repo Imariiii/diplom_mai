@@ -5,7 +5,7 @@
 import re
 from typing import Any, Dict, List, Optional
 
-from backend.database.logical_scenarios import LOGICAL_SCENARIO_TEMPLATE_IDS
+from backend.database.logical_scenarios import AUTO_GENERATED_SCENARIO_TEMPLATE_IDS
 from backend.database.database_group_validator import DatabaseGroupValidator
 from backend.database.repository.connection_repository import ConnectionRepository
 from backend.database.repository.database_group_repository import DatabaseGroupRepository
@@ -214,7 +214,10 @@ class DatabaseGroupProvisioner:
             and str(bundle.generated_from_connection_id) == reference_connection_id
             and bundle.generation_source == SCENARIO_GENERATOR_VERSION
         }
-        return any(template_id not in generated_templates for template_id in LOGICAL_SCENARIO_TEMPLATE_IDS)
+        return any(
+            template_id not in generated_templates
+            for template_id in AUTO_GENERATED_SCENARIO_TEMPLATE_IDS
+        )
 
     def _pick_reference_connection(
         self,

@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Code2, Layers } from "lucide-react"
 import type { ScenarioBundleSummary, ScenarioTemplate } from "@/lib/types"
-import { formatWorkloadModeLabel } from "@/lib/throughput-metrics"
+import { WorkloadModeBadge } from "@/components/scenarios/workload-mode-badge"
 
 interface ScenarioSelectorCardProps {
   scenarios: ScenarioTemplate[]
@@ -62,7 +62,8 @@ export function ScenarioSelectorCard({
           Сценарий тестирования
         </CardTitle>
         <CardDescription>
-          Шаблон нагрузки и набор запросов для выбранной базы. Подробности запросов — по кнопке ниже.
+          Шаблон нагрузки и активный набор для выбранной базы. Режим исполнения: одиночные SQL-запросы
+          или транзакции — см. бейдж у набора.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -95,11 +96,9 @@ export function ScenarioSelectorCard({
 
         {activeBundle && (
           <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-sm space-y-1">
-            <div>
-              <Badge variant="outline" className="mr-2 text-[10px]">
-                {formatWorkloadModeLabel(activeBundle.workload_mode)}
-              </Badge>
-              <span className="text-muted-foreground">Активный набор: </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <WorkloadModeBadge workloadMode={activeBundle.workload_mode} className="text-[11px]" />
+              <span className="text-muted-foreground">Активный набор:</span>
               <span className="font-medium text-foreground">{activeBundle.name}</span>
             </div>
             {isTransactionBundle && transactions.length > 0 && (
