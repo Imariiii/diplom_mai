@@ -149,7 +149,7 @@ class LoadTester:
         throughput: Optional[float] = None,
         interval_sec: Optional[float] = None,
     ):
-        """Отправить realtime-метрики через callback (attempt_rate — запросов/с за окно)."""
+        """Отправить realtime-метрики через callback (rates считаются по primary units)."""
         if self._metrics_callback and self._is_streaming:
             try:
                 if window_end_perf is None:
@@ -717,7 +717,7 @@ class LoadTester:
         query_id: Optional[str],
         measurement_phase: str = "measurement",
     ) -> List[Dict[str, Any]]:
-        """Агрегировать результаты в 1-секундные окна: throughput — успехи/с, attempt_rate — запросов/с."""
+        """Агрегировать результаты в 1-секундные окна: throughput — успехи/с, attempt_rate — попытки/с."""
         if not timestamps:
             return []
 
@@ -1765,7 +1765,7 @@ class LoadTester:
             throughput = stats.get('throughput', stats.get('tps', 0))
             print(
                 f"[TEST] ✓ {conn_name}: {successful}/{total} успешно, "
-                f"avg={avg_ms:.1f}ms, throughput={throughput:.1f} req/s"
+                f"avg={avg_ms:.1f}ms, throughput={throughput:.1f} units/s"
             )
 
             all_results.append({

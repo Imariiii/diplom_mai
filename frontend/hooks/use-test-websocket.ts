@@ -192,7 +192,7 @@ export function useTestWebSocket({
             networkOutMibPerSec: metricsData.network_out_mib_per_sec,
             cacheHitRatio: metricsData.cache_hit_ratio ?? null,
             bufferPoolHitRatio: metricsData.buffer_pool_hit_ratio ?? null,
-            cacheHitRatioStatus: metricsData.cache_hit_ratio_status,
+            cacheHitRatioStatus: metricsData.cache_hit_ratio_status as TimeSeriesPoint["cacheHitRatioStatus"],
             cacheHitRatioNote: metricsData.cache_hit_ratio_note,
             cacheHitRatioMode: metricsData.cache_hit_ratio_mode,
             bufferSizeMB: metricsData.buffer_size_mb ?? 0,

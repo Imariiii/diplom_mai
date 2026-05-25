@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Maximize2 } from "lucide-react"
+import type { ChartRow } from "@/lib/time-series-chart-data"
 import {
   computeElapsedSpanSeconds,
   extractDatabaseTrace,
@@ -24,7 +25,7 @@ interface TimeSeriesChartProps {
   title: string
   description?: string
   icon: React.ReactNode
-  data: Record<string, unknown>[]
+  data: ChartRow[]
   databases: string[]
   dbNames: Record<string, string>
   getDbColor: (dbId: string) => string
@@ -47,7 +48,7 @@ function ChartContent({
   height,
   xAxisTitle = "Время от старта (с)",
 }: {
-  data: Record<string, unknown>[]
+  data: ChartRow[]
   databases: string[]
   metricKey: string
   chartType: "line" | "area"

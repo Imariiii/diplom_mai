@@ -285,8 +285,8 @@ class TestRepository(BaseRepository):
         """
         Добавить точку временного ряда.
 
-        Legacy: колонка throughput = attempt_rate (все запросы/с).
-        Колонка tps = successful_throughput (успешных/с), если передана.
+        Legacy: колонка throughput = attempt_rate (все primary unit попытки/с).
+        Колонка tps = successful_throughput (успешных primary units/с), если передана.
         disk_iops: rate (disk_ops_per_sec), если передан, иначе cumulative legacy.
         network_in/out: rate MiB/s, если переданы *_mib_per_sec, иначе cumulative legacy.
         """

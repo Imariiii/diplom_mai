@@ -11,6 +11,7 @@ import { apiClient } from "@/lib/api"
 import { toast } from "sonner"
 import { DB_NAMES } from "@/lib/chart-colors"
 import { getVisibleSelfCheckWarnings } from "@/lib/self-check"
+import type { DBMSInternalMetrics } from "@/lib/types"
 import { EmptyStateCard } from "./dashboards/empty-state-card"
 import { PageHeader } from "./dashboards/page-header"
 import { TestProgressBar } from "./dashboards/test-progress-bar"
@@ -80,11 +81,13 @@ export function DashboardsPage() {
                   p99Times: number[]
                   minTimes: number[]
                   maxTimes: number[]
+                  stdDevTimes: number[]
                   throughputValues: number[]
                   attemptRateValues: number[]
                   activeConnections: number[]
                   successful: number
                   failed: number
+                  rollbacks: number
                   indexInfo?: any
                   selfCheckWarnings: string[]
                 }> = {}
@@ -100,7 +103,7 @@ export function DashboardsPage() {
                           avgTimes: [], p50Times: [], p95Times: [], p99Times: [],
                           minTimes: [], maxTimes: [], stdDevTimes: [],
                           throughputValues: [], attemptRateValues: [],
-                          activeConnections: [], successful: 0, failed: 0, selfCheckWarnings: [],
+                          activeConnections: [], successful: 0, failed: 0, rollbacks: 0, selfCheckWarnings: [],
                         }
                       }
                       const bucket = aggregateByDb[dbKey]
@@ -116,8 +119,9 @@ export function DashboardsPage() {
                       const ar = pickAggregateAttemptRate(stats)
                       if (ar !== undefined) bucket.attemptRateValues.push(ar)
                       if (typeof stats.active_connections === "number") bucket.activeConnections.push(stats.active_connections)
-                      bucket.successful += stats.successful || 0
-                      bucket.failed += stats.failed || 0
+                      bucket.successful += stats.successful_transactions ?? stats.successful ?? 0
+                      bucket.failed += stats.failed_transactions ?? stats.failed ?? 0
+                      bucket.rollbacks += Number(stats.rollbacks) || 0
                       if (stats.index_info) bucket.indexInfo = stats.index_info
                       getVisibleSelfCheckWarnings(stats.self_check).forEach((warning) => {
                         if (!bucket.selfCheckWarnings.includes(warning)) {
@@ -133,7 +137,7 @@ export function DashboardsPage() {
                         avgTimes: [], p50Times: [], p95Times: [], p99Times: [],
                         minTimes: [], maxTimes: [], stdDevTimes: [],
                         throughputValues: [], attemptRateValues: [],
-                          activeConnections: [], successful: 0, failed: 0, selfCheckWarnings: [],
+                          activeConnections: [], successful: 0, failed: 0, rollbacks: 0, selfCheckWarnings: [],
                       }
                     }
                     const bucket = aggregateByDb[dbKey]
@@ -149,8 +153,9 @@ export function DashboardsPage() {
                     const arRow = pickAggregateAttemptRate(stats)
                     if (arRow !== undefined) bucket.attemptRateValues.push(arRow)
                     if (typeof stats.active_connections === "number") bucket.activeConnections.push(stats.active_connections)
-                    bucket.successful += stats.successful || 0
-                    bucket.failed += stats.failed || 0
+                    bucket.successful += stats.successful_transactions ?? stats.successful ?? 0
+                    bucket.failed += stats.failed_transactions ?? stats.failed ?? 0
+                    bucket.rollbacks += Number(stats.rollbacks) || 0
                     if (stats.index_info) bucket.indexInfo = stats.index_info
                     getVisibleSelfCheckWarnings(stats.self_check).forEach((warning) => {
                       if (!bucket.selfCheckWarnings.includes(warning)) {
@@ -200,9 +205,9 @@ export function DashboardsPage() {
                       return {
                       cacheHitRatio: cache.cacheHitRatio,
                       bufferPoolHitRatio: cache.bufferPoolHitRatio ?? cache.cacheHitRatio,
-                      cacheHitRatioStatus: cache.cacheHitRatioStatus,
-                      cacheHitRatioNote: cache.cacheHitRatioNote,
-                      cacheHitRatioMode: cache.cacheHitRatioMode,
+                      cacheHitRatioStatus: (cache.cacheHitRatioStatus ?? undefined) as DBMSInternalMetrics["cacheHitRatioStatus"],
+                      cacheHitRatioNote: cache.cacheHitRatioNote ?? undefined,
+                      cacheHitRatioMode: (cache.cacheHitRatioMode ?? undefined) as DBMSInternalMetrics["cacheHitRatioMode"],
                       bufferSizeMB: Number(dbmsMetricsData.buffer_size_mb) || 0,
                       bufferSizeLabel: typeof dbmsMetricsData.buffer_size_label === "string"
                         ? dbmsMetricsData.buffer_size_label
@@ -220,7 +225,7 @@ export function DashboardsPage() {
                       totalTransactions,
                       successfulTransactions: bucket.successful,
                       failedTransactions: bucket.failed,
-                      rollbacks: 0,
+                      rollbacks: bucket.rollbacks,
                     },
                     systemMetrics: response.system_metrics?.[dbKey],
                     timeSeriesData: [],
@@ -336,12 +341,14 @@ export function DashboardsPage() {
     [realtimeData, chartTimelineMode],
   )
   const chartXAxisTitle = CHART_TIMELINE_AXIS_TITLE[chartTimelineMode]
+  const workloadMode = currentTest?.summary?.workload_mode || (currentTest?.config as any)?.workload_mode
+  const primaryRateUnit = currentTest?.summary?.primary_rate_unit || (currentTest?.config as any)?.primary_rate_unit
 
   const getLatestMetric = (dbId: string, metric: string) => {
     const points = realtimeData[dbId]
     if (!points || points.length === 0) return "—"
     const value = points[points.length - 1][metric as keyof typeof points[number]]
-    return typeof value === "number" ? value.toFixed(2) : value
+    return typeof value === "number" ? value.toFixed(2) : "—"
   }
 
   const getResultForDb = (dbId: string) => {
@@ -604,6 +611,8 @@ export function DashboardsPage() {
             chartXAxisTitle={chartXAxisTitle}
             chartTimelineMode={chartTimelineMode}
             onChartTimelineModeChange={setChartTimelineMode}
+            workloadMode={workloadMode}
+            primaryRateUnit={primaryRateUnit}
           />
         </TabsContent>
 

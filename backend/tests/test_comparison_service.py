@@ -145,15 +145,15 @@ class TestThroughputSamplePriority:
         )
         assert svc._extract_throughput_values(samples) == [100.0, 120.0]
 
-    def test_extract_ignores_realtime_without_batch_windows(self):
-        """Realtime-сэмплы несут attempt_rate; сравнение throughput — только throughput_window."""
+    def test_extract_uses_realtime_when_batch_windows_absent(self):
+        """Realtime-сэмплы дают fallback successful throughput, если batch windows отсутствуют."""
         svc = self._service()
         samples = _make_throughput_samples(
             "conn_pg",
             batch_values=[],
             realtime_values=[80.0, 82.0, 85.0],
         )
-        assert svc._extract_throughput_values(samples) == []
+        assert svc._extract_throughput_values(samples) == [80.0, 82.0, 85.0]
 
     @pytest.mark.asyncio
     async def test_build_series_from_metric_samples_uses_priority_source(self):

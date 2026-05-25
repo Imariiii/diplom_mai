@@ -498,6 +498,7 @@ class TestStreamingCallbackSampleTime:
             db_name="PostgreSQL",
             response_time=15.0,
             attempt_rate=50.0,
+            throughput=4.0,
             successful=5,
             failed=1,
             sample_timestamp=explicit_ts,
@@ -520,6 +521,46 @@ class TestStreamingCallbackSampleTime:
 
         repository.add_metric_sample_batch.assert_awaited_once()
         assert callback.metric_samples_buffer == []
+
+    @pytest.mark.asyncio
+    async def test_on_test_start_status_includes_elapsed_seconds(self):
+        manager = MagicMock()
+        manager.send_status_update = AsyncMock()
+        callback = StreamingCallback("test-1", manager, repository=None)
+
+        await callback.on_test_start()
+
+        manager.send_status_update.assert_awaited()
+        update = manager.send_status_update.await_args.args[0]
+        assert update.status == "running"
+        assert update.elapsed_seconds == 0
+
+    @pytest.mark.asyncio
+    async def test_on_status_change_elapsed_increases_after_start(self):
+        manager = MagicMock()
+        manager.send_status_update = AsyncMock()
+        callback = StreamingCallback("test-1", manager, repository=None)
+        await callback.on_test_start()
+        callback.start_time = time.perf_counter() - 5.0
+
+        await callback.on_status_change("running", "Прогрев…")
+
+        update = manager.send_status_update.await_args.args[0]
+        assert update.elapsed_seconds >= 5
+
+    @pytest.mark.asyncio
+    async def test_on_backup_status_includes_elapsed_seconds(self):
+        manager = MagicMock()
+        manager.send_status_update = AsyncMock()
+        manager.send_operation_status = AsyncMock()
+        callback = StreamingCallback("test-1", manager, repository=None)
+        await callback.on_test_start()
+        callback.start_time = time.perf_counter() - 3.0
+
+        await callback.on_backup_status("backup_started", {"tables": ["t1"]})
+
+        manager.send_operation_status.assert_awaited_once()
+        assert manager.send_operation_status.await_args.kwargs["elapsed_seconds"] >= 3
 
 
 class TestRealtimeThroughputSamples:
@@ -548,3 +589,57 @@ class TestRealtimeThroughputSamples:
         assert callback.metric_samples_buffer[0]["sample_type"] == "throughput_realtime"
         assert callback.metric_samples_buffer[0]["attempt_rate"] == 50.0
         assert callback.metric_samples_buffer[0]["throughput"] == 4.0
+
+
+class TestExecuteScenarioTransaction:
+    @pytest.mark.asyncio
+    async def test_execute_scenario_transaction_commits_all_steps(self, tester):
+        conn = MagicMock()
+        trans = MagicMock()
+        trans.commit = AsyncMock()
+        trans.rollback = AsyncMock()
+        conn.begin = AsyncMock(return_value=trans)
+
+        result_mock = MagicMock()
+        result_mock.returns_rows = False
+        conn.execute = AsyncMock(return_value=result_mock)
+
+        engine = _AsyncEngine(conn)
+        tester.db_connection.get_engine_async = AsyncMock(return_value=engine)
+
+        transaction = {
+            "name": "checkout",
+            "steps": [
+                {"sql_template": "SELECT 1", "query_type": "select"},
+                {"sql_template": "UPDATE t SET x=1", "query_type": "update"},
+            ],
+            "params": [],
+        }
+        result = await tester.execute_scenario_transaction("db1", transaction, "scenario")
+        assert result["error"] is None
+        assert result["steps_executed"] == 2
+        assert result["rollbacks"] == 0
+        trans.commit.assert_awaited_once()
+        assert conn.execute.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_execute_scenario_transaction_rolls_back_on_error(self, tester):
+        conn = MagicMock()
+        trans = MagicMock()
+        trans.commit = AsyncMock()
+        trans.rollback = AsyncMock()
+        conn.begin = AsyncMock(return_value=trans)
+        conn.execute = AsyncMock(side_effect=RuntimeError("boom"))
+
+        engine = _AsyncEngine(conn)
+        tester.db_connection.get_engine_async = AsyncMock(return_value=engine)
+
+        transaction = {
+            "name": "fail",
+            "steps": [{"sql_template": "SELECT 1", "query_type": "select"}],
+            "params": [],
+        }
+        result = await tester.execute_scenario_transaction("db1", transaction, "scenario")
+        assert result["error"] is not None
+        assert result["rollbacks"] == 1
+        trans.rollback.assert_awaited_once()

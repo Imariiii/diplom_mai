@@ -15,6 +15,9 @@ export interface TestRequest {
   bundle_id?: string
   resolved_bundle_id?: string
   resolved_bundle_name?: string
+  workload_mode?: string
+  primary_rate_unit?: string
+  comparison_unit?: string
   resolved_profile_id?: string
   resolved_profile_name?: string
   resolved_bundle_snapshot?: {
@@ -24,7 +27,10 @@ export interface TestRequest {
     scenario_template_name?: string
     schema_profile_id?: string
     schema_profile_name?: string
+    workload_mode?: string
+    primary_rate_unit?: string
     queries?: Array<{ sql_template?: string; query_type?: string; weight?: number }>
+    transactions?: Array<Record<string, unknown>>
     indexes?: Array<Record<string, unknown>>
   }
   iterations?: number

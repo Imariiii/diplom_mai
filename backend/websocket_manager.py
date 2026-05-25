@@ -18,10 +18,10 @@ class TestMetricsUpdate:
     db_name: str = ""  # Имя подключения для отображения в UI
     timestamp: str = ""
     
-    # Метрики производительности (realtime: attempt_rate — запросов SQL/с за окно)
+    # Метрики производительности (realtime: rates primary units/с за окно)
     response_time: float = 0.0
     attempt_rate: float = 0.0
-    throughput: float = 0.0  # успешных операций/с за окно (additive)
+    throughput: float = 0.0  # успешных primary units/с за окно
     active_connections: int = 0
     error_count: int = 0
     
